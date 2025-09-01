@@ -1,7 +1,7 @@
 import os
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from dotenv import load_dotenv
-from telegram_bot import handlers
+from . import handlers
 
 load_dotenv()
 
