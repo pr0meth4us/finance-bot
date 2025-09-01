@@ -7,15 +7,14 @@ WORKDIR /app
 # Copy the requirements file from the repository root
 COPY requirements.txt .
 
-# Install dependencies
+# Install dependencies (make sure gunicorn is in requirements.txt)
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the contents of the web_service folder from the repository root
-# into the container's /app directory
+# Copy the web_service directory contents to /app
 COPY web_service/ .
 
-# Make port 8000 available
+# Make port 8000 available to the world outside this container
 EXPOSE 8000
 
-# Define the command to run your app using Gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "run:app"]
+# Define the command to run the application
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "1", "run:app"]
