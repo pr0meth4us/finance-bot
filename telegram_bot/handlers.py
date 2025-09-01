@@ -7,7 +7,8 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from . import keyboards, api_client
+import keyboards      # * FIX: Changed from 'from . import keyboards, api_client' *
+import api_client     # * FIX: Changed from 'from . import keyboards, api_client' *
 
 # --- Conversation States ---
 AMOUNT, CURRENCY, CATEGORY, CUSTOM_CATEGORY, ASK_REMARK, REMARK = range(6)
@@ -287,7 +288,6 @@ async def save_transaction_and_end(update: Update, context: ContextTypes.DEFAULT
     else:
         await message_to_use.reply_text("❌ Failed to record transaction.", reply_markup=keyboards.main_menu_keyboard())
 
-    # Delete the intermediate messages for a cleaner chat
     if update.callback_query:
         await update.callback_query.message.delete()
 
