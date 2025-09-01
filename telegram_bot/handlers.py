@@ -7,7 +7,8 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from . import keyboards, api_client
+import keyboards      # * FIX: Changed from 'from . import keyboards, api_client' *
+import api_client     # * FIX: Changed from 'from . import keyboards, api_client' *
 
 # --- Conversation States ---
 AMOUNT, CURRENCY, CATEGORY, CUSTOM_CATEGORY, ASK_REMARK, REMARK = range(6)
@@ -25,10 +26,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(text, reply_markup=keyboard)
 
-    # * THIS IS THE FIX: Forcibly end any active conversation when /start is used. *
     return ConversationHandler.END
 
 async def get_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fetches and sends the analytics chart."""
     query = update.callback_query
     await query.answer()
     await query.message.edit_text("📈 Generating your report...")
@@ -50,12 +51,14 @@ async def get_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Rate Update Conversation ---
 async def update_rate_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Starts the conversation to update the exchange rate."""
     query = update.callback_query
     await query.answer()
     await query.edit_message_text("Please enter the new exchange rate for 1 USD to KHR (e.g., 4100).")
     return NEW_RATE
 
 async def received_new_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives and saves the new exchange rate."""
     try:
         new_rate = float(update.message.text)
         response = api_client.update_exchange_rate(new_rate)
@@ -70,6 +73,7 @@ async def received_new_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Transaction History & Management ---
 async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Displays a list of recent transactions to manage."""
     query = update.callback_query
     await query.answer()
     transactions = api_client.get_recent_transactions()
@@ -83,6 +87,7 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def manage_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shows options for a selected transaction."""
     query = update.callback_query
     await query.answer()
     tx_id = query.data.split('_')[-1]
@@ -90,6 +95,7 @@ async def manage_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.edit_message_text(text, reply_markup=keyboards.manage_tx_keyboard(tx_id))
 
 async def delete_transaction_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Asks for confirmation before deleting a transaction."""
     query = update.callback_query
     await query.answer()
     tx_id = query.data.split('_')[-1]
@@ -99,6 +105,7 @@ async def delete_transaction_prompt(update: Update, context: ContextTypes.DEFAUL
     )
 
 async def delete_transaction_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Deletes the transaction after confirmation."""
     query = update.callback_query
     await query.answer()
     tx_id = query.data.split('_')[-1]
@@ -116,11 +123,13 @@ async def delete_transaction_confirm(update: Update, context: ContextTypes.DEFAU
 
 # --- IOU / Debt Management ---
 async def iou_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Displays the IOU management menu."""
     query = update.callback_query
     await query.answer()
     await query.edit_message_text("🤝 Let's manage your IOUs.", reply_markup=keyboards.iou_menu_keyboard())
 
 async def iou_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shows a list of all open debts."""
     query = update.callback_query
     await query.answer()
     debts = api_client.get_open_debts()
@@ -132,6 +141,7 @@ async def iou_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text, reply_markup=keyboards.iou_list_keyboard(debts))
 
 async def iou_settle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Marks a debt as settled and creates a corresponding transaction."""
     query = update.callback_query
     await query.answer()
     debt_id = query.data.split('_')[-1]
@@ -150,6 +160,7 @@ async def iou_settle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- IOU Add Conversation ---
 async def iou_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Starts the conversation to add a new IOU."""
     query = update.callback_query
     await query.answer()
     context.user_data['iou_type'] = 'lent' if query.data == 'iou_lent' else 'borrowed'
@@ -194,6 +205,7 @@ async def iou_received_currency(update: Update, context: ContextTypes.DEFAULT_TY
 
 # --- Add Transaction Conversation ---
 async def add_transaction_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Starts the conversation to add an expense or income."""
     query = update.callback_query
     await query.answer()
     context.user_data['type'] = 'expense' if query.data == 'add_expense' else 'income'
@@ -202,6 +214,7 @@ async def add_transaction_start(update: Update, context: ContextTypes.DEFAULT_TY
     return AMOUNT
 
 async def received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives the transaction amount."""
     try:
         context.user_data['amount'] = float(update.message.text)
         await update.message.reply_text("Which currency?", reply_markup=keyboards.currency_keyboard())
@@ -211,6 +224,7 @@ async def received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return AMOUNT
 
 async def received_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives the currency and automatically determines the account."""
     query = update.callback_query
     await query.answer()
     currency = query.data.split('_')[1]
@@ -221,6 +235,7 @@ async def received_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CATEGORY
 
 async def received_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives a predefined category or triggers the custom category flow."""
     query = update.callback_query
     await query.answer()
     category_choice = query.data.split('_')[1]
@@ -237,6 +252,7 @@ async def received_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ASK_REMARK
 
 async def received_custom_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives a manually typed custom category."""
     context.user_data['categoryId'] = update.message.text
     await update.message.reply_text(
         "Great. Would you like to add a remark/description?",
@@ -245,6 +261,7 @@ async def received_custom_category(update: Update, context: ContextTypes.DEFAULT
     return ASK_REMARK
 
 async def ask_remark(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Asks if the user wants to add a remark, or skips it."""
     query = update.callback_query
     await query.answer()
     choice = query.data.split('_')[1]
@@ -257,11 +274,14 @@ async def ask_remark(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await save_transaction_and_end(update, context)
 
 async def received_remark(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives the optional remark text."""
     context.user_data['description'] = update.message.text
     return await save_transaction_and_end(update, context)
 
 async def save_transaction_and_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A helper function to save the transaction data and end the conversation."""
     response = api_client.add_transaction(context.user_data)
+
     message_to_use = update.callback_query.message if update.callback_query else update.message
 
     if response:
@@ -275,12 +295,15 @@ async def save_transaction_and_end(update: Update, context: ContextTypes.DEFAULT
     context.user_data.clear()
     return ConversationHandler.END
 
+# --- Universal Cancel ---
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancels any active conversation."""
     if update.message:
         await update.message.reply_text("Operation cancelled.", reply_markup=keyboards.main_menu_keyboard())
     elif update.callback_query:
         await update.callback_query.answer()
         await update.callback_query.edit_message_text("Operation cancelled.", reply_markup=keyboards.main_menu_keyboard())
+
     context.user_data.clear()
     return ConversationHandler.END
 
