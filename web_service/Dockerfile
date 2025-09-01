@@ -4,14 +4,12 @@ FROM python:3.11-slim
 # Set the working directory inside the container
 WORKDIR /app
 
-# --- THIS IS THE FIX ---
 # Copy the requirements file from the repository root
 COPY requirements.txt .
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# --- THIS IS THE FIX ---
 # Copy the contents of the web_service folder from the repository root
 # into the container's /app directory
 COPY web_service/ .
