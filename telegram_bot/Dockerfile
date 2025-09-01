@@ -10,9 +10,9 @@ COPY ../requirements.txt .
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the entire telegram_bot directory into the container
-COPY . .
+# --- THIS IS THE FIX ---
+# Copy only the contents of the telegram_bot directory into the container's /app directory
+COPY ./telegram_bot .
 
 # Define the command to run your bot
-# This is the command Koyeb will run to start your worker
 CMD ["python", "bot.py"]
