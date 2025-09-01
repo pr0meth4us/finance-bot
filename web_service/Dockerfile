@@ -7,7 +7,7 @@ WORKDIR /app
 # Copy the requirements file from the repository root
 COPY requirements.txt .
 
-# Install dependencies (including gunicorn)
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the web_service directory contents to /app
@@ -17,8 +17,8 @@ COPY web_service/ .
 EXPOSE 8000
 
 # Set environment variables
+ENV PYTHONPATH=/app
 ENV FLASK_APP=run.py
-ENV FLASK_ENV=production
 
-# Use Python to run the Flask app directly
-CMD ["python", "-c", "from app import create_app; app = create_app(); app.run(host='0.0.0.0', port=8000, debug=False)"]
+# Run the application using the run.py file directly
+CMD ["python", "run.py"]
