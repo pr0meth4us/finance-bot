@@ -8,4 +8,4 @@ class Config:
     DB_NAME = os.getenv('DB_NAME', 'personalFinanceBot')
     TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
     TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-    KHR_TO_USD_RATE = 4100 # Exchange rate for reporting
+    EXCHANGERATE_API_KEY = os.getenv('EXCHANGERATE_API_KEY')

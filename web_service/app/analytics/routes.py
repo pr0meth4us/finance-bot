@@ -1,24 +1,37 @@
 import io
-from flask import Blueprint, current_app, Response
-from datetime import datetime, timedelta
+from flask import Blueprint, current_app, Response, request
+from datetime import datetime, timedelta, time
 import matplotlib.pyplot as plt
 
 analytics_bp = Blueprint('analytics', __name__, url_prefix='/analytics')
 
+
 @analytics_bp.route('/report/chart', methods=['GET'])
 def get_report_chart():
-    settings = current_app.db.settings.find_one({'_id': 'config'})
-    khr_rate = settings.get('khr_to_usd_rate', 4100) if settings else 4100
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
 
-    start_date = datetime.utcnow() - timedelta(days=30)
+    try:
+        if start_date_str and end_date_str:
+            start_date = datetime.fromisoformat(start_date_str)
+            end_date = datetime.fromisoformat(end_date_str)
+            end_date = datetime.combine(end_date.date(), time.max)
+        else:
+            end_date = datetime.utcnow()
+            start_date = end_date - timedelta(days=30)
+    except (ValueError, TypeError):
+        return Response("Invalid date format. Use YYYY-MM-DD.", status=400)
 
     pipeline = [
-        {'$match': {'timestamp': {'$gte': start_date}, 'type': 'expense'}},
+        {'$match': {
+            'timestamp': {'$gte': start_date, '$lte': end_date},
+            'type': 'expense'
+        }},
         {'$addFields': {
             'amount_in_usd': {
                 '$cond': {
                     'if': {'$eq': ['$currency', 'KHR']},
-                    'then': {'$divide': ['$amount', khr_rate]},
+                    'then': {'$divide': ['$amount', '$exchangeRateAtTime']},
                     'else': '$amount'
                 }
             }
@@ -33,7 +46,7 @@ def get_report_chart():
     data = list(current_app.db.transactions.aggregate(pipeline))
 
     if not data:
-        return Response("No expense data for the period.", status=404)
+        return Response("No expense data for the selected period.", status=404)
 
     labels = [item['_id'] for item in data]
     sizes = [item['total'] for item in data]
@@ -41,7 +54,8 @@ def get_report_chart():
     fig, ax = plt.subplots()
     ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
     ax.axis('equal')
-    plt.title(f"Expenses (Last 30 Days, in USD)\nRate: 1 USD = {khr_rate} KHR")
+    title = f"Expenses from {start_date.strftime('%d %b')} to {end_date.strftime('%d %b %Y')}"
+    plt.title(title)
 
     buf = io.BytesIO()
     plt.savefig(buf, format='png')

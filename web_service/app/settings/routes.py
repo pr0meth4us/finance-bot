@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, current_app
 
 settings_bp = Blueprint('settings', __name__, url_prefix='/settings')
 
+
 @settings_bp.route('/rate', methods=['POST'])
 def update_khr_rate():
     data = request.json

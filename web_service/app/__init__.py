@@ -6,8 +6,10 @@ from apscheduler.triggers.cron import CronTrigger
 import requests
 from .config import Config
 
+
 def send_daily_reminder_job():
     """Checks if a transaction was logged today and sends a reminder if not."""
+    # This job needs its own client because it runs in a separate thread
     client = MongoClient(Config.MONGODB_URI, tls=True, tlsCAFile=certifi.where())
     db = client[Config.DB_NAME]
 
@@ -23,7 +25,7 @@ def send_daily_reminder_job():
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload = {'chat_id': chat_id, 'text': message}
         try:
-            requests.post(url, json=payload)
+            requests.post(url, json=payload, timeout=5)
             print("Sent daily reminder.")
         except Exception as e:
             print(f"Failed to send reminder: {e}")
@@ -31,6 +33,7 @@ def send_daily_reminder_job():
         print("Skipped daily reminder, transactions found or config missing.")
 
     client.close()
+
 
 def create_app():
     app = Flask(__name__)
@@ -45,15 +48,19 @@ def create_app():
     from .analytics.routes import analytics_bp
     from .transactions.routes import transactions_bp
     from .debts.routes import debts_bp
+    from .summary.routes import summary_bp  # * FIX: This line imports the summary blueprint *
+
     app.register_blueprint(settings_bp)
     app.register_blueprint(analytics_bp)
     app.register_blueprint(transactions_bp)
     app.register_blueprint(debts_bp)
+    app.register_blueprint(summary_bp)  # * FIX: This line registers the summary blueprint *
 
     scheduler = BackgroundScheduler(daemon=True)
-    scheduler.add_job(send_daily_reminder_job, trigger=CronTrigger(hour=21, minute=0))
+    # Set timezone to Phnom Penh (ICT - Indochina Time)
+    scheduler.add_job(send_daily_reminder_job, trigger=CronTrigger(hour=21, minute=0, timezone='Asia/Phnom_Penh'))
     scheduler.start()
-    print("⏰ Daily reminder job scheduled for 21:00 server time.")
+    print("⏰ Daily reminder job scheduled for 21:00 Phnom Penh time.")
 
     @app.route("/health")
     def health_check():
