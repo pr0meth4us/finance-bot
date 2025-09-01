@@ -1,20 +1,22 @@
 # Use an official Python runtime as a parent image
 FROM python:3.11-slim
 
-# Set the working directory in the container
+# Set the working directory inside the container
 WORKDIR /app
 
-# Copy the requirements file first to leverage Docker's layer caching
-COPY ../requirements.txt .
+# --- THIS IS THE FIX ---
+# Copy the requirements file from the repository root
+COPY requirements.txt .
 
-# Install any needed packages specified in requirements.txt
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # --- THIS IS THE FIX ---
-# Copy only the contents of the web_service directory into the container's /app directory
-COPY ./web_service .
+# Copy the contents of the web_service folder from the repository root
+# into the container's /app directory
+COPY web_service/ .
 
-# Make port 8000 available to the world outside this container
+# Make port 8000 available
 EXPOSE 8000
 
 # Define the command to run your app using Gunicorn
