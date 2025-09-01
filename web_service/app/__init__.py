@@ -4,7 +4,7 @@ from pymongo import MongoClient
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import requests
-from web_service.config import Config
+from .config import Config
 
 def send_daily_reminder_job():
     """Checks if a transaction was logged today and sends a reminder if not."""
