@@ -1,0 +1,13 @@
+# requirements.txt
+
+# --- Backend ---
+Flask
+pymongo[srv]
+python-dotenv
+APScheduler
+matplotlib
+certifi
+
+# --- Bot ---
+python-telegram-bot
+requests
