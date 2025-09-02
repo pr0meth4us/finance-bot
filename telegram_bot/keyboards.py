@@ -115,6 +115,10 @@ def expense_categories_keyboard():
     """* Categories specifically for expenses. *"""
     keyboard = [
         [InlineKeyboardButton("🍔 Food", callback_data='cat_Food')],
+        [
+            InlineKeyboardButton("🍹 Drink", callback_data='cat_Drink'),
+            InlineKeyboardButton("🍺 Alcohol", callback_data='cat_Alcohol')
+        ],
         [InlineKeyboardButton("🚗 Transport", callback_data='cat_Transport')],
         [InlineKeyboardButton("🛍️ Shopping", callback_data='cat_Shopping')],
         [InlineKeyboardButton("💡 Bills", callback_data='cat_Bills')],
