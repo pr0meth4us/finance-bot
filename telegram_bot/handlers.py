@@ -16,11 +16,11 @@ from decorators import restricted  # Import our new security decorator
 (
     AMOUNT, CURRENCY, CATEGORY, CUSTOM_CATEGORY, ASK_REMARK, REMARK,
     NEW_RATE,
-    IOU_PERSON, IOU_AMOUNT, IOU_CURRENCY,
+    IOU_PERSON, IOU_AMOUNT, IOU_CURRENCY, IOU_PURPOSE,  # Added IOU_PURPOSE
     REPAY_AMOUNT,
     SETBALANCE_ACCOUNT, SETBALANCE_AMOUNT,
     FORGOT_DATE, FORGOT_TYPE
-) = range(15)
+) = range(16)  # Updated range to 16
 
 
 # --- Helper Function ---
@@ -242,10 +242,12 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     direction = "Owes you" if debt['type'] == 'lent' else "You owe"
+    purpose_text = f"<b>Purpose:</b> {debt['purpose']}\n" if debt.get('purpose') else ""
 
     text = (
         f"<b>Debt Details:</b>\n"
         f"<b>Person:</b> {debt['person']} ({direction})\n"
+        f"{purpose_text}"
         f"<b>Original Amount:</b> {debt.get('originalAmount', 0):,.2f} {debt.get('currency', '')}\n"
         f"<b>Remaining Balance:</b> {debt.get('remainingAmount', 0):,.2f} {debt.get('currency', '')}"
     )
@@ -333,16 +335,25 @@ async def iou_received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def iou_received_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Saves a new IOU, then fetches and displays the summary."""
+    """Receives the currency and asks for the purpose."""
     query = update.callback_query
     await query.answer()
     context.user_data['iou_currency'] = query.data.split('_')[1]
+
+    await query.edit_message_text("What was this for? (e.g., Lunch, Deposit)")
+    return IOU_PURPOSE
+
+
+async def iou_received_purpose(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives the purpose and saves the new IOU."""
+    context.user_data['iou_purpose'] = update.message.text
 
     debt_data = {
         "type": context.user_data['iou_type'],
         "person": context.user_data['iou_person'],
         "amount": context.user_data['iou_amount'],
-        "currency": context.user_data['iou_currency']
+        "currency": context.user_data['iou_currency'],
+        "purpose": context.user_data['iou_purpose']
     }
     response = api_client.add_debt(debt_data)
 
@@ -350,7 +361,7 @@ async def iou_received_currency(update: Update, context: ContextTypes.DEFAULT_TY
     summary_data = api_client.get_balance_summary()
     summary_text = format_summary_message(summary_data)
 
-    await query.edit_message_text(
+    await update.message.reply_text(
         base_text + summary_text,
         parse_mode='HTML',
         reply_markup=keyboards.main_menu_keyboard()
@@ -582,12 +593,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = keyboards.main_menu_keyboard()
 
     if update.callback_query:
-        # Check if the callback is from the 'Forgot' flow to avoid errors
         if update.callback_query.data == 'cancel_conversation':
             await update.callback_query.answer()
             await update.callback_query.edit_message_text(message, reply_markup=keyboard)
         else:
-            # Standard cancel for other flows
             await update.callback_query.answer()
             await update.callback_query.edit_message_text(message, reply_markup=keyboard)
     elif update.message:
@@ -617,7 +626,6 @@ forgot_conversation_handler = ConversationHandler(
     states={
         FORGOT_DATE: [CallbackQueryHandler(received_forgot_day, pattern='^forgot_day_')],
         FORGOT_TYPE: [CallbackQueryHandler(received_forgot_type, pattern='^forgot_type_')],
-        # Reuse states from the main transaction handler
         AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_amount)],
         CURRENCY: [CallbackQueryHandler(received_currency, pattern='^curr_')],
         CATEGORY: [CallbackQueryHandler(received_category, pattern='^cat_')],
@@ -646,6 +654,7 @@ iou_conversation_handler = ConversationHandler(
         IOU_PERSON: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_received_person)],
         IOU_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_received_amount)],
         IOU_CURRENCY: [CallbackQueryHandler(iou_received_currency, pattern='^curr_')],
+        IOU_PURPOSE: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_received_purpose)],
     },
     fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
     per_message=False

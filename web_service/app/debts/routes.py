@@ -23,6 +23,7 @@ def add_debt():
         "originalAmount": amount,
         "remainingAmount": amount,
         "currency": data['currency'],
+        "purpose": data.get("purpose", ""),  # Added purpose field
         "status": "open",
         "repayments": [],
         "created_at": datetime.utcnow()
