@@ -7,7 +7,10 @@ def main_menu_keyboard():
             InlineKeyboardButton("💸 Add Expense", callback_data='add_expense'),
             InlineKeyboardButton("💰 Add Income", callback_data='add_income')
         ],
-        [InlineKeyboardButton("🤔 Forgot to Log?", callback_data='forgot_log_start')],
+        [
+            InlineKeyboardButton("🤔 Forgot to Log?", callback_data='forgot_log_start'),
+            InlineKeyboardButton("🔍 Quick Check", callback_data='quick_check'),
+        ],
         [InlineKeyboardButton("📊 Set Balance", callback_data='set_balance_start')],
         [InlineKeyboardButton("📖 History", callback_data='history')],
         [InlineKeyboardButton("📈 Report", callback_data='report_menu')],

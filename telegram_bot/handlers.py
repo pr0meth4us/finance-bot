@@ -16,11 +16,11 @@ from decorators import restricted  # Import our new security decorator
 (
     AMOUNT, CURRENCY, CATEGORY, CUSTOM_CATEGORY, ASK_REMARK, REMARK,
     NEW_RATE,
-    IOU_PERSON, IOU_AMOUNT, IOU_CURRENCY, IOU_PURPOSE,  # Added IOU_PURPOSE
+    IOU_PERSON, IOU_AMOUNT, IOU_CURRENCY, IOU_PURPOSE,
     REPAY_AMOUNT,
     SETBALANCE_ACCOUNT, SETBALANCE_AMOUNT,
     FORGOT_DATE, FORGOT_TYPE
-) = range(16)  # Updated range to 16
+) = range(16)
 
 
 # --- Helper Function ---
@@ -65,6 +65,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=keyboard)
 
     return ConversationHandler.END
+
+
+# --- New Quick Check Function ---
+@restricted
+async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fetches and displays a quick summary of balances and debts."""
+    query = update.callback_query
+    await query.answer("Fetching summary...")
+
+    summary_data = api_client.get_balance_summary()
+    summary_text = format_summary_message(summary_data)
+    text = "🔍 Here is your quick summary:" + summary_text
+
+    await query.edit_message_text(
+        text,
+        parse_mode='HTML',
+        reply_markup=keyboards.main_menu_keyboard()
+    )
 
 
 # --- Report Generation ---

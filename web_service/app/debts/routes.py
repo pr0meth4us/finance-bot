@@ -23,12 +23,33 @@ def add_debt():
         "originalAmount": amount,
         "remainingAmount": amount,
         "currency": data['currency'],
-        "purpose": data.get("purpose", ""),  # Added purpose field
+        "purpose": data.get("purpose", ""),
         "status": "open",
         "repayments": [],
         "created_at": datetime.utcnow()
     }
     result = current_app.db.debts.insert_one(debt)
+
+    # --- New logic to create a corresponding transaction ---
+    account_name = "USD Account" if data['currency'] == "USD" else "KHR Account"
+    tx = {
+        "amount": amount,
+        "currency": data['currency'],
+        "accountName": account_name,
+        "description": f"Loan related to {data['person']} for {data.get('purpose', 'N/A')}",
+        "timestamp": datetime.utcnow()
+    }
+
+    if data['type'] == 'lent':
+        tx['type'] = 'expense'
+        tx['categoryId'] = 'Loan Lent'
+    elif data['type'] == 'borrowed':
+        tx['type'] = 'income'
+        tx['categoryId'] = 'Loan Received'
+
+    current_app.db.transactions.insert_one(tx)
+    # --- End of new logic ---
+
     return jsonify({'message': 'Debt recorded', 'id': str(result.inserted_id)}), 201
 
 

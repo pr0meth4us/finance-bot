@@ -20,7 +20,7 @@ def main():
     app.add_handler(handlers.iou_conversation_handler)
     app.add_handler(handlers.repay_conversation_handler)
     app.add_handler(handlers.set_balance_conversation_handler)
-    app.add_handler(handlers.forgot_conversation_handler) # Added new handler
+    app.add_handler(handlers.forgot_conversation_handler)
 
     # --- Register Standalone Command Handlers ---
     app.add_handler(CommandHandler("start", handlers.start))
@@ -29,6 +29,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handlers.start, pattern='^start$'))
     app.add_handler(CallbackQueryHandler(handlers.report_menu, pattern='^report_menu$'))
     app.add_handler(CallbackQueryHandler(handlers.generate_report_for_period, pattern='^report_period_'))
+    app.add_handler(CallbackQueryHandler(handlers.quick_check, pattern='^quick_check$')) # Added Quick Check
 
     # History callbacks
     app.add_handler(CallbackQueryHandler(handlers.history_menu, pattern='^history$'))
