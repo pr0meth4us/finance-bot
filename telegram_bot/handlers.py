@@ -10,7 +10,8 @@ from telegram.ext import (
 import keyboards
 import api_client
 from datetime import datetime, timedelta, time
-from decorators import restricted  # Import our new security decorator
+from decorators import restricted
+from collections import defaultdict
 
 # --- Conversation States ---
 (
@@ -67,7 +68,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-# --- New Quick Check Function ---
 @restricted
 async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Fetches and displays a quick summary of balances and debts."""
@@ -235,24 +235,57 @@ async def iou_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @restricted
 async def iou_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Shows a list of all open debts."""
+    """Shows a summary list of all open debts, grouped by person."""
     query = update.callback_query
     await query.answer()
-    debts = api_client.get_open_debts()
-    if not debts:
+    grouped_debts = api_client.get_open_debts()
+    if not grouped_debts:
         await query.edit_message_text("You have no open debts! 👍", reply_markup=keyboards.iou_menu_keyboard())
         return
 
-    text = "Select a debt to view details or record a repayment:"
-    await query.edit_message_text(text, reply_markup=keyboards.iou_list_keyboard(debts))
+    text = "Here is a summary of debts by person.\nSelect one to see details:"
+    await query.edit_message_text(text, reply_markup=keyboards.iou_list_keyboard(grouped_debts))
+
+
+@restricted
+async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shows all individual debts for a specific person."""
+    query = update.callback_query
+    await query.answer()
+    person_name = query.data.split('_')[-1]
+
+    person_debts = api_client.get_debts_by_person(person_name)
+    if not person_debts:
+        await query.edit_message_text(f"❌ Could not find any open debts for {person_name}.", reply_markup=keyboards.iou_menu_keyboard())
+        return
+
+    totals = defaultdict(float)
+    for debt in person_debts:
+        totals[debt['currency']] += debt['remainingAmount']
+
+    total_str = " / ".join([f"{amount:,.2f} {currency}" for currency, amount in totals.items()])
+    direction = "owes you" if person_debts[0]['type'] == 'lent' else "you owe"
+
+    text = (
+        f"<b>Debts for {person_name}</b> ({direction})\n"
+        f"<b>Total Remaining:</b> {total_str}\n\n"
+        "Select a specific loan to manage:"
+    )
+    await query.edit_message_text(
+        text,
+        parse_mode='HTML',
+        reply_markup=keyboards.iou_person_detail_keyboard(person_debts)
+    )
 
 
 @restricted
 async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Shows details for a single debt."""
+    """Shows details for a single debt, including the date."""
     query = update.callback_query
     await query.answer()
-    debt_id = query.data.split('_')[-1]
+    parts = query.data.split('_')
+    debt_id = parts[2]
+    person_name = parts[3]
 
     debt = api_client.get_debt_details(debt_id)
     if not debt:
@@ -261,10 +294,13 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     direction = "Owes you" if debt['type'] == 'lent' else "You owe"
     purpose_text = f"<b>Purpose:</b> {debt['purpose']}\n" if debt.get('purpose') else ""
+    created_date_str = datetime.fromisoformat(debt['created_at']).strftime('%d %b %Y, %I:%M %p')
+    date_text = f"<b>Date Created:</b> {created_date_str}\n"
 
     text = (
         f"<b>Debt Details:</b>\n"
         f"<b>Person:</b> {debt['person']} ({direction})\n"
+        f"{date_text}"
         f"{purpose_text}"
         f"<b>Original Amount:</b> {debt.get('originalAmount', 0):,.2f} {debt.get('currency', '')}\n"
         f"<b>Remaining Balance:</b> {debt.get('remainingAmount', 0):,.2f} {debt.get('currency', '')}"
@@ -273,7 +309,7 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(
         text,
         parse_mode='HTML',
-        reply_markup=keyboards.iou_detail_keyboard(debt_id)
+        reply_markup=keyboards.iou_detail_keyboard(debt_id, person_name)
     )
 
 
@@ -468,7 +504,6 @@ async def received_forgot_day(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     days_ago = int(query.data.split('_')[-1])
 
-    # We set the time to noon on that day to avoid timezone issues
     forgotten_datetime = datetime.combine(
         datetime.utcnow().date() - timedelta(days=days_ago),
         time(12, 0)
@@ -569,7 +604,7 @@ async def ask_remark(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if choice == 'yes':
         await query.edit_message_text("Please type your remark.")
         return REMARK
-    else:  # User chose 'no' / skip
+    else:
         context.user_data['description'] = ''
         return await save_transaction_and_end(update, context)
 
@@ -603,7 +638,6 @@ async def save_transaction_and_end(update: Update, context: ContextTypes.DEFAULT
     return ConversationHandler.END
 
 
-# --- Universal Cancel ---
 @restricted
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancels any active conversation."""
@@ -623,8 +657,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-
-# --- Build Conversation Handlers ---
 tx_conversation_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(add_transaction_start, pattern='^(add_expense|add_income)$')],
     states={

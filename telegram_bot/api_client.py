@@ -1,6 +1,7 @@
 import os
 import requests
 from dotenv import load_dotenv
+import urllib.parse
 
 load_dotenv()
 BASE_URL = os.getenv("WEB_SERVICE_URL")
@@ -33,6 +34,18 @@ def get_open_debts():
         return res.json()
     except requests.exceptions.RequestException as e:
         print(f"API Error fetching debts: {e}")
+        return []
+
+
+def get_debts_by_person(person_name):
+    """Fetches all open debts for a specific person."""
+    try:
+        encoded_name = urllib.parse.quote(person_name)
+        res = requests.get(f"{BASE_URL}/debts/person/{encoded_name}", timeout=10)
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error fetching debts for person {person_name}: {e}")
         return []
 
 

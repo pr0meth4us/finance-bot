@@ -29,7 +29,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handlers.start, pattern='^start$'))
     app.add_handler(CallbackQueryHandler(handlers.report_menu, pattern='^report_menu$'))
     app.add_handler(CallbackQueryHandler(handlers.generate_report_for_period, pattern='^report_period_'))
-    app.add_handler(CallbackQueryHandler(handlers.quick_check, pattern='^quick_check$')) # Added Quick Check
+    app.add_handler(CallbackQueryHandler(handlers.quick_check, pattern='^quick_check$'))
 
     # History callbacks
     app.add_handler(CallbackQueryHandler(handlers.history_menu, pattern='^history$'))
@@ -37,10 +37,12 @@ def main():
     app.add_handler(CallbackQueryHandler(handlers.delete_transaction_prompt, pattern='^delete_tx_'))
     app.add_handler(CallbackQueryHandler(handlers.delete_transaction_confirm, pattern='^confirm_delete_'))
 
-    # IOU callbacks
+    # IOU callbacks (New flow)
     app.add_handler(CallbackQueryHandler(handlers.iou_menu, pattern='^iou_menu$'))
     app.add_handler(CallbackQueryHandler(handlers.iou_view, pattern='^iou_view$'))
+    app.add_handler(CallbackQueryHandler(handlers.iou_person_detail, pattern='^iou_person_'))
     app.add_handler(CallbackQueryHandler(handlers.iou_detail, pattern='^iou_detail_'))
+
 
     print("🚀 Bot is running...")
     app.run_polling()

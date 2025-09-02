@@ -1,4 +1,5 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from datetime import datetime
 
 
 def main_menu_keyboard():
@@ -78,28 +79,46 @@ def iou_menu_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-def iou_list_keyboard(debts):
+def iou_list_keyboard(grouped_debts):
+    """Creates a keyboard for debts grouped by person."""
     keyboard = []
-    lent = [d for d in debts if d['type'] == 'lent']
-    borrowed = [d for d in debts if d['type'] == 'borrowed']
+    lent = [d for d in grouped_debts if d['type'] == 'lent']
+    borrowed = [d for d in grouped_debts if d['type'] == 'borrowed']
 
     if lent:
         for debt in lent:
-            label = f"Owed by {debt['person']}: {debt['remainingAmount']:,.2f} {debt['currency']}"
-            keyboard.append([InlineKeyboardButton(label, callback_data=f"iou_detail_{debt['_id']}")])
+            label = f"Owed by {debt['person']}: {debt['totalAmount']:,.2f} {debt['currency']} ({debt['count']})"
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"iou_person_{debt['person']}")])
     if borrowed:
         for debt in borrowed:
-            label = f"You owe {debt['person']}: {debt['remainingAmount']:,.2f} {debt['currency']}"
-            keyboard.append([InlineKeyboardButton(label, callback_data=f"iou_detail_{debt['_id']}")])
+            label = f"You owe {debt['person']}: {debt['totalAmount']:,.2f} {debt['currency']} ({debt['count']})"
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"iou_person_{debt['person']}")])
 
     keyboard.append([InlineKeyboardButton("‹ Back", callback_data='iou_menu')])
     return InlineKeyboardMarkup(keyboard)
 
 
-def iou_detail_keyboard(debt_id):
+def iou_person_detail_keyboard(person_debts):
+    """Creates a keyboard for an individual person's debts, including the date."""
+    keyboard = []
+    person_name = person_debts[0]['person'] if person_debts else ''
+
+    for debt in person_debts:
+        created_date = datetime.fromisoformat(debt['created_at']).strftime('%d %b')
+        purpose = debt.get('purpose') or 'No purpose'
+        label = f"{debt['remainingAmount']:,.2f} {debt['currency']} ({created_date}) - {purpose}"
+        callback = f"iou_detail_{debt['_id']}_{person_name}"
+        keyboard.append([InlineKeyboardButton(label, callback_data=callback)])
+
+    keyboard.append([InlineKeyboardButton("‹ Back to Summary", callback_data='iou_view')])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def iou_detail_keyboard(debt_id, person_name):
+    """Creates keyboard for a single debt, with a back button to the person's list."""
     keyboard = [
         [InlineKeyboardButton("💵 Record Repayment", callback_data=f"repay_start_{debt_id}")],
-        [InlineKeyboardButton("‹ Back to List", callback_data='iou_view')],
+        [InlineKeyboardButton("‹ Back to List", callback_data=f"iou_person_{person_name}")],
     ]
     return InlineKeyboardMarkup(keyboard)
 

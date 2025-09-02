@@ -1,12 +1,23 @@
 from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime
 from bson import ObjectId
+from urllib.parse import unquote
 
 debts_bp = Blueprint('debts', __name__, url_prefix='/debts')
 
 
 def serialize_debt(doc):
-    doc['_id'] = str(doc['_id'])
+    """Recursively converts ObjectId and datetime objects to strings."""
+    if isinstance(doc, list):
+        return [serialize_debt(item) for item in doc]
+    if isinstance(doc, dict):
+        for key, value in doc.items():
+            if isinstance(value, ObjectId):
+                doc[key] = str(value)
+            elif isinstance(value, datetime):
+                doc[key] = value.isoformat()
+            elif isinstance(value, (dict, list)):
+                serialize_debt(value)
     return doc
 
 
@@ -30,7 +41,6 @@ def add_debt():
     }
     result = current_app.db.debts.insert_one(debt)
 
-    # --- New logic to create a corresponding transaction ---
     account_name = "USD Account" if data['currency'] == "USD" else "KHR Account"
     tx = {
         "amount": amount,
@@ -48,15 +58,46 @@ def add_debt():
         tx['categoryId'] = 'Loan Received'
 
     current_app.db.transactions.insert_one(tx)
-    # --- End of new logic ---
-
     return jsonify({'message': 'Debt recorded', 'id': str(result.inserted_id)}), 201
 
 
 @debts_bp.route('/', methods=['GET'])
 def get_open_debts():
-    debts = list(current_app.db.debts.find({'status': 'open'}))
-    return jsonify([serialize_debt(d) for d in debts])
+    """Returns a list of debts grouped by person and currency."""
+    pipeline = [
+        {'$match': {'status': 'open'}},
+        {
+            '$group': {
+                '_id': {'person': '$person', 'currency': '$currency', 'type': '$type'},
+                'totalAmount': {'$sum': '$remainingAmount'},
+                'count': {'$sum': 1}
+            }
+        },
+        {
+            '$project': {
+                '_id': 0,
+                'person': '$_id.person',
+                'currency': '$_id.currency',
+                'type': '$_id.type',
+                'totalAmount': '$totalAmount',
+                'count': '$count'
+            }
+        },
+        {'$sort': {'person': 1}}
+    ]
+    grouped_debts = list(current_app.db.debts.aggregate(pipeline))
+    return jsonify(grouped_debts)
+
+
+@debts_bp.route('/person/<person_name>', methods=['GET'])
+def get_debts_by_person(person_name):
+    """Returns all individual open debts for a specific person."""
+    decoded_name = unquote(person_name)
+    debts = list(current_app.db.debts.find({
+        'person': decoded_name,
+        'status': 'open'
+    }).sort('created_at', 1))
+    return jsonify(serialize_debt(debts))
 
 
 @debts_bp.route('/<debt_id>', methods=['GET'])
