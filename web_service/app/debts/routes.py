@@ -89,12 +89,13 @@ def get_open_debts():
     return jsonify(grouped_debts)
 
 
-@debts_bp.route('/person/<person_name>', methods=['GET'])
-def get_debts_by_person(person_name):
-    """Returns all individual open debts for a specific person."""
+@debts_bp.route('/person/<person_name>/<currency>', methods=['GET'])
+def get_debts_by_person_and_currency(person_name, currency):
+    """Returns all individual open debts for a specific person and currency."""
     decoded_name = unquote(person_name)
     debts = list(current_app.db.debts.find({
         'person': decoded_name,
+        'currency': currency,
         'status': 'open'
     }).sort('created_at', 1))
     return jsonify(serialize_debt(debts))
@@ -108,55 +109,75 @@ def get_debt_details(debt_id):
     return jsonify(serialize_debt(debt))
 
 
-@debts_bp.route('/<debt_id>/repay', methods=['POST'])
-def record_repayment(debt_id):
+@debts_bp.route('/person/<person_name>/<currency>/repay', methods=['POST'])
+def record_lump_sum_repayment(person_name, currency):
+    """Applies a lump-sum repayment across the oldest debts first."""
     data = request.json
     if 'amount' not in data:
-        return jsonify({'error': 'Repayment amount is required'}), 400
+        return jsonify({'error': 'Amount is required'}), 400
 
     try:
-        repayment_amount = float(data['amount'])
+        total_repayment = float(data['amount'])
     except ValueError:
         return jsonify({'error': 'Amount must be a number'}), 400
 
-    debt = current_app.db.debts.find_one({'_id': ObjectId(debt_id)})
-    if not debt:
-        return jsonify({'error': 'Debt not found'}), 404
+    decoded_name = unquote(person_name)
+    debts_to_settle = list(current_app.db.debts.find({
+        'person': decoded_name,
+        'currency': currency,
+        'status': 'open'
+    }).sort('created_at', 1))
 
-    if repayment_amount > debt['remainingAmount']:
-        return jsonify({'error': 'Repayment cannot be greater than the remaining amount'}), 400
+    if not debts_to_settle:
+        return jsonify({'error': 'No open debts found for this person and currency'}), 404
 
-    account_name = "USD Account" if debt['currency'] == "USD" else "KHR Account"
-    tx = {
-        "amount": repayment_amount,
-        "currency": debt['currency'],
-        "accountName": account_name,
-        "timestamp": datetime.utcnow()
-    }
-    if debt['type'] == 'lent':
-        tx['type'] = 'income'
-        tx['categoryId'] = 'Debt Settled'
-        tx['description'] = f"Repayment from {debt['person']}"
-    else:
-        tx['type'] = 'expense'
-        tx['categoryId'] = 'Debt Repayment'
-        tx['description'] = f"Repayment to {debt['person']}"
+    settled_count = 0
+    partially_paid_count = 0
+    account_name = "USD Account" if currency == "USD" else "KHR Account"
 
-    current_app.db.transactions.insert_one(tx)
+    for debt in debts_to_settle:
+        if total_repayment <= 0:
+            break
 
-    new_remaining_amount = debt['remainingAmount'] - repayment_amount
-    new_status = 'settled' if new_remaining_amount <= 0.001 else 'open'
+        remaining_on_this_debt = debt['remainingAmount']
+        payment_for_this_debt = min(total_repayment, remaining_on_this_debt)
 
-    current_app.db.debts.update_one(
-        {'_id': ObjectId(debt_id)},
-        {
-            '$inc': {'remainingAmount': -repayment_amount},
-            '$push': {'repayments': {'amount': repayment_amount, 'date': datetime.utcnow()}},
-            '$set': {'status': new_status}
-        }
-    )
+        # Create transaction for this portion of the repayment
+        tx = {"amount": payment_for_this_debt, "currency": currency, "accountName": account_name, "timestamp": datetime.utcnow()}
+        if debt['type'] == 'lent':
+            tx['type'] = 'income'
+            tx['categoryId'] = 'Debt Settled'
+            tx['description'] = f"Repayment from {debt['person']}"
+        else: # borrowed
+            tx['type'] = 'expense'
+            tx['categoryId'] = 'Debt Repayment'
+            tx['description'] = f"Repayment to {debt['person']}"
+        current_app.db.transactions.insert_one(tx)
 
-    return jsonify({
-        'message': 'Repayment recorded successfully',
-        'remainingAmount': new_remaining_amount
-    })
+        # Update debt document
+        new_remaining = remaining_on_this_debt - payment_for_this_debt
+        new_status = 'settled' if new_remaining <= 0.001 else 'open'
+
+        current_app.db.debts.update_one(
+            {'_id': debt['_id']},
+            {
+                '$set': {'remainingAmount': new_remaining, 'status': new_status},
+                '$push': {'repayments': {'amount': payment_for_this_debt, 'date': datetime.utcnow()}}
+            }
+        )
+
+        total_repayment -= payment_for_this_debt
+
+        if new_status == 'settled':
+            settled_count += 1
+        else:
+            partially_paid_count += 1
+
+    message_parts = []
+    if settled_count > 0:
+        message_parts.append(f"settled {settled_count} loan{'s' if settled_count > 1 else ''}")
+    if partially_paid_count > 0:
+        message_parts.append(f"partially paid 1 loan")
+
+    final_message = f"Repayment of {data['amount']} {currency} applied. Successfully {', and '.join(message_parts)}."
+    return jsonify({'message': final_message})

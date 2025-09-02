@@ -18,7 +18,7 @@ from collections import defaultdict
     AMOUNT, CURRENCY, CATEGORY, CUSTOM_CATEGORY, ASK_REMARK, REMARK,
     NEW_RATE,
     IOU_PERSON, IOU_AMOUNT, IOU_CURRENCY, IOU_PURPOSE,
-    REPAY_AMOUNT,
+    REPAY_LUMP_AMOUNT,
     SETBALANCE_ACCOUNT, SETBALANCE_AMOUNT,
     FORGOT_DATE, FORGOT_TYPE
 ) = range(16)
@@ -249,32 +249,30 @@ async def iou_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @restricted
 async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Shows all individual debts for a specific person."""
+    """Shows all individual debts for a specific person and currency."""
     query = update.callback_query
     await query.answer()
-    person_name = query.data.split('_')[-1]
+    parts = query.data.split('_')
+    person_name = parts[2]
+    currency = parts[3]
 
-    person_debts = api_client.get_debts_by_person(person_name)
+    person_debts = api_client.get_debts_by_person_and_currency(person_name, currency)
     if not person_debts:
-        await query.edit_message_text(f"❌ Could not find any open debts for {person_name}.", reply_markup=keyboards.iou_menu_keyboard())
+        await query.edit_message_text(f"❌ Could not find any open {currency} debts for {person_name}.", reply_markup=keyboards.iou_menu_keyboard())
         return
 
-    totals = defaultdict(float)
-    for debt in person_debts:
-        totals[debt['currency']] += debt['remainingAmount']
-
-    total_str = " / ".join([f"{amount:,.2f} {currency}" for currency, amount in totals.items()])
+    total = sum(d['remainingAmount'] for d in person_debts)
     direction = "owes you" if person_debts[0]['type'] == 'lent' else "you owe"
 
     text = (
         f"<b>Debts for {person_name}</b> ({direction})\n"
-        f"<b>Total Remaining:</b> {total_str}\n\n"
-        "Select a specific loan to manage:"
+        f"<b>Total Remaining:</b> {total:,.2f} {currency}\n\n"
+        "Select a specific loan to view, or record a repayment:"
     )
     await query.edit_message_text(
         text,
         parse_mode='HTML',
-        reply_markup=keyboards.iou_person_detail_keyboard(person_debts)
+        reply_markup=keyboards.iou_person_detail_keyboard(person_debts, person_name, currency)
     )
 
 
@@ -284,8 +282,7 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     parts = query.data.split('_')
-    debt_id = parts[2]
-    person_name = parts[3]
+    debt_id, person_name, currency = parts[2], parts[3], parts[4]
 
     debt = api_client.get_debt_details(debt_id)
     if not debt:
@@ -309,38 +306,38 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(
         text,
         parse_mode='HTML',
-        reply_markup=keyboards.iou_detail_keyboard(debt_id, person_name)
+        reply_markup=keyboards.iou_detail_keyboard(debt_id, person_name, currency)
     )
 
 
-# --- IOU Repayment Conversation ---
+# --- Lump-Sum Repayment Conversation ---
 @restricted
-async def repay_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Starts the conversation to record a repayment."""
+async def repay_lump_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Starts the lump-sum repayment conversation."""
     query = update.callback_query
     await query.answer()
-    debt_id = query.data.split('_')[-1]
-    context.user_data['debt_id'] = debt_id
+    parts = query.data.split('_')
+    person_name, currency = parts[2], parts[3]
+    context.user_data['lump_repay_person'] = person_name
+    context.user_data['lump_repay_currency'] = currency
 
-    await query.edit_message_text("How much was repaid?")
-    return REPAY_AMOUNT
+    await query.edit_message_text(f"How much did {person_name} repay in {currency}?")
+    return REPAY_LUMP_AMOUNT
 
 
-async def received_repayment_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives and saves the repayment amount."""
+async def received_lump_repayment_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives and processes the lump-sum repayment amount."""
     try:
         amount = float(update.message.text)
-        debt_id = context.user_data['debt_id']
+        person = context.user_data['lump_repay_person']
+        currency = context.user_data['lump_repay_currency']
 
-        response = api_client.record_repayment(debt_id, amount)
+        response = api_client.record_lump_sum_repayment(person, currency, amount)
 
-        if response and 'remainingAmount' in response:
-            remaining = response['remainingAmount']
-            base_text = f"✅ Repayment of {amount:,.2f} recorded. The remaining balance is now {remaining:,.2f}."
-            if remaining <= 0:
-                base_text = "✅ Repayment recorded. This debt is now fully settled!"
+        if 'error' in response:
+             base_text = f"❌ Error: {response['error']}"
         else:
-            base_text = "❌ Error recording repayment. The amount might be too high or the debt not found."
+            base_text = f"✅ {response['message']}"
 
         summary_data = api_client.get_balance_summary()
         summary_text = format_summary_message(summary_data)
@@ -353,7 +350,7 @@ async def received_repayment_amount(update: Update, context: ContextTypes.DEFAUL
 
     except (ValueError, TypeError):
         await update.message.reply_text("Please enter a valid number for the repayment amount.")
-        return REPAY_AMOUNT
+        return REPAY_LUMP_AMOUNT
 
     context.user_data.clear()
     return ConversationHandler.END
@@ -657,6 +654,8 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
+
+# --- Build Conversation Handlers ---
 tx_conversation_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(add_transaction_start, pattern='^(add_expense|add_income)$')],
     states={
@@ -666,6 +665,15 @@ tx_conversation_handler = ConversationHandler(
         CUSTOM_CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_custom_category)],
         ASK_REMARK: [CallbackQueryHandler(ask_remark, pattern='^remark_')],
         REMARK: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_remark)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
+    per_message=False
+)
+
+repay_lump_conversation_handler = ConversationHandler(
+    entry_points=[CallbackQueryHandler(repay_lump_start, pattern='^repay_lump_')],
+    states={
+        REPAY_LUMP_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_lump_repayment_amount)]
     },
     fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
     per_message=False
@@ -705,15 +713,6 @@ iou_conversation_handler = ConversationHandler(
         IOU_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_received_amount)],
         IOU_CURRENCY: [CallbackQueryHandler(iou_received_currency, pattern='^curr_')],
         IOU_PURPOSE: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_received_purpose)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
-    per_message=False
-)
-
-repay_conversation_handler = ConversationHandler(
-    entry_points=[CallbackQueryHandler(repay_start, pattern='^repay_start_')],
-    states={
-        REPAY_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_repayment_amount)]
     },
     fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
     per_message=False

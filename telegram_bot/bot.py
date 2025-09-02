@@ -18,7 +18,7 @@ def main():
     app.add_handler(handlers.tx_conversation_handler)
     app.add_handler(handlers.rate_conversation_handler)
     app.add_handler(handlers.iou_conversation_handler)
-    app.add_handler(handlers.repay_conversation_handler)
+    app.add_handler(handlers.repay_lump_conversation_handler)
     app.add_handler(handlers.set_balance_conversation_handler)
     app.add_handler(handlers.forgot_conversation_handler)
 

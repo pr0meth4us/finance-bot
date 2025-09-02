@@ -37,15 +37,15 @@ def get_open_debts():
         return []
 
 
-def get_debts_by_person(person_name):
-    """Fetches all open debts for a specific person."""
+def get_debts_by_person_and_currency(person_name, currency):
+    """Fetches all open debts for a specific person and currency."""
     try:
         encoded_name = urllib.parse.quote(person_name)
-        res = requests.get(f"{BASE_URL}/debts/person/{encoded_name}", timeout=10)
+        res = requests.get(f"{BASE_URL}/debts/person/{encoded_name}/{currency}", timeout=10)
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error fetching debts for person {person_name}: {e}")
+        print(f"API Error fetching debts for {person_name} ({currency}): {e}")
         return []
 
 
@@ -59,15 +59,22 @@ def get_debt_details(debt_id):
         return None
 
 
-def record_repayment(debt_id, amount):
+def record_lump_sum_repayment(person_name, currency, amount):
+    """Records a lump-sum repayment for a person in a specific currency."""
     try:
+        encoded_name = urllib.parse.quote(person_name)
+        url = f"{BASE_URL}/debts/person/{encoded_name}/{currency}/repay"
         payload = {'amount': amount}
-        res = requests.post(f"{BASE_URL}/debts/{debt_id}/repay", json=payload, timeout=10)
+        res = requests.post(url, json=payload, timeout=15)
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error recording repayment: {e}")
-        return None
+        print(f"API Error recording lump-sum repayment: {e}")
+        # Try to parse error message from backend if available
+        try:
+            return e.response.json()
+        except:
+            return {'error': 'A network error occurred.'}
 
 
 def update_exchange_rate(rate):
