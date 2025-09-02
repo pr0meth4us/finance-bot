@@ -3,13 +3,39 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 def main_menu_keyboard():
     keyboard = [
-        [InlineKeyboardButton("💸 Add Expense", callback_data='add_expense')],
-        [InlineKeyboardButton("💰 Add Income", callback_data='add_income')],
+        [
+            InlineKeyboardButton("💸 Add Expense", callback_data='add_expense'),
+            InlineKeyboardButton("💰 Add Income", callback_data='add_income')
+        ],
+        [InlineKeyboardButton("🤔 Forgot to Log?", callback_data='forgot_log_start')],
         [InlineKeyboardButton("📊 Set Balance", callback_data='set_balance_start')],
         [InlineKeyboardButton("📖 History", callback_data='history')],
         [InlineKeyboardButton("📈 Report", callback_data='report_menu')],
         [InlineKeyboardButton("⚙️ Update Rate", callback_data='update_rate')],
         [InlineKeyboardButton("🤝 IOU / Debts", callback_data='iou_menu')],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def forgot_day_keyboard():
+    """Keyboard to select which past day to log for."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Yesterday", callback_data='forgot_day_1'),
+            InlineKeyboardButton("2 Days Ago", callback_data='forgot_day_2')
+        ],
+        [InlineKeyboardButton("❌ Cancel", callback_data='cancel_conversation')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def forgot_type_keyboard():
+    """Keyboard to select transaction type for a forgotten log."""
+    keyboard = [
+        [
+            InlineKeyboardButton("💸 Expense", callback_data='forgot_type_expense'),
+            InlineKeyboardButton("💰 Income", callback_data='forgot_type_income')
+        ],
     ]
     return InlineKeyboardMarkup(keyboard)
 

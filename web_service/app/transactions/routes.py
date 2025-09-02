@@ -17,6 +17,13 @@ def add_transaction():
     if not all(k in data for k in ['type', 'amount', 'currency', 'categoryId', 'accountName']):
         return jsonify({'error': 'Missing required fields'}), 400
 
+    # Determine the timestamp: use provided one or default to now
+    timestamp_str = data.get('timestamp')
+    if timestamp_str:
+        timestamp = datetime.fromisoformat(timestamp_str)
+    else:
+        timestamp = datetime.utcnow()
+
     tx = {
         "type": data['type'],
         "amount": float(data['amount']),
@@ -24,7 +31,7 @@ def add_transaction():
         "categoryId": data['categoryId'],
         "accountName": data['accountName'],
         "description": data.get('description', ''),
-        "timestamp": datetime.utcnow()
+        "timestamp": timestamp
     }
 
     if tx['currency'] == 'KHR':

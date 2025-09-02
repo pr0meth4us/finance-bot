@@ -9,15 +9,18 @@ from telegram.ext import (
 )
 import keyboards
 import api_client
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from decorators import restricted  # Import our new security decorator
 
 # --- Conversation States ---
-AMOUNT, CURRENCY, CATEGORY, CUSTOM_CATEGORY, ASK_REMARK, REMARK = range(6)
-NEW_RATE = range(6, 7)
-IOU_PERSON, IOU_AMOUNT, IOU_CURRENCY = range(7, 10)
-REPAY_AMOUNT = range(10, 11)
-SETBALANCE_ACCOUNT, SETBALANCE_AMOUNT = range(11, 13)
+(
+    AMOUNT, CURRENCY, CATEGORY, CUSTOM_CATEGORY, ASK_REMARK, REMARK,
+    NEW_RATE,
+    IOU_PERSON, IOU_AMOUNT, IOU_CURRENCY,
+    REPAY_AMOUNT,
+    SETBALANCE_ACCOUNT, SETBALANCE_AMOUNT,
+    FORGOT_DATE, FORGOT_TYPE
+) = range(15)
 
 
 # --- Helper Function ---
@@ -308,8 +311,7 @@ async def iou_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     context.user_data['iou_type'] = 'lent' if query.data == 'iou_lent' else 'borrowed'
 
-    prompt = "Who did you lend money to?" if context.user_data[
-                                                 'iou_type'] == 'lent' else "Who did you borrow money from?"
+    prompt = "Who did you lend money to?" if context.user_data['iou_type'] == 'lent' else "Who did you borrow money from?"
     await query.edit_message_text(prompt)
     return IOU_PERSON
 
@@ -418,10 +420,53 @@ async def received_balance_amount(update: Update, context: ContextTypes.DEFAULT_
         return SETBALANCE_AMOUNT
 
 
-# --- Add Transaction Conversation ---
+# --- Forgot to Log Conversation ---
+@restricted
+async def forgot_log_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Starts the conversation to log a transaction for a past day."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "Which day did you forget to log?",
+        reply_markup=keyboards.forgot_day_keyboard()
+    )
+    return FORGOT_DATE
+
+
+async def received_forgot_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives the day and asks for the transaction type."""
+    query = update.callback_query
+    await query.answer()
+    days_ago = int(query.data.split('_')[-1])
+
+    # We set the time to noon on that day to avoid timezone issues
+    forgotten_datetime = datetime.combine(
+        datetime.utcnow().date() - timedelta(days=days_ago),
+        time(12, 0)
+    )
+    context.user_data['timestamp'] = forgotten_datetime.isoformat()
+
+    await query.edit_message_text(
+        "Got it. Was it an expense or an income?",
+        reply_markup=keyboards.forgot_type_keyboard()
+    )
+    return FORGOT_TYPE
+
+
+async def received_forgot_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives the transaction type and proceeds to ask for the amount."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data['type'] = query.data.split('_')[-1]
+    emoji = "💸" if context.user_data['type'] == 'expense' else "💰"
+    await query.edit_message_text(f"{emoji} Enter the amount:")
+    return AMOUNT
+
+
+# --- Add Transaction Conversation (Shared Logic) ---
 @restricted
 async def add_transaction_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Starts the conversation to add an expense or income."""
+    """Starts the conversation to add an expense or income for today."""
     query = update.callback_query
     await query.answer()
     context.user_data['type'] = 'expense' if query.data == 'add_expense' else 'income'
@@ -533,12 +578,20 @@ async def save_transaction_and_end(update: Update, context: ContextTypes.DEFAULT
 @restricted
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancels any active conversation."""
-    if update.message:
-        await update.message.reply_text("Operation cancelled.", reply_markup=keyboards.main_menu_keyboard())
-    elif update.callback_query:
-        await update.callback_query.answer()
-        await update.callback_query.edit_message_text("Operation cancelled.",
-                                                      reply_markup=keyboards.main_menu_keyboard())
+    message = "Operation cancelled."
+    keyboard = keyboards.main_menu_keyboard()
+
+    if update.callback_query:
+        # Check if the callback is from the 'Forgot' flow to avoid errors
+        if update.callback_query.data == 'cancel_conversation':
+            await update.callback_query.answer()
+            await update.callback_query.edit_message_text(message, reply_markup=keyboard)
+        else:
+            # Standard cancel for other flows
+            await update.callback_query.answer()
+            await update.callback_query.edit_message_text(message, reply_markup=keyboard)
+    elif update.message:
+        await update.message.reply_text(message, reply_markup=keyboard)
 
     context.user_data.clear()
     return ConversationHandler.END
@@ -556,6 +609,27 @@ tx_conversation_handler = ConversationHandler(
         REMARK: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_remark)],
     },
     fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
+    per_message=False
+)
+
+forgot_conversation_handler = ConversationHandler(
+    entry_points=[CallbackQueryHandler(forgot_log_start, pattern='^forgot_log_start$')],
+    states={
+        FORGOT_DATE: [CallbackQueryHandler(received_forgot_day, pattern='^forgot_day_')],
+        FORGOT_TYPE: [CallbackQueryHandler(received_forgot_type, pattern='^forgot_type_')],
+        # Reuse states from the main transaction handler
+        AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_amount)],
+        CURRENCY: [CallbackQueryHandler(received_currency, pattern='^curr_')],
+        CATEGORY: [CallbackQueryHandler(received_category, pattern='^cat_')],
+        CUSTOM_CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_custom_category)],
+        ASK_REMARK: [CallbackQueryHandler(ask_remark, pattern='^remark_')],
+        REMARK: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_remark)],
+    },
+    fallbacks=[
+        CommandHandler('cancel', cancel),
+        CommandHandler('start', start),
+        CallbackQueryHandler(cancel, pattern='^cancel_conversation$')
+    ],
     per_message=False
 )
 
