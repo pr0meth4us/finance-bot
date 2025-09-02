@@ -25,7 +25,14 @@ def get_report_chart():
     pipeline = [
         {'$match': {
             'timestamp': {'$gte': start_date, '$lte': end_date},
-            'type': 'expense'
+            'type': 'expense',
+            'categoryId': {
+                '$nin': [
+                    'Loan Lent',
+                    'Debt Repayment',
+                    'Initial Balance'
+                ]
+            }
         }},
         {'$addFields': {
             'amount_in_usd': {
@@ -46,7 +53,7 @@ def get_report_chart():
     data = list(current_app.db.transactions.aggregate(pipeline))
 
     if not data:
-        return Response("No expense data for the selected period.", status=404)
+        return Response("No lifestyle expense data found for the selected period.", status=404)
 
     labels = [item['_id'] for item in data]
     sizes = [item['total'] for item in data]
@@ -54,7 +61,7 @@ def get_report_chart():
     fig, ax = plt.subplots()
     ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
     ax.axis('equal')
-    title = f"Expenses from {start_date.strftime('%d %b')} to {end_date.strftime('%d %b %Y')}"
+    title = f"Lifestyle Expenses from {start_date.strftime('%d %b')} to {end_date.strftime('%d %b %Y')}"
     plt.title(title)
 
     buf = io.BytesIO()
