@@ -59,12 +59,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the main menu and forcibly ends any active conversation."""
     text = "Welcome to your Personal Finance Assistant!"
     keyboard = keyboards.main_menu_keyboard()
+    chat_id = update.effective_chat.id
+
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.edit_message_text(text, reply_markup=keyboard)
-    else:
-        await update.message.reply_text(text, reply_markup=keyboard)
 
+    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
     return ConversationHandler.END
 
 
@@ -78,8 +78,9 @@ async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     summary_text = format_summary_message(summary_data)
     text = "🔍 Here is your quick summary:" + summary_text
 
-    await query.edit_message_text(
-        text,
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=text,
         parse_mode='HTML',
         reply_markup=keyboards.main_menu_keyboard()
     )
@@ -91,8 +92,9 @@ async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the menu for selecting a report period."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text(
-        "What period would you like a report for?",
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="What period would you like a report for?",
         reply_markup=keyboards.report_period_keyboard()
     )
 
@@ -121,10 +123,11 @@ async def generate_report_for_period(update: Update, context: ContextTypes.DEFAU
         end_date = next_month_first_day - timedelta(days=1)
 
     if start_date and end_date:
-        await query.edit_message_text(
-            f"📈 Generating your report for {start_date.strftime('%b %d')} to {end_date.strftime('%b %d')}...")
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=f"📈 Generating your report for {start_date.strftime('%b %d')} to {end_date.strftime('%b %d')}..."
+        )
         chart = api_client.get_chart(start_date, end_date)
-        await query.message.delete()
 
         if chart:
             await context.bot.send_photo(chat_id=query.message.chat_id, photo=chart)
@@ -147,7 +150,10 @@ async def update_rate_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Starts the conversation to update the exchange rate."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Please enter the new exchange rate for 1 USD to KHR (e.g., 4100).")
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="Please enter the new exchange rate for 1 USD to KHR (e.g., 4100)."
+    )
     return NEW_RATE
 
 
@@ -173,13 +179,17 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     transactions = api_client.get_recent_transactions()
-    if not transactions:
-        await query.edit_message_text("No recent transactions found.", reply_markup=keyboards.main_menu_keyboard())
-        return
+    text_to_send = "Select a transaction to manage:"
+    reply_markup_to_send = keyboards.history_keyboard(transactions)
 
-    await query.edit_message_text(
-        "Select a transaction to manage:",
-        reply_markup=keyboards.history_keyboard(transactions)
+    if not transactions:
+        text_to_send = "No recent transactions found."
+        reply_markup_to_send = keyboards.main_menu_keyboard()
+
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=text_to_send,
+        reply_markup=reply_markup_to_send
     )
 
 
@@ -190,7 +200,11 @@ async def manage_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     tx_id = query.data.split('_')[-1]
     text = f"Managing Transaction ID: ...{tx_id[-6:]}"
-    await query.edit_message_text(text, reply_markup=keyboards.manage_tx_keyboard(tx_id))
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=text,
+        reply_markup=keyboards.manage_tx_keyboard(tx_id)
+    )
 
 
 @restricted
@@ -199,8 +213,9 @@ async def delete_transaction_prompt(update: Update, context: ContextTypes.DEFAUL
     query = update.callback_query
     await query.answer()
     tx_id = query.data.split('_')[-1]
-    await query.edit_message_text(
-        "⚠️ Are you sure you want to delete this transaction?",
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="⚠️ Are you sure you want to delete this transaction?",
         reply_markup=keyboards.confirm_delete_keyboard(tx_id)
     )
 
@@ -212,14 +227,14 @@ async def delete_transaction_confirm(update: Update, context: ContextTypes.DEFAU
     await query.answer()
     tx_id = query.data.split('_')[-1]
     success = api_client.delete_transaction(tx_id)
-    if success:
-        await query.edit_message_text("🗑️ Transaction successfully deleted.")
-    else:
-        await query.edit_message_text("❌ Error: Could not delete transaction.")
+
+    text_to_send = "🗑️ Transaction successfully deleted." if success else "❌ Error: Could not delete transaction."
+    await context.bot.send_message(chat_id=query.message.chat_id, text=text_to_send)
 
     transactions = api_client.get_recent_transactions()
-    await query.message.reply_text(
-        "Here is the updated history:",
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="Here is the updated history:",
         reply_markup=keyboards.history_keyboard(transactions)
     )
 
@@ -230,7 +245,11 @@ async def iou_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the IOU management menu."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("🤝 Let's manage your IOUs.", reply_markup=keyboards.iou_menu_keyboard())
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="🤝 Let's manage your IOUs.",
+        reply_markup=keyboards.iou_menu_keyboard()
+    )
 
 
 @restricted
@@ -239,12 +258,19 @@ async def iou_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     grouped_debts = api_client.get_open_debts()
-    if not grouped_debts:
-        await query.edit_message_text("You have no open debts! 👍", reply_markup=keyboards.iou_menu_keyboard())
-        return
 
-    text = "Here is a summary of debts by person.\nSelect one to see details:"
-    await query.edit_message_text(text, reply_markup=keyboards.iou_list_keyboard(grouped_debts))
+    text_to_send = "Here is a summary of debts by person.\nSelect one to see details:"
+    reply_markup_to_send = keyboards.iou_list_keyboard(grouped_debts)
+
+    if not grouped_debts:
+        text_to_send = "You have no open debts! 👍"
+        reply_markup_to_send = keyboards.iou_menu_keyboard()
+
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=text_to_send,
+        reply_markup=reply_markup_to_send
+    )
 
 
 @restricted
@@ -255,26 +281,31 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = query.data.split(':')
 
     if len(parts) != 4:
-        await query.edit_message_text("Error: Invalid or outdated button. Please go back and try again.", reply_markup=keyboards.iou_menu_keyboard())
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text="Error: Invalid or outdated button. Please go back and try again.",
+                                       reply_markup=keyboards.iou_menu_keyboard())
         return
 
     _, _, person_name, currency = parts
-
     person_debts = api_client.get_debts_by_person_and_currency(person_name, currency)
+
     if not person_debts:
-        await query.edit_message_text(f"❌ Could not find any open {currency} debts for {person_name}.", reply_markup=keyboards.iou_menu_keyboard())
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text=f"❌ Could not find any open {currency} debts for {person_name}.",
+                                       reply_markup=keyboards.iou_menu_keyboard())
         return
 
     total = sum(d['remainingAmount'] for d in person_debts)
     direction = "owes you" if person_debts[0]['type'] == 'lent' else "you owe"
-
     text = (
         f"<b>Debts for {person_name}</b> ({direction})\n"
         f"<b>Total Remaining:</b> {total:,.2f} {currency}\n\n"
         "Select a specific loan to view, or record a repayment:"
     )
-    await query.edit_message_text(
-        text,
+
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=text,
         parse_mode='HTML',
         reply_markup=keyboards.iou_person_detail_keyboard(person_debts, person_name, currency)
     )
@@ -288,21 +319,22 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = query.data.split(':')
 
     if len(parts) != 5:
-        await query.edit_message_text("Error: Invalid or outdated button. Please go back and try again.", reply_markup=keyboards.iou_menu_keyboard())
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text="Error: Invalid or outdated button. Please go back and try again.",
+                                       reply_markup=keyboards.iou_menu_keyboard())
         return
 
     _, _, debt_id, person_name, currency = parts
-
     debt = api_client.get_debt_details(debt_id)
     if not debt:
-        await query.edit_message_text("❌ Error: Could not find this debt.", reply_markup=keyboards.iou_menu_keyboard())
+        await context.bot.send_message(chat_id=query.message.chat_id, text="❌ Error: Could not find this debt.",
+                                       reply_markup=keyboards.iou_menu_keyboard())
         return
 
     direction = "Owes you" if debt['type'] == 'lent' else "You owe"
     purpose_text = f"<b>Purpose:</b> {debt['purpose']}\n" if debt.get('purpose') else ""
     created_date_str = datetime.fromisoformat(debt['created_at']).strftime('%d %b %Y, %I:%M %p')
     date_text = f"<b>Date Created:</b> {created_date_str}\n"
-
     text = (
         f"<b>Debt Details:</b>\n"
         f"<b>Person:</b> {debt['person']} ({direction})\n"
@@ -312,8 +344,9 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<b>Remaining Balance:</b> {debt.get('remainingAmount', 0):,.2f} {debt.get('currency', '')}"
     )
 
-    await query.edit_message_text(
-        text,
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=text,
         parse_mode='HTML',
         reply_markup=keyboards.iou_detail_keyboard(debt_id, person_name, currency)
     )
@@ -328,15 +361,19 @@ async def repay_lump_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = query.data.split(':')
 
     if len(parts) != 4:
-        await query.edit_message_text("Error: Invalid or outdated button. Please go back and try again.", reply_markup=keyboards.iou_menu_keyboard())
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text="Error: Invalid or outdated button. Please go back and try again.",
+                                       reply_markup=keyboards.iou_menu_keyboard())
         return ConversationHandler.END
 
     _, _, person_name, currency = parts
-
     context.user_data['lump_repay_person'] = person_name
     context.user_data['lump_repay_currency'] = currency
 
-    await query.edit_message_text(f"How much did {person_name} repay in {currency}?")
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=f"How much did {person_name} repay in {currency}?"
+    )
     return REPAY_LUMP_AMOUNT
 
 
@@ -348,11 +385,7 @@ async def received_lump_repayment_amount(update: Update, context: ContextTypes.D
         currency = context.user_data['lump_repay_currency']
 
         response = api_client.record_lump_sum_repayment(person, currency, amount)
-
-        if 'error' in response:
-             base_text = f"❌ Error: {response['error']}"
-        else:
-            base_text = f"✅ {response['message']}"
+        base_text = f"✅ {response['message']}" if 'error' not in response else f"❌ Error: {response['error']}"
 
         summary_data = api_client.get_balance_summary()
         summary_text = format_summary_message(summary_data)
@@ -362,7 +395,6 @@ async def received_lump_repayment_amount(update: Update, context: ContextTypes.D
             parse_mode='HTML',
             reply_markup=keyboards.main_menu_keyboard()
         )
-
     except (ValueError, TypeError):
         await update.message.reply_text("Please enter a valid number for the repayment amount.")
         return REPAY_LUMP_AMOUNT
@@ -378,9 +410,9 @@ async def iou_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data['iou_type'] = 'lent' if query.data == 'iou_lent' else 'borrowed'
-
-    prompt = "Who did you lend money to?" if context.user_data['iou_type'] == 'lent' else "Who did you borrow money from?"
-    await query.edit_message_text(prompt)
+    prompt = "Who did you lend money to?" if context.user_data[
+                                                 'iou_type'] == 'lent' else "Who did you borrow money from?"
+    await context.bot.send_message(chat_id=query.message.chat_id, text=prompt)
     return IOU_PERSON
 
 
@@ -405,15 +437,13 @@ async def iou_received_currency(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
     context.user_data['iou_currency'] = query.data.split('_')[1]
-
-    await query.edit_message_text("What was this for? (e.g., Lunch, Deposit)")
+    await context.bot.send_message(chat_id=query.message.chat_id, text="What was this for? (e.g., Lunch, Deposit)")
     return IOU_PURPOSE
 
 
 async def iou_received_purpose(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives the purpose and saves the new IOU."""
     context.user_data['iou_purpose'] = update.message.text
-
     debt_data = {
         "type": context.user_data['iou_type'],
         "person": context.user_data['iou_person'],
@@ -422,17 +452,14 @@ async def iou_received_purpose(update: Update, context: ContextTypes.DEFAULT_TYP
         "purpose": context.user_data['iou_purpose']
     }
     response = api_client.add_debt(debt_data)
-
     base_text = "✅ Debt successfully recorded!" if response else "❌ Failed to record debt."
     summary_data = api_client.get_balance_summary()
     summary_text = format_summary_message(summary_data)
-
     await update.message.reply_text(
         base_text + summary_text,
         parse_mode='HTML',
         reply_markup=keyboards.main_menu_keyboard()
     )
-
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -443,8 +470,9 @@ async def set_balance_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Starts the conversation to set an initial balance."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text(
-        "Which account do you want to set the balance for?",
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="Which account do you want to set the balance for?",
         reply_markup=keyboards.set_balance_account_keyboard()
     )
     return SETBALANCE_ACCOUNT
@@ -457,8 +485,10 @@ async def received_balance_account(update: Update, context: ContextTypes.DEFAULT
     currency = query.data.split('_')[-1]
     context.user_data['currency'] = currency
     context.user_data['accountName'] = "USD Account" if currency == "USD" else "KHR Account"
-
-    await query.edit_message_text(f"What is the total current balance for your {currency} Account?")
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=f"What is the total current balance for your {currency} Account?"
+    )
     return SETBALANCE_AMOUNT
 
 
@@ -466,32 +496,24 @@ async def received_balance_amount(update: Update, context: ContextTypes.DEFAULT_
     """Receives the amount and creates the 'Initial Balance' transaction."""
     try:
         amount = float(update.message.text)
-
         tx_data = {
-            "type": "income",
-            "amount": amount,
+            "type": "income", "amount": amount,
             "currency": context.user_data['currency'],
             "accountName": context.user_data['accountName'],
             "categoryId": "Initial Balance",
             "description": "Starting balance set by user"
         }
-
         api_client.add_transaction(tx_data)
-
         base_text = f"✅ Initial balance of {amount:,.2f} {context.user_data['currency']} set successfully!"
-
         summary_data = api_client.get_balance_summary()
         summary_text = format_summary_message(summary_data)
-
         await update.message.reply_text(
             base_text + summary_text,
             parse_mode='HTML',
             reply_markup=keyboards.main_menu_keyboard()
         )
-
         context.user_data.clear()
         return ConversationHandler.END
-
     except (ValueError, TypeError):
         await update.message.reply_text("Please enter a valid number for the balance.")
         return SETBALANCE_AMOUNT
@@ -503,8 +525,9 @@ async def forgot_log_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Starts the conversation to log a transaction for a past day."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text(
-        "Which day did you forget to log?",
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="Which day did you forget to log?",
         reply_markup=keyboards.forgot_day_keyboard()
     )
     return FORGOT_DATE
@@ -515,15 +538,14 @@ async def received_forgot_day(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     await query.answer()
     days_ago = int(query.data.split('_')[-1])
-
     forgotten_datetime = datetime.combine(
         datetime.utcnow().date() - timedelta(days=days_ago),
         time(12, 0)
     )
     context.user_data['timestamp'] = forgotten_datetime.isoformat()
-
-    await query.edit_message_text(
-        "Got it. Was it an expense or an income?",
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="Got it. Was it an expense or an income?",
         reply_markup=keyboards.forgot_type_keyboard()
     )
     return FORGOT_TYPE
@@ -535,7 +557,7 @@ async def received_forgot_type(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     context.user_data['type'] = query.data.split('_')[-1]
     emoji = "💸" if context.user_data['type'] == 'expense' else "💰"
-    await query.edit_message_text(f"{emoji} Enter the amount:")
+    await context.bot.send_message(chat_id=query.message.chat_id, text=f"{emoji} Enter the amount:")
     return AMOUNT
 
 
@@ -547,7 +569,7 @@ async def add_transaction_start(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     context.user_data['type'] = 'expense' if query.data == 'add_expense' else 'income'
     emoji = "💸" if context.user_data['type'] == 'expense' else "💰"
-    await query.edit_message_text(f"{emoji} Enter the amount:")
+    await context.bot.send_message(chat_id=query.message.chat_id, text=f"{emoji} Enter the amount:")
     return AMOUNT
 
 
@@ -569,13 +591,9 @@ async def received_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
     currency = query.data.split('_')[1]
     context.user_data['currency'] = currency
     context.user_data['accountName'] = "USD Account" if currency == "USD" else "KHR Account"
-
-    if context.user_data.get('type') == 'income':
-        keyboard = keyboards.income_categories_keyboard()
-    else:
-        keyboard = keyboards.expense_categories_keyboard()
-
-    await query.edit_message_text("Which category?", reply_markup=keyboard)
+    keyboard = keyboards.income_categories_keyboard() if context.user_data.get(
+        'type') == 'income' else keyboards.expense_categories_keyboard()
+    await context.bot.send_message(chat_id=query.message.chat_id, text="Which category?", reply_markup=keyboard)
     return CATEGORY
 
 
@@ -586,24 +604,22 @@ async def received_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     category_choice = query.data.split('_')[1]
 
     if category_choice == 'other':
-        await query.edit_message_text("Please type your custom category name (e.g., Side Project, Freelance).")
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text="Please type your custom category name (e.g., Side Project, Freelance).")
         return CUSTOM_CATEGORY
     else:
         context.user_data['categoryId'] = category_choice
-        await query.edit_message_text(
-            "Great. Would you like to add a remark/description?",
-            reply_markup=keyboards.ask_remark_keyboard()
-        )
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text="Great. Would you like to add a remark/description?",
+                                       reply_markup=keyboards.ask_remark_keyboard())
         return ASK_REMARK
 
 
 async def received_custom_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives a manually typed custom category."""
     context.user_data['categoryId'] = update.message.text
-    await update.message.reply_text(
-        "Great. Would you like to add a remark/description?",
-        reply_markup=keyboards.ask_remark_keyboard()
-    )
+    await update.message.reply_text("Great. Would you like to add a remark/description?",
+                                    reply_markup=keyboards.ask_remark_keyboard())
     return ASK_REMARK
 
 
@@ -614,7 +630,7 @@ async def ask_remark(update: Update, context: ContextTypes.DEFAULT_TYPE):
     choice = query.data.split('_')[1]
 
     if choice == 'yes':
-        await query.edit_message_text("Please type your remark.")
+        await context.bot.send_message(chat_id=query.message.chat_id, text="Please type your remark.")
         return REMARK
     else:
         context.user_data['description'] = ''
@@ -631,21 +647,14 @@ async def save_transaction_and_end(update: Update, context: ContextTypes.DEFAULT
     """Saves transaction, then fetches and displays the summary."""
     response = api_client.add_transaction(context.user_data)
     message_to_use = update.callback_query.message if update.callback_query else update.message
-
     base_text = "✅ Transaction recorded successfully!" if response else "❌ Failed to record transaction."
-
     summary_data = api_client.get_balance_summary()
     summary_text = format_summary_message(summary_data)
-
     await message_to_use.reply_text(
         base_text + summary_text,
         parse_mode='HTML',
         reply_markup=keyboards.main_menu_keyboard()
     )
-
-    if update.callback_query:
-        await update.callback_query.message.delete()
-
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -655,17 +664,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancels any active conversation."""
     message = "Operation cancelled."
     keyboard = keyboards.main_menu_keyboard()
-
+    chat_id = update.effective_chat.id
     if update.callback_query:
-        if update.callback_query.data == 'cancel_conversation':
-            await update.callback_query.answer()
-            await update.callback_query.edit_message_text(message, reply_markup=keyboard)
-        else:
-            await update.callback_query.answer()
-            await update.callback_query.edit_message_text(message, reply_markup=keyboard)
-    elif update.message:
-        await update.message.reply_text(message, reply_markup=keyboard)
-
+        await update.callback_query.answer()
+    await context.bot.send_message(chat_id=chat_id, text=message, reply_markup=keyboard)
     context.user_data.clear()
     return ConversationHandler.END
 
