@@ -21,7 +21,7 @@ def main():
     app.add_handler(handlers.repay_lump_conversation_handler)
     app.add_handler(handlers.set_balance_conversation_handler)
     app.add_handler(handlers.forgot_conversation_handler)
-    app.add_handler(handlers.reminder_conversation_handler) # Add new handler
+    app.add_handler(handlers.reminder_conversation_handler) # New Reminder Handler
 
     # --- Register Standalone Command Handlers ---
     app.add_handler(CommandHandler("start", handlers.start))
@@ -38,7 +38,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handlers.delete_transaction_prompt, pattern='^delete_tx_'))
     app.add_handler(CallbackQueryHandler(handlers.delete_transaction_confirm, pattern='^confirm_delete_'))
 
-    # IOU callbacks
+    # IOU callbacks (New flow)
     app.add_handler(CallbackQueryHandler(handlers.iou_menu, pattern='^iou_menu$'))
     app.add_handler(CallbackQueryHandler(handlers.iou_view, pattern='^iou_view$'))
     app.add_handler(CallbackQueryHandler(handlers.iou_person_detail, pattern='^iou:person:'))

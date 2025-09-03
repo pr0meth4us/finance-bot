@@ -17,11 +17,12 @@ from collections import defaultdict
 (
     AMOUNT, CURRENCY, CATEGORY, CUSTOM_CATEGORY, ASK_REMARK, REMARK,
     NEW_RATE,
-    IOU_PERSON, IOU_AMOUNT, IOU_CURRENCY, IOU_PURPOSE, IOU_ASK_DATE, IOU_CUSTOM_DATE,
+    IOU_ASK_DATE, IOU_CUSTOM_DATE, IOU_PERSON, IOU_AMOUNT, IOU_CURRENCY, IOU_PURPOSE,
     REPAY_LUMP_AMOUNT,
     SETBALANCE_ACCOUNT, SETBALANCE_AMOUNT,
-    FORGOT_DATE, FORGOT_TYPE, FORGOT_CUSTOM_DATE
-) = range(19)
+    FORGOT_DATE, FORGOT_CUSTOM_DATE, FORGOT_TYPE,
+    REMINDER_PURPOSE, REMINDER_ASK_DATE, REMINDER_CUSTOM_DATE
+) = range(22)
 
 
 # --- Helper Function ---
@@ -406,14 +407,55 @@ async def received_lump_repayment_amount(update: Update, context: ContextTypes.D
 # --- IOU Add Conversation ---
 @restricted
 async def iou_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Starts the conversation to add a new IOU."""
+    """Starts the IOU conversation by asking for the date."""
     query = update.callback_query
     await query.answer()
+    context.user_data.clear()
     context.user_data['iou_type'] = 'lent' if query.data == 'iou_lent' else 'borrowed'
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="When did this happen?",
+        reply_markup=keyboards.iou_date_keyboard()
+    )
+    return IOU_ASK_DATE
+
+
+async def iou_received_date_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the date choice for an IOU."""
+    query = update.callback_query
+    await query.answer()
+    choice = query.data
+
     prompt = "Who did you lend money to?" if context.user_data[
                                                  'iou_type'] == 'lent' else "Who did you borrow money from?"
-    await context.bot.send_message(chat_id=query.message.chat_id, text=prompt)
-    return IOU_PERSON
+
+    if choice == 'iou_date_today':
+        await context.bot.send_message(chat_id=query.message.chat_id, text=prompt)
+        return IOU_PERSON
+    elif choice == 'iou_date_yesterday':
+        yesterday_dt = datetime.combine(datetime.utcnow().date() - timedelta(days=1), time(12, 0))
+        context.user_data['timestamp'] = yesterday_dt.isoformat()
+        await context.bot.send_message(chat_id=query.message.chat_id, text=prompt)
+        return IOU_PERSON
+    elif choice == 'iou_date_custom':
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text="Please enter the date in YYYY-MM-DD format.")
+        return IOU_CUSTOM_DATE
+
+
+async def iou_received_custom_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the custom date input for an IOU."""
+    date_str = update.message.text
+    try:
+        custom_dt = datetime.combine(datetime.strptime(date_str, "%Y-%m-%d").date(), time(12, 0))
+        context.user_data['timestamp'] = custom_dt.isoformat()
+        prompt = "Who did you lend money to?" if context.user_data[
+                                                     'iou_type'] == 'lent' else "Who did you borrow money from?"
+        await update.message.reply_text(prompt)
+        return IOU_PERSON
+    except ValueError:
+        await update.message.reply_text("Invalid format. Please use YYYY-MM-DD.")
+        return IOU_CUSTOM_DATE
 
 
 async def iou_received_person(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -442,63 +484,110 @@ async def iou_received_currency(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def iou_received_purpose(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives the purpose and asks for the date."""
+    """Receives the purpose and saves the new IOU."""
     context.user_data['iou_purpose'] = update.message.text
-    await update.message.reply_text("When did this happen?", reply_markup=keyboards.iou_date_keyboard())
-    return IOU_ASK_DATE
-
-
-async def iou_received_date_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the user's choice of 'Today' or 'Custom Date' for an IOU."""
-    query = update.callback_query
-    await query.answer()
-    choice = query.data
-
-    if choice == 'iou_date_today':
-        return await save_iou_and_end(update, context)
-    elif choice == 'iou_date_custom':
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text="Please enter the date and time in YYYY-MM-DD HH:MM format (e.g., 2023-08-25 15:30)."
-        )
-        return IOU_CUSTOM_DATE
-
-
-async def iou_received_custom_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Parses the custom date and time for an IOU."""
-    date_str = update.message.text
-    try:
-        dt_object = datetime.strptime(date_str, '%Y-%m-%d %H:%M')
-        context.user_data['timestamp'] = dt_object.isoformat()
-        return await save_iou_and_end(update, context)
-    except ValueError:
-        await update.message.reply_text("Invalid format. Please use YYYY-MM-DD HH:MM format.")
-        return IOU_CUSTOM_DATE
-
-
-async def save_iou_and_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Gathers all IOU data and saves it via API call."""
     debt_data = {
         "type": context.user_data['iou_type'],
         "person": context.user_data['iou_person'],
         "amount": context.user_data['iou_amount'],
         "currency": context.user_data['iou_currency'],
-        "purpose": context.user_data['iou_purpose']
+        "purpose": context.user_data['iou_purpose'],
+        "timestamp": context.user_data.get('timestamp')
     }
-    if 'timestamp' in context.user_data:
-        debt_data['timestamp'] = context.user_data['timestamp']
-
     response = api_client.add_debt(debt_data)
     base_text = "✅ Debt successfully recorded!" if response else "❌ Failed to record debt."
     summary_data = api_client.get_balance_summary()
     summary_text = format_summary_message(summary_data)
-
-    message_to_use = update.callback_query.message if update.callback_query else update.message
-    await message_to_use.reply_text(
+    await update.message.reply_text(
         base_text + summary_text,
         parse_mode='HTML',
         reply_markup=keyboards.main_menu_keyboard()
     )
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+# --- Set Reminder Conversation ---
+@restricted
+async def set_reminder_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Starts the conversation to set a new reminder."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data.clear()
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="What would you like to be reminded of?"
+    )
+    return REMINDER_PURPOSE
+
+
+async def received_reminder_purpose(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives the reminder purpose and asks for the date."""
+    context.user_data['reminder_purpose'] = update.message.text
+    await update.message.reply_text(
+        "When should I remind you?",
+        reply_markup=keyboards.reminder_date_keyboard()
+    )
+    return REMINDER_ASK_DATE
+
+
+async def received_reminder_date_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the date choice for a reminder."""
+    query = update.callback_query
+    await query.answer()
+    choice = query.data.split('_')[-1]
+
+    if choice == 'custom':
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text="Please enter the date in YYYY-MM-DD format.")
+        return REMINDER_CUSTOM_DATE
+
+    try:
+        days = int(choice)
+        reminder_dt = datetime.combine(datetime.utcnow().date() + timedelta(days=days), time(9, 0))  # 9 AM
+        context.user_data['reminder_date'] = reminder_dt.isoformat()
+        return await save_reminder_and_end(update, context)
+    except (ValueError, TypeError):
+        await context.bot.send_message(chat_id=query.message.chat_id, text="Invalid choice. Please try again.")
+        return REMINDER_ASK_DATE
+
+
+async def received_reminder_custom_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the custom date input for a reminder."""
+    date_str = update.message.text
+    try:
+        # Combine date with a fixed time (e.g., 9 AM)
+        custom_dt = datetime.combine(datetime.strptime(date_str, "%Y-%m-%d").date(), time(9, 0))
+        context.user_data['reminder_date'] = custom_dt.isoformat()
+        return await save_reminder_and_end(update, context)
+    except ValueError:
+        await update.message.reply_text("Invalid format. Please use YYYY-MM-DD.")
+        return REMINDER_CUSTOM_DATE
+
+
+async def save_reminder_and_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Saves the reminder and ends the conversation."""
+    reminder_data = {
+        "purpose": context.user_data['reminder_purpose'],
+        "reminder_date": context.user_data['reminder_date'],
+        "chat_id": update.effective_chat.id
+    }
+    response = api_client.add_reminder(reminder_data)
+
+    message_to_use = update.callback_query.message if update.callback_query else update.message
+
+    if response:
+        reminder_date_obj = datetime.fromisoformat(context.user_data['reminder_date'])
+        await message_to_use.reply_text(
+            f"✅ Got it! I will remind you on {reminder_date_obj.strftime('%d %b %Y')}.",
+            reply_markup=keyboards.main_menu_keyboard()
+        )
+    else:
+        await message_to_use.reply_text(
+            "❌ Sorry, I couldn't set that reminder. Please try again.",
+            reply_markup=keyboards.main_menu_keyboard()
+        )
+
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -576,21 +665,17 @@ async def received_forgot_day(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Receives the day and asks for the transaction type."""
     query = update.callback_query
     await query.answer()
-    choice = query.data
+    choice = query.data.split('_')[-1]
 
-    if choice == 'forgot_day_custom':
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text="Please enter the date in YYYY-MM-DD format."
-        )
+    if choice == 'custom':
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text="Please enter the date in YYYY-MM-DD format.")
         return FORGOT_CUSTOM_DATE
 
-    days_ago = int(choice.split('_')[-1])
-    forgotten_datetime = datetime.combine(
-        datetime.utcnow().date() - timedelta(days=days_ago),
-        time(12, 0)
-    )
+    days_ago = int(choice)
+    forgotten_datetime = datetime.combine(datetime.utcnow().date() - timedelta(days=days_ago), time(12, 0))
     context.user_data['timestamp'] = forgotten_datetime.isoformat()
+
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text="Got it. Was it an expense or an income?",
@@ -600,20 +685,18 @@ async def received_forgot_day(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def received_forgot_custom_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Parses a custom date for a forgotten transaction."""
+    """Handles the custom date input for a forgotten log."""
     date_str = update.message.text
     try:
-        dt_object = datetime.strptime(date_str, '%Y-%m-%d')
-        # Set a default time to avoid timezone issues
-        final_dt = dt_object.replace(hour=12, minute=0)
-        context.user_data['timestamp'] = final_dt.isoformat()
+        custom_dt = datetime.combine(datetime.strptime(date_str, "%Y-%m-%d").date(), time(12, 0))
+        context.user_data['timestamp'] = custom_dt.isoformat()
         await update.message.reply_text(
             "Got it. Was it an expense or an income?",
             reply_markup=keyboards.forgot_type_keyboard()
         )
         return FORGOT_TYPE
     except ValueError:
-        await update.message.reply_text("Invalid format. Please use YYYY-MM-DD format.")
+        await update.message.reply_text("Invalid format. Please use YYYY-MM-DD.")
         return FORGOT_CUSTOM_DATE
 
 
@@ -793,12 +876,12 @@ rate_conversation_handler = ConversationHandler(
 iou_conversation_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(iou_start, pattern='^(iou_lent|iou_borrowed)$')],
     states={
+        IOU_ASK_DATE: [CallbackQueryHandler(iou_received_date_choice, pattern='^iou_date_')],
+        IOU_CUSTOM_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_received_custom_date)],
         IOU_PERSON: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_received_person)],
         IOU_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_received_amount)],
         IOU_CURRENCY: [CallbackQueryHandler(iou_received_currency, pattern='^curr_')],
         IOU_PURPOSE: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_received_purpose)],
-        IOU_ASK_DATE: [CallbackQueryHandler(iou_received_date_choice, pattern='^iou_date_')],
-        IOU_CUSTOM_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_received_custom_date)],
     },
     fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
     per_message=False
@@ -809,6 +892,17 @@ set_balance_conversation_handler = ConversationHandler(
     states={
         SETBALANCE_ACCOUNT: [CallbackQueryHandler(received_balance_account, pattern='^set_balance_')],
         SETBALANCE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_balance_amount)]
+    },
+    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
+    per_message=False
+)
+
+reminder_conversation_handler = ConversationHandler(
+    entry_points=[CallbackQueryHandler(set_reminder_start, pattern='^set_reminder_start$')],
+    states={
+        REMINDER_PURPOSE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_reminder_purpose)],
+        REMINDER_ASK_DATE: [CallbackQueryHandler(received_reminder_date_choice, pattern='^remind_date_')],
+        REMINDER_CUSTOM_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_reminder_custom_date)],
     },
     fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
     per_message=False

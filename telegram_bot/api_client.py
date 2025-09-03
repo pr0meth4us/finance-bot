@@ -7,17 +7,6 @@ load_dotenv()
 BASE_URL = os.getenv("WEB_SERVICE_URL")
 
 
-def set_reminder(data):
-    """Sends a request to the backend to schedule a reminder."""
-    try:
-        res = requests.post(f"{BASE_URL}/reminders/add", json=data, timeout=10)
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        print(f"API Error setting reminder: {e}")
-        return None
-
-
 def get_balance_summary():
     try:
         res = requests.get(f"{BASE_URL}/summary/balance", timeout=10)
@@ -35,6 +24,16 @@ def add_debt(data):
         return res.json()
     except requests.exceptions.RequestException as e:
         print(f"API Error adding debt: {e}")
+        return None
+
+def add_reminder(data):
+    """Sends a new reminder to the backend."""
+    try:
+        res = requests.post(f"{BASE_URL}/reminders/", json=data, timeout=10)
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error adding reminder: {e}")
         return None
 
 

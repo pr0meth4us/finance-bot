@@ -12,11 +12,27 @@ def main_menu_keyboard():
             InlineKeyboardButton("🤔 Forgot to Log?", callback_data='forgot_log_start'),
             InlineKeyboardButton("🔍 Quick Check", callback_data='quick_check'),
         ],
-        [InlineKeyboardButton("📊 Set Balance", callback_data='set_balance_start')],
+        [
+            InlineKeyboardButton("📊 Set Balance", callback_data='set_balance_start'),
+            InlineKeyboardButton("🔔 Set Reminder", callback_data='set_reminder_start')
+        ],
         [InlineKeyboardButton("📖 History", callback_data='history')],
         [InlineKeyboardButton("📈 Report", callback_data='report_menu')],
         [InlineKeyboardButton("⚙️ Update Rate", callback_data='update_rate')],
         [InlineKeyboardButton("🤝 IOU / Debts", callback_data='iou_menu')],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def reminder_date_keyboard():
+    """Keyboard for selecting a reminder date."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Tomorrow", callback_data='remind_date_1'),
+            InlineKeyboardButton("In 3 Days", callback_data='remind_date_3'),
+            InlineKeyboardButton("In 1 Week", callback_data='remind_date_7')
+        ],
+        [InlineKeyboardButton("🗓️ Custom Date", callback_data='remind_date_custom')],
+        [InlineKeyboardButton("❌ Cancel", callback_data='cancel_conversation')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -29,6 +45,18 @@ def forgot_day_keyboard():
             InlineKeyboardButton("2 Days Ago", callback_data='forgot_day_2')
         ],
         [InlineKeyboardButton("🗓️ Custom Date", callback_data='forgot_day_custom')],
+        [InlineKeyboardButton("❌ Cancel", callback_data='cancel_conversation')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def iou_date_keyboard():
+    """Keyboard for selecting an IOU date."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Today", callback_data='iou_date_today'),
+            InlineKeyboardButton("Yesterday", callback_data='iou_date_yesterday'),
+        ],
+        [InlineKeyboardButton("🗓️ Custom Date", callback_data='iou_date_custom')],
         [InlineKeyboardButton("❌ Cancel", callback_data='cancel_conversation')]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -76,17 +104,6 @@ def iou_menu_keyboard():
         [InlineKeyboardButton("⬅️ I Borrowed Money", callback_data='iou_borrowed')],
         [InlineKeyboardButton("📖 View Open Debts", callback_data='iou_view')],
         [InlineKeyboardButton("‹ Back to Main Menu", callback_data='start')],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def iou_date_keyboard():
-    """Keyboard to select the date for a new IOU."""
-    keyboard = [
-        [
-            InlineKeyboardButton("Today", callback_data='iou_date_today'),
-            InlineKeyboardButton("🗓️ Custom Date", callback_data='iou_date_custom')
-        ],
     ]
     return InlineKeyboardMarkup(keyboard)
 
