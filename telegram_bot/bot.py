@@ -40,8 +40,8 @@ def main():
     # IOU callbacks (New flow)
     app.add_handler(CallbackQueryHandler(handlers.iou_menu, pattern='^iou_menu$'))
     app.add_handler(CallbackQueryHandler(handlers.iou_view, pattern='^iou_view$'))
-    app.add_handler(CallbackQueryHandler(handlers.iou_person_detail, pattern='^iou_person_'))
-    app.add_handler(CallbackQueryHandler(handlers.iou_detail, pattern='^iou_detail_'))
+    app.add_handler(CallbackQueryHandler(handlers.iou_person_detail, pattern='^iou:person:'))
+    app.add_handler(CallbackQueryHandler(handlers.iou_detail, pattern='^iou:detail:'))
 
 
     print("🚀 Bot is running...")
