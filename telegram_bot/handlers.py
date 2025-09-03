@@ -21,8 +21,8 @@ from collections import defaultdict
     REPAY_LUMP_AMOUNT,
     SETBALANCE_ACCOUNT, SETBALANCE_AMOUNT,
     FORGOT_DATE, FORGOT_CUSTOM_DATE, FORGOT_TYPE,
-    REMINDER_PURPOSE, REMINDER_ASK_DATE, REMINDER_CUSTOM_DATE
-) = range(22)
+    REMINDER_PURPOSE, REMINDER_ASK_DATE, REMINDER_CUSTOM_DATE, REMINDER_ASK_TIME
+) = range(23)
 
 
 # --- Helper Function ---
@@ -544,9 +544,11 @@ async def received_reminder_date_choice(update: Update, context: ContextTypes.DE
 
     try:
         days = int(choice)
-        reminder_dt = datetime.combine(datetime.utcnow().date() + timedelta(days=days), time(9, 0))  # 9 AM
-        context.user_data['reminder_date'] = reminder_dt.isoformat()
-        return await save_reminder_and_end(update, context)
+        reminder_date = datetime.utcnow().date() + timedelta(days=days)
+        context.user_data['reminder_date_part'] = reminder_date
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text="Got it. And at what time? (e.g., 09:00, 17:30)")
+        return REMINDER_ASK_TIME
     except (ValueError, TypeError):
         await context.bot.send_message(chat_id=query.message.chat_id, text="Invalid choice. Please try again.")
         return REMINDER_ASK_DATE
@@ -556,35 +558,54 @@ async def received_reminder_custom_date(update: Update, context: ContextTypes.DE
     """Handles the custom date input for a reminder."""
     date_str = update.message.text
     try:
-        # Combine date with a fixed time (e.g., 9 AM)
-        custom_dt = datetime.combine(datetime.strptime(date_str, "%Y-%m-%d").date(), time(9, 0))
-        context.user_data['reminder_date'] = custom_dt.isoformat()
-        return await save_reminder_and_end(update, context)
+        custom_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        context.user_data['reminder_date_part'] = custom_date
+        await update.message.reply_text("Got it. And at what time? (e.g., 09:00, 17:30)")
+        return REMINDER_ASK_TIME
     except ValueError:
         await update.message.reply_text("Invalid format. Please use YYYY-MM-DD.")
         return REMINDER_CUSTOM_DATE
 
 
-async def save_reminder_and_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Saves the reminder and ends the conversation."""
+async def received_reminder_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives the time, combines it with the date, and saves the reminder."""
+    time_str = update.message.text
+    try:
+        reminder_time = datetime.strptime(time_str, "%H:%M").time()
+        reminder_date = context.user_data['reminder_date_part']
+
+        # Combine date and time into a single datetime object
+        final_reminder_dt = datetime.combine(reminder_date, reminder_time)
+
+        # Save to user_data and call the final save function
+        context.user_data['reminder_datetime'] = final_reminder_dt.isoformat()
+        return await _save_reminder_and_confirm(update, context)
+    except ValueError:
+        await update.message.reply_text("Invalid time format. Please use HH:MM (24-hour format, e.g., 09:00 or 17:30).")
+        return REMINDER_ASK_TIME
+
+
+async def _save_reminder_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Helper function to save the reminder and end the conversation."""
     reminder_data = {
         "purpose": context.user_data['reminder_purpose'],
-        "reminder_date": context.user_data['reminder_date'],
+        "reminder_datetime": context.user_data['reminder_datetime'],
         "chat_id": update.effective_chat.id
     }
     response = api_client.add_reminder(reminder_data)
 
-    message_to_use = update.callback_query.message if update.callback_query else update.message
+    message_to_use = update.message
 
-    if response:
-        reminder_date_obj = datetime.fromisoformat(context.user_data['reminder_date'])
+    if response and 'error' not in response:
+        reminder_date_obj = datetime.fromisoformat(context.user_data['reminder_datetime'])
         await message_to_use.reply_text(
-            f"✅ Got it! I will remind you on {reminder_date_obj.strftime('%d %b %Y')}.",
+            f"✅ Got it! I will remind you on {reminder_date_obj.strftime('%d %b %Y at %H:%M')}.",
             reply_markup=keyboards.main_menu_keyboard()
         )
     else:
+        error_msg = response.get('error', 'Please try again.') if response else 'Please try again.'
         await message_to_use.reply_text(
-            "❌ Sorry, I couldn't set that reminder. Please try again.",
+            f"❌ Sorry, I couldn't set that reminder. {error_msg}",
             reply_markup=keyboards.main_menu_keyboard()
         )
 
@@ -903,6 +924,7 @@ reminder_conversation_handler = ConversationHandler(
         REMINDER_PURPOSE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_reminder_purpose)],
         REMINDER_ASK_DATE: [CallbackQueryHandler(received_reminder_date_choice, pattern='^remind_date_')],
         REMINDER_CUSTOM_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_reminder_custom_date)],
+        REMINDER_ASK_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_reminder_time)],
     },
     fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
     per_message=False
