@@ -253,12 +253,21 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     parts = query.data.split('_')
-    person_name = parts[2]
-    currency = parts[3]
+
+    # --- FIX: Robustly parse person and currency from callback data ---
+    if len(parts) < 4:
+        await query.edit_message_text("Error: Invalid or outdated button. Please go back and try again.",
+                                      reply_markup=keyboards.iou_menu_keyboard())
+        return
+
+    currency = parts[-1]
+    person_name = '_'.join(parts[2:-1])
+    # --- END FIX ---
 
     person_debts = api_client.get_debts_by_person_and_currency(person_name, currency)
     if not person_debts:
-        await query.edit_message_text(f"❌ Could not find any open {currency} debts for {person_name}.", reply_markup=keyboards.iou_menu_keyboard())
+        await query.edit_message_text(f"❌ Could not find any open {currency} debts for {person_name}.",
+                                      reply_markup=keyboards.iou_menu_keyboard())
         return
 
     total = sum(d['remainingAmount'] for d in person_debts)
@@ -282,7 +291,16 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     parts = query.data.split('_')
-    debt_id, person_name, currency = parts[2], parts[3], parts[4]
+
+    # --- FIX: Robustly parse callback data ---
+    if len(parts) < 5:
+        await query.edit_message_text("Error: Invalid or outdated button. Please go back and try again.",
+                                      reply_markup=keyboards.iou_menu_keyboard())
+        return
+    debt_id = parts[2]
+    currency = parts[-1]
+    person_name = '_'.join(parts[3:-1])
+    # --- END FIX ---
 
     debt = api_client.get_debt_details(debt_id)
     if not debt:
@@ -317,7 +335,17 @@ async def repay_lump_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     parts = query.data.split('_')
-    person_name, currency = parts[2], parts[3]
+
+    # --- FIX: Robustly parse callback data ---
+    if len(parts) < 4:
+        await query.edit_message_text("Error: Invalid or outdated button. Please go back and try again.",
+                                      reply_markup=keyboards.iou_menu_keyboard())
+        return ConversationHandler.END
+
+    currency = parts[-1]
+    person_name = '_'.join(parts[2:-1])
+    # --- END FIX ---
+
     context.user_data['lump_repay_person'] = person_name
     context.user_data['lump_repay_currency'] = currency
 
@@ -335,7 +363,7 @@ async def received_lump_repayment_amount(update: Update, context: ContextTypes.D
         response = api_client.record_lump_sum_repayment(person, currency, amount)
 
         if 'error' in response:
-             base_text = f"❌ Error: {response['error']}"
+            base_text = f"❌ Error: {response['error']}"
         else:
             base_text = f"✅ {response['message']}"
 
@@ -364,7 +392,8 @@ async def iou_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     context.user_data['iou_type'] = 'lent' if query.data == 'iou_lent' else 'borrowed'
 
-    prompt = "Who did you lend money to?" if context.user_data['iou_type'] == 'lent' else "Who did you borrow money from?"
+    prompt = "Who did you lend money to?" if context.user_data[
+                                                 'iou_type'] == 'lent' else "Who did you borrow money from?"
     await query.edit_message_text(prompt)
     return IOU_PERSON
 
