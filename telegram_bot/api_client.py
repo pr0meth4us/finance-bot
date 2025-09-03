@@ -7,6 +7,17 @@ load_dotenv()
 BASE_URL = os.getenv("WEB_SERVICE_URL")
 
 
+def set_reminder(data):
+    """Sends a request to the backend to schedule a reminder."""
+    try:
+        res = requests.post(f"{BASE_URL}/reminders/add", json=data, timeout=10)
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error setting reminder: {e}")
+        return None
+
+
 def get_balance_summary():
     try:
         res = requests.get(f"{BASE_URL}/summary/balance", timeout=10)
@@ -70,7 +81,6 @@ def record_lump_sum_repayment(person_name, currency, amount):
         return res.json()
     except requests.exceptions.RequestException as e:
         print(f"API Error recording lump-sum repayment: {e}")
-        # Try to parse error message from backend if available
         try:
             return e.response.json()
         except:

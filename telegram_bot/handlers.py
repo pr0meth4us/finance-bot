@@ -12,6 +12,7 @@ import api_client
 from datetime import datetime, timedelta, time
 from decorators import restricted
 from collections import defaultdict
+import pytz
 
 # --- Conversation States ---
 (
@@ -20,8 +21,9 @@ from collections import defaultdict
     IOU_PERSON, IOU_AMOUNT, IOU_CURRENCY, IOU_PURPOSE,
     REPAY_LUMP_AMOUNT,
     SETBALANCE_ACCOUNT, SETBALANCE_AMOUNT,
-    FORGOT_DATE, FORGOT_TYPE
-) = range(16)
+    FORGOT_DATE, FORGOT_TYPE,
+    REMINDER_MESSAGE, REMINDER_TIME
+) = range(18)
 
 
 # --- Helper Function ---
@@ -84,6 +86,74 @@ async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML',
         reply_markup=keyboards.main_menu_keyboard()
     )
+
+
+# --- Reminder Conversation ---
+@restricted
+async def set_reminder_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Starts the conversation to set a new reminder."""
+    query = update.callback_query
+    await query.answer()
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="What do you want to be reminded of?"
+    )
+    return REMINDER_MESSAGE
+
+
+async def received_reminder_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives the reminder message and asks for the time."""
+    context.user_data['reminder_message'] = update.message.text
+    await update.message.reply_text(
+        "When should I remind you?",
+        reply_markup=keyboards.reminder_time_keyboard()
+    )
+    return REMINDER_TIME
+
+
+async def received_reminder_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives the time, schedules the reminder, and ends the conversation."""
+    query = update.callback_query
+    await query.answer()
+
+    time_choice = query.data.split('_')[-1]
+
+    phnom_penh_tz = pytz.timezone('Asia/Phnom_Penh')
+    now = datetime.now(phnom_penh_tz)
+    remind_at = None
+
+    if time_choice == '1h':
+        remind_at = now + timedelta(hours=1)
+    elif time_choice == '3h':
+        remind_at = now + timedelta(hours=3)
+    elif time_choice == 'tmrw':
+        tomorrow = now.date() + timedelta(days=1)
+        remind_at = phnom_penh_tz.localize(datetime.combine(tomorrow, time(9, 0)))
+    elif time_choice == '1w':
+        next_week = now.date() + timedelta(weeks=1)
+        remind_at = phnom_penh_tz.localize(datetime.combine(next_week, time(9, 0)))
+
+    if remind_at:
+        payload = {
+            "chat_id": query.message.chat_id,
+            "message": context.user_data['reminder_message'],
+            "remind_at": remind_at.isoformat()
+        }
+
+        response = api_client.set_reminder(payload)
+
+        if response and 'error' not in response:
+            formatted_time = remind_at.strftime('%d %b %Y at %I:%M %p')
+            text = f"✅ Got it! I will remind you to:\n\n*\"{context.user_data['reminder_message']}\"*\n\non {formatted_time}."
+            await context.bot.send_message(chat_id=query.message.chat_id, text=text,
+                                           reply_markup=keyboards.main_menu_keyboard(), parse_mode='Markdown')
+        else:
+            await context.bot.send_message(chat_id=query.message.chat_id,
+                                           text="❌ Sorry, I couldn't set that reminder. Please try again.",
+                                           reply_markup=keyboards.main_menu_keyboard())
+
+    context.user_data.clear()
+    return ConversationHandler.END
 
 
 # --- Report Generation ---
@@ -740,6 +810,16 @@ set_balance_conversation_handler = ConversationHandler(
     states={
         SETBALANCE_ACCOUNT: [CallbackQueryHandler(received_balance_account, pattern='^set_balance_')],
         SETBALANCE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_balance_amount)]
+    },
+    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
+    per_message=False
+)
+
+reminder_conversation_handler = ConversationHandler(
+    entry_points=[CallbackQueryHandler(set_reminder_start, pattern='^set_reminder_start$')],
+    states={
+        REMINDER_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_reminder_message)],
+        REMINDER_TIME: [CallbackQueryHandler(received_reminder_time, pattern='^reminder_time_')]
     },
     fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
     per_message=False

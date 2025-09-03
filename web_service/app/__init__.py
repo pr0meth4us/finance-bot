@@ -48,19 +48,23 @@ def create_app():
     from .analytics.routes import analytics_bp
     from .transactions.routes import transactions_bp
     from .debts.routes import debts_bp
-    from .summary.routes import summary_bp  # * FIX: This line imports the summary blueprint *
+    from .summary.routes import summary_bp
+    from .reminders.routes import reminders_bp  # Import new blueprint
 
     app.register_blueprint(settings_bp)
     app.register_blueprint(analytics_bp)
     app.register_blueprint(transactions_bp)
     app.register_blueprint(debts_bp)
-    app.register_blueprint(summary_bp)  # * FIX: This line registers the summary blueprint *
+    app.register_blueprint(summary_bp)
+    app.register_blueprint(reminders_bp)  # Register new blueprint
 
     scheduler = BackgroundScheduler(daemon=True)
-    # Set timezone to Phnom Penh (ICT - Indochina Time)
     scheduler.add_job(send_daily_reminder_job, trigger=CronTrigger(hour=21, minute=0, timezone='Asia/Phnom_Penh'))
     scheduler.start()
     print("⏰ Daily reminder job scheduled for 21:00 Phnom Penh time.")
+
+    # Make the scheduler accessible to other parts of the app
+    app.scheduler = scheduler
 
     @app.route("/health")
     def health_check():
