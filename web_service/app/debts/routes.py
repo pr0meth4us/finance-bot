@@ -27,6 +27,10 @@ def add_debt():
     if not all(k in data for k in ['type', 'person', 'amount', 'currency']):
         return jsonify({'error': 'Missing required fields'}), 400
 
+    # Use provided timestamp or default to now
+    timestamp_str = data.get('timestamp')
+    created_at = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.utcnow()
+
     amount = float(data['amount'])
     debt = {
         "type": data['type'],
@@ -37,17 +41,18 @@ def add_debt():
         "purpose": data.get("purpose", ""),
         "status": "open",
         "repayments": [],
-        "created_at": datetime.utcnow()
+        "created_at": created_at
     }
     result = current_app.db.debts.insert_one(debt)
 
+    # Create a corresponding transaction with the same timestamp
     account_name = "USD Account" if data['currency'] == "USD" else "KHR Account"
     tx = {
         "amount": amount,
         "currency": data['currency'],
         "accountName": account_name,
         "description": f"Loan related to {data['person']} for {data.get('purpose', 'N/A')}",
-        "timestamp": datetime.utcnow()
+        "timestamp": created_at
     }
 
     if data['type'] == 'lent':

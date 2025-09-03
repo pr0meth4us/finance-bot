@@ -12,28 +12,11 @@ def main_menu_keyboard():
             InlineKeyboardButton("🤔 Forgot to Log?", callback_data='forgot_log_start'),
             InlineKeyboardButton("🔍 Quick Check", callback_data='quick_check'),
         ],
-        [InlineKeyboardButton("⏰ Set Reminder", callback_data='set_reminder_start')],
         [InlineKeyboardButton("📊 Set Balance", callback_data='set_balance_start')],
         [InlineKeyboardButton("📖 History", callback_data='history')],
         [InlineKeyboardButton("📈 Report", callback_data='report_menu')],
         [InlineKeyboardButton("⚙️ Update Rate", callback_data='update_rate')],
         [InlineKeyboardButton("🤝 IOU / Debts", callback_data='iou_menu')],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def reminder_time_keyboard():
-    """Keyboard for selecting when to be reminded."""
-    keyboard = [
-        [
-            InlineKeyboardButton("In 1 Hour", callback_data='reminder_time_1h'),
-            InlineKeyboardButton("In 3 Hours", callback_data='reminder_time_3h')
-        ],
-        [
-            InlineKeyboardButton("Tomorrow (9 AM)", callback_data='reminder_time_tmrw'),
-            InlineKeyboardButton("Next week (9 AM)", callback_data='reminder_time_1w')
-        ],
-        [InlineKeyboardButton("❌ Cancel", callback_data='cancel_conversation')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -45,6 +28,7 @@ def forgot_day_keyboard():
             InlineKeyboardButton("Yesterday", callback_data='forgot_day_1'),
             InlineKeyboardButton("2 Days Ago", callback_data='forgot_day_2')
         ],
+        [InlineKeyboardButton("🗓️ Custom Date", callback_data='forgot_day_custom')],
         [InlineKeyboardButton("❌ Cancel", callback_data='cancel_conversation')]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -96,12 +80,24 @@ def iou_menu_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
+def iou_date_keyboard():
+    """Keyboard to select the date for a new IOU."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Today", callback_data='iou_date_today'),
+            InlineKeyboardButton("🗓️ Custom Date", callback_data='iou_date_custom')
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 def iou_list_keyboard(grouped_debts):
     """Creates a keyboard for debts grouped by person and currency."""
     keyboard = []
     lent = [d for d in grouped_debts if d['type'] == 'lent']
     borrowed = [d for d in grouped_debts if d['type'] == 'borrowed']
 
+    # Using ':' as a safer separator for callback data
     if lent:
         for debt in lent:
             label = f"Owed by {debt['person']}: {debt['totalAmount']:,.2f} {debt['currency']} ({debt['count']})"
