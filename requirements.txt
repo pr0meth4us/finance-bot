@@ -12,3 +12,4 @@ certifi
 # --- Bot ---
 python-telegram-bot
 requests
+pytz
