@@ -7,13 +7,14 @@ load_dotenv()
 BASE_URL = os.getenv("WEB_SERVICE_URL")
 
 
-def get_balance_summary():
+def get_detailed_summary():
+    """Fetches the new detailed summary with balance, debts, and period activity."""
     try:
-        res = requests.get(f"{BASE_URL}/summary/balance", timeout=10)
+        res = requests.get(f"{BASE_URL}/summary/detailed", timeout=10)
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error fetching summary: {e}")
+        print(f"API Error fetching detailed summary: {e}")
         return None
 
 

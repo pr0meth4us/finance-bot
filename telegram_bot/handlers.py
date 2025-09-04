@@ -27,14 +27,16 @@ from collections import defaultdict
 
 # --- Helper Function ---
 def format_summary_message(summary_data):
-    """Formats the summary data into a readable string with separated currencies for debts."""
+    """Formats the detailed summary data into a readable string."""
     if not summary_data:
         return ""
 
+    # --- Balances ---
     khr_bal = summary_data.get('balances', {}).get('KHR', 0)
     usd_bal = summary_data.get('balances', {}).get('USD', 0)
-    balance_text = f"💵 {usd_bal:,.2f} USD\n៛ {khr_bal:,.0f} KHR"
+    balance_text = f"<b>Balances:</b>\n💵 {usd_bal:,.2f} USD\n៛ {khr_bal:,.0f} KHR"
 
+    # --- Debts ---
     owed_to_you_data = summary_data.get('debts_owed_to_you', [])
     owed_to_you_usd = next((item['total'] for item in owed_to_you_data if item['_id'] == 'USD'), 0)
     owed_to_you_khr = next((item['total'] for item in owed_to_you_data if item['_id'] == 'KHR'), 0)
@@ -45,12 +47,39 @@ def format_summary_message(summary_data):
     owed_by_you_khr = next((item['total'] for item in owed_by_you_data if item['_id'] == 'KHR'), 0)
     owed_by_you_text = f"    💵 {owed_by_you_usd:,.2f} USD\n    ៛ {owed_by_you_khr:,.0f} KHR"
 
+    debt_text = f"<b>Debts:</b>\n➡️ <b>You are owed:</b>\n{owed_to_you_text}\n⬅️ <b>You owe:</b>\n{owed_by_you_text}"
+
+    # --- Activity Periods ---
+    def format_period_line(period_data):
+        """Helper to format a single period's income/expense line."""
+        income = period_data.get('income', {})
+        expense = period_data.get('expense', {})
+
+        income_parts = []
+        if income.get('USD', 0) > 0: income_parts.append(f"{income['USD']:,.2f} USD")
+        if income.get('KHR', 0) > 0: income_parts.append(f"{income['KHR']:,.0f} KHR")
+        income_str = ' & '.join(income_parts) if income_parts else "0"
+
+        expense_parts = []
+        if expense.get('USD', 0) > 0: expense_parts.append(f"{expense['USD']:,.2f} USD")
+        if expense.get('KHR', 0) > 0: expense_parts.append(f"{expense['KHR']:,.0f} KHR")
+        expense_str = ' & '.join(expense_parts) if expense_parts else "0"
+
+        return f"    ⬆️ In: {income_str}\n    ⬇️ Out: {expense_str}"
+
+    periods = summary_data.get('periods', {})
+    today_text = f"<b>Today:</b>\n{format_period_line(periods.get('today', {}))}"
+    this_week_text = f"<b>This Week:</b>\n{format_period_line(periods.get('this_week', {}))}"
+    this_month_text = f"<b>This Month:</b>\n{format_period_line(periods.get('this_month', {}))}"
+
+    activity_text = f"<b>Activity:</b>\n{today_text}\n{this_week_text}\n{this_month_text}"
+
+    # --- Combine All Parts ---
     return (
         f"\n\n--- Your Current Status ---\n"
-        f"<b>Balances:</b>\n{balance_text}\n\n"
-        f"<b>Debts:</b>\n"
-        f"➡️ <b>You are owed:</b>\n{owed_to_you_text}\n"
-        f"⬅️ <b>You owe:</b>\n{owed_by_you_text}"
+        f"{balance_text}\n\n"
+        f"{debt_text}\n\n"
+        f"{activity_text}"
     )
 
 
@@ -75,7 +104,7 @@ async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer("Fetching summary...")
 
-    summary_data = api_client.get_balance_summary()
+    summary_data = api_client.get_detailed_summary()
     summary_text = format_summary_message(summary_data)
     text = "🔍 Here is your quick summary:" + summary_text
 
@@ -103,6 +132,7 @@ async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @restricted
 async def generate_report_for_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Fetches and sends the analytics chart for the selected period."""
+    # This handler sends a photo, so the flow is slightly different and kept as is.
     query = update.callback_query
     await query.answer()
     period = query.data.split('_')[-1]
@@ -148,7 +178,7 @@ async def generate_report_for_period(update: Update, context: ContextTypes.DEFAU
 # --- Rate Update Conversation ---
 @restricted
 async def update_rate_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Starts the conversation to update the exchange rate."""
+    # This handler is simple and kept as is.
     query = update.callback_query
     await query.answer()
     await context.bot.send_message(
@@ -159,7 +189,7 @@ async def update_rate_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def received_new_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives and saves the new exchange rate."""
+    # This handler is simple and kept as is.
     try:
         new_rate = float(update.message.text)
         response = api_client.update_exchange_rate(new_rate)
@@ -176,7 +206,7 @@ async def received_new_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Transaction History & Management ---
 @restricted
 async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays a list of recent transactions to manage."""
+    # This handler is simple and kept as is.
     query = update.callback_query
     await query.answer()
     transactions = api_client.get_recent_transactions()
@@ -196,7 +226,7 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @restricted
 async def manage_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Shows options for a selected transaction."""
+    # This handler is simple and kept as is.
     query = update.callback_query
     await query.answer()
     tx_id = query.data.split('_')[-1]
@@ -210,7 +240,7 @@ async def manage_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 @restricted
 async def delete_transaction_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Asks for confirmation before deleting a transaction."""
+    # This handler is simple and kept as is.
     query = update.callback_query
     await query.answer()
     tx_id = query.data.split('_')[-1]
@@ -223,7 +253,7 @@ async def delete_transaction_prompt(update: Update, context: ContextTypes.DEFAUL
 
 @restricted
 async def delete_transaction_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Deletes the transaction after confirmation."""
+    # This handler is simple and kept as is.
     query = update.callback_query
     await query.answer()
     tx_id = query.data.split('_')[-1]
@@ -243,7 +273,7 @@ async def delete_transaction_confirm(update: Update, context: ContextTypes.DEFAU
 # --- IOU / Debt Management ---
 @restricted
 async def iou_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the IOU management menu."""
+    # This handler is simple and kept as is.
     query = update.callback_query
     await query.answer()
     await context.bot.send_message(
@@ -255,7 +285,7 @@ async def iou_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @restricted
 async def iou_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Shows a summary list of all open debts, grouped by person."""
+    # This handler is simple and kept as is.
     query = update.callback_query
     await query.answer()
     grouped_debts = api_client.get_open_debts()
@@ -276,7 +306,7 @@ async def iou_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @restricted
 async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Shows all individual debts for a specific person and currency."""
+    # This handler is simple and kept as is.
     query = update.callback_query
     await query.answer()
     parts = query.data.split(':')
@@ -314,7 +344,7 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @restricted
 async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Shows details for a single debt, including the date."""
+    # This handler is simple and kept as is.
     query = update.callback_query
     await query.answer()
     parts = query.data.split(':')
@@ -356,7 +386,7 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Lump-Sum Repayment Conversation ---
 @restricted
 async def repay_lump_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Starts the lump-sum repayment conversation."""
+    # This handler is simple and kept as is.
     query = update.callback_query
     await query.answer()
     parts = query.data.split(':')
@@ -379,7 +409,7 @@ async def repay_lump_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def received_lump_repayment_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives and processes the lump-sum repayment amount."""
+    # This handler is simple and kept as is.
     try:
         amount = float(update.message.text)
         person = context.user_data['lump_repay_person']
@@ -388,7 +418,7 @@ async def received_lump_repayment_amount(update: Update, context: ContextTypes.D
         response = api_client.record_lump_sum_repayment(person, currency, amount)
         base_text = f"✅ {response['message']}" if 'error' not in response else f"❌ Error: {response['error']}"
 
-        summary_data = api_client.get_balance_summary()
+        summary_data = api_client.get_detailed_summary()
         summary_text = format_summary_message(summary_data)
 
         await update.message.reply_text(
@@ -407,7 +437,7 @@ async def received_lump_repayment_amount(update: Update, context: ContextTypes.D
 # --- IOU Add Conversation ---
 @restricted
 async def iou_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Starts the IOU conversation by asking for the date."""
+    # This handler is simple and kept as is.
     query = update.callback_query
     await query.answer()
     context.user_data.clear()
@@ -421,7 +451,6 @@ async def iou_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def iou_received_date_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the date choice for an IOU."""
     query = update.callback_query
     await query.answer()
     choice = query.data
@@ -444,7 +473,7 @@ async def iou_received_date_choice(update: Update, context: ContextTypes.DEFAULT
 
 
 async def iou_received_custom_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the custom date input for an IOU."""
+    # This handler is simple and kept as is.
     date_str = update.message.text
     try:
         custom_dt = datetime.combine(datetime.strptime(date_str, "%Y-%m-%d").date(), time(12, 0))
@@ -459,12 +488,14 @@ async def iou_received_custom_date(update: Update, context: ContextTypes.DEFAULT
 
 
 async def iou_received_person(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # This handler is simple and kept as is.
     context.user_data['iou_person'] = update.message.text
     await update.message.reply_text("How much?")
     return IOU_AMOUNT
 
 
 async def iou_received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # This handler is simple and kept as is.
     try:
         context.user_data['iou_amount'] = float(update.message.text)
         await update.message.reply_text("Which currency?", reply_markup=keyboards.currency_keyboard())
@@ -475,16 +506,19 @@ async def iou_received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def iou_received_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives the currency and asks for the purpose."""
+    """Receives the currency and asks for the purpose, confirming the choice."""
     query = update.callback_query
     await query.answer()
-    context.user_data['iou_currency'] = query.data.split('_')[1]
-    await context.bot.send_message(chat_id=query.message.chat_id, text="What was this for? (e.g., Lunch, Deposit)")
+    currency = query.data.split('_')[1]
+    context.user_data['iou_currency'] = currency
+
+    text = f"Currency: *{currency}*\n\nWhat was this for? (e.g., Lunch, Deposit)"
+    await context.bot.send_message(chat_id=query.message.chat_id, text=text, parse_mode='MarkdownV2')
     return IOU_PURPOSE
 
 
 async def iou_received_purpose(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives the purpose and saves the new IOU."""
+    # This handler is simple and kept as is.
     context.user_data['iou_purpose'] = update.message.text
     debt_data = {
         "type": context.user_data['iou_type'],
@@ -496,7 +530,7 @@ async def iou_received_purpose(update: Update, context: ContextTypes.DEFAULT_TYP
     }
     response = api_client.add_debt(debt_data)
     base_text = "✅ Debt successfully recorded!" if response else "❌ Failed to record debt."
-    summary_data = api_client.get_balance_summary()
+    summary_data = api_client.get_detailed_summary()
     summary_text = format_summary_message(summary_data)
     await update.message.reply_text(
         base_text + summary_text,
@@ -508,9 +542,9 @@ async def iou_received_purpose(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 # --- Set Reminder Conversation ---
+# This entire conversation flow is new or modified for confirmation messages.
 @restricted
 async def set_reminder_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Starts the conversation to set a new reminder."""
     query = update.callback_query
     await query.answer()
     context.user_data.clear()
@@ -522,7 +556,6 @@ async def set_reminder_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def received_reminder_purpose(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives the reminder purpose and asks for the date."""
     context.user_data['reminder_purpose'] = update.message.text
     await update.message.reply_text(
         "When should I remind you?",
@@ -532,22 +565,29 @@ async def received_reminder_purpose(update: Update, context: ContextTypes.DEFAUL
 
 
 async def received_reminder_date_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the date choice for a reminder."""
     query = update.callback_query
     await query.answer()
+
+    # Extract the button text for confirmation
+    button_text = ""
+    for row in query.message.reply_markup.inline_keyboard:
+        for button in row:
+            if button.callback_data == query.data:
+                button_text = button.text.replace("🗓️ ", "")
+
     choice = query.data.split('_')[-1]
 
     if choice == 'custom':
-        await context.bot.send_message(chat_id=query.message.chat_id,
-                                       text="Please enter the date in YYYY-MM-DD format.")
+        text = f"Date: *{button_text}*\n\nPlease enter the date in YYYY-MM-DD format."
+        await context.bot.send_message(chat_id=query.message.chat_id, text=text, parse_mode='MarkdownV2')
         return REMINDER_CUSTOM_DATE
 
     try:
         days = int(choice)
         reminder_date = datetime.utcnow().date() + timedelta(days=days)
         context.user_data['reminder_date_part'] = reminder_date
-        await context.bot.send_message(chat_id=query.message.chat_id,
-                                       text="Got it. And at what time? (e.g., 09:00, 17:30)")
+        text = f"Date: *{button_text}*\n\nGot it. And at what time? (e.g., 09:00, 17:30)"
+        await context.bot.send_message(chat_id=query.message.chat_id, text=text, parse_mode='MarkdownV2')
         return REMINDER_ASK_TIME
     except (ValueError, TypeError):
         await context.bot.send_message(chat_id=query.message.chat_id, text="Invalid choice. Please try again.")
@@ -555,7 +595,6 @@ async def received_reminder_date_choice(update: Update, context: ContextTypes.DE
 
 
 async def received_reminder_custom_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the custom date input for a reminder."""
     date_str = update.message.text
     try:
         custom_date = datetime.strptime(date_str, "%Y-%m-%d").date()
@@ -568,16 +607,11 @@ async def received_reminder_custom_date(update: Update, context: ContextTypes.DE
 
 
 async def received_reminder_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives the time, combines it with the date, and saves the reminder."""
     time_str = update.message.text
     try:
         reminder_time = datetime.strptime(time_str, "%H:%M").time()
         reminder_date = context.user_data['reminder_date_part']
-
-        # Combine date and time into a single datetime object
         final_reminder_dt = datetime.combine(reminder_date, reminder_time)
-
-        # Save to user_data and call the final save function
         context.user_data['reminder_datetime'] = final_reminder_dt.isoformat()
         return await _save_reminder_and_confirm(update, context)
     except ValueError:
@@ -586,7 +620,6 @@ async def received_reminder_time(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def _save_reminder_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Helper function to save the reminder and end the conversation."""
     reminder_data = {
         "purpose": context.user_data['reminder_purpose'],
         "reminder_datetime": context.user_data['reminder_datetime'],
@@ -616,7 +649,6 @@ async def _save_reminder_and_confirm(update: Update, context: ContextTypes.DEFAU
 # --- Set Initial Balance Conversation ---
 @restricted
 async def set_balance_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Starts the conversation to set an initial balance."""
     query = update.callback_query
     await query.answer()
     await context.bot.send_message(
@@ -628,21 +660,22 @@ async def set_balance_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def received_balance_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives the account choice and asks for the amount."""
     query = update.callback_query
     await query.answer()
     currency = query.data.split('_')[-1]
     context.user_data['currency'] = currency
     context.user_data['accountName'] = "USD Account" if currency == "USD" else "KHR Account"
+
+    text = f"Account: *{currency}*\n\nWhat is the total current balance for your {currency} Account?"
     await context.bot.send_message(
         chat_id=query.message.chat_id,
-        text=f"What is the total current balance for your {currency} Account?"
+        text=text,
+        parse_mode='MarkdownV2'
     )
     return SETBALANCE_AMOUNT
 
 
 async def received_balance_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives the amount and creates the 'Initial Balance' transaction."""
     try:
         amount = float(update.message.text)
         tx_data = {
@@ -654,7 +687,7 @@ async def received_balance_amount(update: Update, context: ContextTypes.DEFAULT_
         }
         api_client.add_transaction(tx_data)
         base_text = f"✅ Initial balance of {amount:,.2f} {context.user_data['currency']} set successfully!"
-        summary_data = api_client.get_balance_summary()
+        summary_data = api_client.get_detailed_summary()
         summary_text = format_summary_message(summary_data)
         await update.message.reply_text(
             base_text + summary_text,
@@ -671,7 +704,6 @@ async def received_balance_amount(update: Update, context: ContextTypes.DEFAULT_
 # --- Forgot to Log Conversation ---
 @restricted
 async def forgot_log_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Starts the conversation to log a transaction for a past day."""
     query = update.callback_query
     await query.answer()
     await context.bot.send_message(
@@ -683,30 +715,37 @@ async def forgot_log_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def received_forgot_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives the day and asks for the transaction type."""
     query = update.callback_query
     await query.answer()
+
+    button_text = ""
+    for row in query.message.reply_markup.inline_keyboard:
+        for button in row:
+            if button.callback_data == query.data:
+                button_text = button.text.replace("🗓️ ", "")
+
     choice = query.data.split('_')[-1]
 
     if choice == 'custom':
-        await context.bot.send_message(chat_id=query.message.chat_id,
-                                       text="Please enter the date in YYYY-MM-DD format.")
+        text = f"Date: *{button_text}*\n\nPlease enter the date in YYYY-MM-DD format."
+        await context.bot.send_message(chat_id=query.message.chat_id, text=text, parse_mode='MarkdownV2')
         return FORGOT_CUSTOM_DATE
 
     days_ago = int(choice)
     forgotten_datetime = datetime.combine(datetime.utcnow().date() - timedelta(days=days_ago), time(12, 0))
     context.user_data['timestamp'] = forgotten_datetime.isoformat()
 
+    text = f"Date: *{button_text}*\n\nGot it. Was it an expense or an income?"
     await context.bot.send_message(
         chat_id=query.message.chat_id,
-        text="Got it. Was it an expense or an income?",
+        text=text,
+        parse_mode='MarkdownV2',
         reply_markup=keyboards.forgot_type_keyboard()
     )
     return FORGOT_TYPE
 
 
 async def received_forgot_custom_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the custom date input for a forgotten log."""
     date_str = update.message.text
     try:
         custom_dt = datetime.combine(datetime.strptime(date_str, "%Y-%m-%d").date(), time(12, 0))
@@ -722,19 +761,21 @@ async def received_forgot_custom_date(update: Update, context: ContextTypes.DEFA
 
 
 async def received_forgot_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives the transaction type and proceeds to ask for the amount."""
     query = update.callback_query
     await query.answer()
+
+    button_text = "Expense" if "expense" in query.data else "Income"
     context.user_data['type'] = query.data.split('_')[-1]
     emoji = "💸" if context.user_data['type'] == 'expense' else "💰"
-    await context.bot.send_message(chat_id=query.message.chat_id, text=f"{emoji} Enter the amount:")
+
+    text = f"Type: *{button_text}*\n\nEnter the amount:"
+    await context.bot.send_message(chat_id=query.message.chat_id, text=text, parse_mode='MarkdownV2')
     return AMOUNT
 
 
 # --- Add Transaction Conversation (Shared Logic) ---
 @restricted
 async def add_transaction_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Starts the conversation to add an expense or income for today."""
     query = update.callback_query
     await query.answer()
     context.user_data['type'] = 'expense' if query.data == 'add_expense' else 'income'
@@ -744,7 +785,6 @@ async def add_transaction_start(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives the transaction amount."""
     try:
         context.user_data['amount'] = float(update.message.text)
         await update.message.reply_text("Which currency?", reply_markup=keyboards.currency_keyboard())
@@ -755,20 +795,21 @@ async def received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def received_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives the currency and shows the correct category keyboard."""
     query = update.callback_query
     await query.answer()
     currency = query.data.split('_')[1]
     context.user_data['currency'] = currency
     context.user_data['accountName'] = "USD Account" if currency == "USD" else "KHR Account"
+
     keyboard = keyboards.income_categories_keyboard() if context.user_data.get(
         'type') == 'income' else keyboards.expense_categories_keyboard()
-    await context.bot.send_message(chat_id=query.message.chat_id, text="Which category?", reply_markup=keyboard)
+    text = f"Currency: *{currency}*\n\nWhich category?"
+    await context.bot.send_message(chat_id=query.message.chat_id, text=text, parse_mode='MarkdownV2',
+                                   reply_markup=keyboard)
     return CATEGORY
 
 
 async def received_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives a predefined category or triggers the custom category flow."""
     query = update.callback_query
     await query.answer()
     category_choice = query.data.split('_')[1]
@@ -779,14 +820,13 @@ async def received_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return CUSTOM_CATEGORY
     else:
         context.user_data['categoryId'] = category_choice
-        await context.bot.send_message(chat_id=query.message.chat_id,
-                                       text="Great. Would you like to add a remark/description?",
+        text = f"Category: *{category_choice}*\n\nGreat. Would you like to add a remark/description?"
+        await context.bot.send_message(chat_id=query.message.chat_id, text=text, parse_mode='MarkdownV2',
                                        reply_markup=keyboards.ask_remark_keyboard())
         return ASK_REMARK
 
 
 async def received_custom_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives a manually typed custom category."""
     context.user_data['categoryId'] = update.message.text
     await update.message.reply_text("Great. Would you like to add a remark/description?",
                                     reply_markup=keyboards.ask_remark_keyboard())
@@ -794,31 +834,33 @@ async def received_custom_category(update: Update, context: ContextTypes.DEFAULT
 
 
 async def ask_remark(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Asks if the user wants to add a remark, or skips it."""
     query = update.callback_query
     await query.answer()
     choice = query.data.split('_')[1]
 
     if choice == 'yes':
-        await context.bot.send_message(chat_id=query.message.chat_id, text="Please type your remark.")
+        button_text = "Add Remark"
+        text = f"Selection: *{button_text}*\n\nPlease type your remark."
+        await context.bot.send_message(chat_id=query.message.chat_id, text=text, parse_mode='MarkdownV2')
         return REMARK
     else:
         context.user_data['description'] = ''
+        button_text = "Skip"
+        await context.bot.send_message(chat_id=query.message.chat_id, text=f"Selection: *{button_text}*",
+                                       parse_mode='MarkdownV2')
         return await save_transaction_and_end(update, context)
 
 
 async def received_remark(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives the optional remark text."""
     context.user_data['description'] = update.message.text
     return await save_transaction_and_end(update, context)
 
 
 async def save_transaction_and_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Saves transaction, then fetches and displays the summary."""
     response = api_client.add_transaction(context.user_data)
     message_to_use = update.callback_query.message if update.callback_query else update.message
     base_text = "✅ Transaction recorded successfully!" if response else "❌ Failed to record transaction."
-    summary_data = api_client.get_balance_summary()
+    summary_data = api_client.get_detailed_summary()
     summary_text = format_summary_message(summary_data)
     await message_to_use.reply_text(
         base_text + summary_text,
