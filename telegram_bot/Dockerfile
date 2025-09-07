@@ -1,18 +1,19 @@
-# Use an official Python runtime as a parent image
 FROM python:3.11-slim
 
-# Set the working directory in the container
 WORKDIR /app
 
-# Copy the requirements file first for caching
+RUN apt-get update && apt-get install -y tzdata &&
+
+ln -sf /usr/share/zoneinfo/Asia/Phnom_Penh /etc/localtime &&
+
+echo "Asia/Phnom_Penh" > /etc/timezone &&
+
+apt-get clean && rm -rf /var/lib/apt/lists/*
+
 COPY ../requirements.txt .
 
-# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# --- THIS IS THE FIX ---
-# Copy only the contents of the telegram_bot directory into the container's /app directory
 COPY ./telegram_bot .
 
-# Define the command to run your bot
 CMD ["python", "bot.py"]
