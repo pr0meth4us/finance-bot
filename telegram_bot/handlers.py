@@ -146,10 +146,8 @@ async def generate_report_for_period(update: Update, context: ContextTypes.DEFAU
     await query.answer()
     period = query.data.split('_')[-1]
 
-    # --- MODIFICATION START ---
     # Use timezone-aware date for "today" to match user's local timezone.
     today = datetime.now(PHNOM_PENH_TZ).date()
-    # --- MODIFICATION END ---
     start_date, end_date = None, None
 
     if period == "today":
@@ -472,15 +470,18 @@ async def iou_received_date_choice(update: Update, context: ContextTypes.DEFAULT
                                                  'iou_type'] == 'lent' else "Who did you borrow money from?"
 
     if choice == 'iou_date_today':
+        # No timestamp set here; backend will default to datetime.utcnow() for current time.
         await context.bot.send_message(chat_id=query.message.chat_id, text=prompt)
         return IOU_PERSON
     elif choice == 'iou_date_yesterday':
-        # --- MODIFICATION START ---
-        # Calculate "yesterday" based on local timezone, not UTC.
+        # --- REFINED MODIFICATION START ---
+        # Calculate "yesterday" based on local timezone date.
         local_today = datetime.now(PHNOM_PENH_TZ).date()
-        yesterday_dt = datetime.combine(local_today - timedelta(days=1), time(12, 0))
-        # --- MODIFICATION END ---
-        context.user_data['timestamp'] = yesterday_dt.isoformat()
+        local_yesterday = local_today - timedelta(days=1)
+        # Create a timezone-aware datetime object for local noon on that day.
+        aware_dt = datetime.combine(local_yesterday, time(12, 0), tzinfo=PHNOM_PENH_TZ)
+        context.user_data['timestamp'] = aware_dt.isoformat()
+        # --- REFINED MODIFICATION END ---
         await context.bot.send_message(chat_id=query.message.chat_id, text=prompt)
         return IOU_PERSON
     elif choice == 'iou_date_custom':
@@ -493,8 +494,13 @@ async def iou_received_custom_date(update: Update, context: ContextTypes.DEFAULT
     """Handles the custom date input for an IOU."""
     date_str = update.message.text
     try:
-        custom_dt = datetime.combine(datetime.strptime(date_str, "%Y-%m-%d").date(), time(12, 0))
-        context.user_data['timestamp'] = custom_dt.isoformat()
+        # --- REFINED MODIFICATION START ---
+        custom_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        # Create a timezone-aware datetime object for local noon on the custom date.
+        aware_dt = datetime.combine(custom_date, time(12, 0), tzinfo=PHNOM_PENH_TZ)
+        context.user_data['timestamp'] = aware_dt.isoformat()
+        # --- REFINED MODIFICATION END ---
+
         prompt = "Who did you lend money to?" if context.user_data[
                                                      'iou_type'] == 'lent' else "Who did you borrow money from?"
         await update.message.reply_text(prompt)
@@ -600,11 +606,9 @@ async def received_reminder_date_choice(update: Update, context: ContextTypes.DE
 
     try:
         days = int(choice)
-        # --- MODIFICATION START ---
         # Calculate future reminder date based on local timezone date.
         local_today = datetime.now(PHNOM_PENH_TZ).date()
         reminder_date = local_today + timedelta(days=days)
-        # --- MODIFICATION END ---
         context.user_data['reminder_date_part'] = reminder_date
         text = f"Date: <b>{button_text}</b>\n\nGot it. And at what time? (e.g., 09:00, 17:30)"
         await context.bot.send_message(chat_id=query.message.chat_id, text=text, parse_mode='HTML')
@@ -634,9 +638,12 @@ async def received_reminder_time(update: Update, context: ContextTypes.DEFAULT_T
         reminder_time = datetime.strptime(time_str, "%H:%M").time()
         reminder_date = context.user_data['reminder_date_part']
 
-        final_reminder_dt = datetime.combine(reminder_date, reminder_time)
-
-        context.user_data['reminder_datetime'] = final_reminder_dt.isoformat()
+        # --- REFINED MODIFICATION START ---
+        # Create timezone-aware datetime for the reminder schedule.
+        # This ensures the scheduler interprets the time correctly based on local time.
+        aware_reminder_dt = datetime.combine(reminder_date, reminder_time, tzinfo=PHNOM_PENH_TZ)
+        context.user_data['reminder_datetime'] = aware_reminder_dt.isoformat()
+        # --- REFINED MODIFICATION END ---
         return await _save_reminder_and_confirm(update, context)
     except ValueError:
         await update.message.reply_text("Invalid time format. Please use HH:MM (24-hour format, e.g., 09:00 or 17:30).")
@@ -655,11 +662,10 @@ async def _save_reminder_and_confirm(update: Update, context: ContextTypes.DEFAU
     message_to_use = update.message
 
     if response and 'error' not in response:
-        # Note: The reminder datetime itself might need to be localized before saving
-        # if the scheduler runs in UTC, but here we assume the scheduler logic handles naive datetimes correctly based on server TZ.
         reminder_date_obj = datetime.fromisoformat(context.user_data['reminder_datetime'])
+        # Format the display time back to local time for confirmation message.
         await message_to_use.reply_text(
-            f"✅ Got it! I will remind you on {reminder_date_obj.strftime('%d %b %Y at %H:%M')}.",
+            f"✅ Got it! I will remind you on {reminder_date_obj.astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y at %H:%M')}.",
             reply_markup=keyboards.main_menu_keyboard()
         )
     else:
@@ -759,12 +765,14 @@ async def received_forgot_day(update: Update, context: ContextTypes.DEFAULT_TYPE
         return FORGOT_CUSTOM_DATE
 
     days_ago = int(choice)
-    # --- MODIFICATION START ---
+    # --- REFINED MODIFICATION START ---
     # Calculate forgotten date based on local timezone date.
     local_today = datetime.now(PHNOM_PENH_TZ).date()
-    forgotten_datetime = datetime.combine(local_today - timedelta(days=days_ago), time(12, 0))
-    # --- MODIFICATION END ---
-    context.user_data['timestamp'] = forgotten_datetime.isoformat()
+    forgotten_date = local_today - timedelta(days=days_ago)
+    # Create a timezone-aware datetime object for local noon on that day.
+    aware_dt = datetime.combine(forgotten_date, time(12, 0), tzinfo=PHNOM_PENH_TZ)
+    context.user_data['timestamp'] = aware_dt.isoformat()
+    # --- REFINED MODIFICATION END ---
 
     text = f"Date: <b>{button_text}</b>\n\nGot it. Was it an expense or an income?"
     await context.bot.send_message(
@@ -779,8 +787,12 @@ async def received_forgot_day(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def received_forgot_custom_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     date_str = update.message.text
     try:
-        custom_dt = datetime.combine(datetime.strptime(date_str, "%Y-%m-%d").date(), time(12, 0))
-        context.user_data['timestamp'] = custom_dt.isoformat()
+        # --- REFINED MODIFICATION START ---
+        custom_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        # Create a timezone-aware datetime object for local noon on the custom date.
+        aware_dt = datetime.combine(custom_date, time(12, 0), tzinfo=PHNOM_PENH_TZ)
+        context.user_data['timestamp'] = aware_dt.isoformat()
+        # --- REFINED MODIFICATION END ---
         await update.message.reply_text(
             "Got it. Was it an expense or an income?",
             reply_markup=keyboards.forgot_type_keyboard()
