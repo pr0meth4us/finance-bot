@@ -1,25 +1,30 @@
+# Use an official Python runtime as a parent image
 FROM python:3.11-slim
 
+# Set the timezone for the container.
+# Replace "Asia/Phnom_Penh" with your desired timezone (e.g., "America/New_York", "Etc/UTC").
+ENV TZ=Asia/Phnom_Penh
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# Set the working directory inside the container
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y tzdata &&
+# Copy the requirements file from the repository root
+# Assuming this Dockerfile is inside the web_service directory
+COPY ../requirements.txt .
 
-ln -sf /usr/share/zoneinfo/Asia/Phnom_Penh /etc/localtime &&
-
-echo "Asia/Phnom_Penh" > /etc/timezone &&
-
-apt-get clean && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY web_service/ .
+# Copy the web_service directory contents to /app
+COPY . .
 
+# Make port 8000 available to the world outside this container
 EXPOSE 8000
 
+# Set environment variables
 ENV PYTHONPATH=/app
 ENV FLASK_APP=run.py
-ENV TZ=Asia/Phnom_Penh
 
+# Run the application using the run.py file directly
 CMD ["python", "run.py"]
