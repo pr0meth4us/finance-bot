@@ -1,3 +1,5 @@
+# --- Start of modified file: telegram_bot/handlers.py ---
+
 from telegram import Update
 from telegram.ext import (
     ContextTypes,
@@ -10,6 +12,10 @@ from telegram.ext import (
 import keyboards
 import api_client
 from datetime import datetime, timedelta, time
+# --- MODIFICATION START ---
+# Import ZoneInfo for timezone-aware calculations (Python 3.9+)
+from zoneinfo import ZoneInfo
+# --- MODIFICATION END ---
 from decorators import restricted
 from collections import defaultdict
 
@@ -24,6 +30,10 @@ from collections import defaultdict
     REMINDER_PURPOSE, REMINDER_ASK_DATE, REMINDER_CUSTOM_DATE, REMINDER_ASK_TIME
 ) = range(23)
 
+# --- MODIFICATION START ---
+# Define the local timezone for accurate date calculations based on user's location
+PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
+# --- MODIFICATION END ---
 
 # --- Helper Function ---
 def format_summary_message(summary_data):
@@ -136,7 +146,10 @@ async def generate_report_for_period(update: Update, context: ContextTypes.DEFAU
     await query.answer()
     period = query.data.split('_')[-1]
 
-    today = datetime.utcnow().date()
+    # --- MODIFICATION START ---
+    # Use timezone-aware date for "today" to match user's local timezone.
+    today = datetime.now(PHNOM_PENH_TZ).date()
+    # --- MODIFICATION END ---
     start_date, end_date = None, None
 
     if period == "today":
@@ -462,7 +475,11 @@ async def iou_received_date_choice(update: Update, context: ContextTypes.DEFAULT
         await context.bot.send_message(chat_id=query.message.chat_id, text=prompt)
         return IOU_PERSON
     elif choice == 'iou_date_yesterday':
-        yesterday_dt = datetime.combine(datetime.utcnow().date() - timedelta(days=1), time(12, 0))
+        # --- MODIFICATION START ---
+        # Calculate "yesterday" based on local timezone, not UTC.
+        local_today = datetime.now(PHNOM_PENH_TZ).date()
+        yesterday_dt = datetime.combine(local_today - timedelta(days=1), time(12, 0))
+        # --- MODIFICATION END ---
         context.user_data['timestamp'] = yesterday_dt.isoformat()
         await context.bot.send_message(chat_id=query.message.chat_id, text=prompt)
         return IOU_PERSON
@@ -583,7 +600,11 @@ async def received_reminder_date_choice(update: Update, context: ContextTypes.DE
 
     try:
         days = int(choice)
-        reminder_date = datetime.utcnow().date() + timedelta(days=days)
+        # --- MODIFICATION START ---
+        # Calculate future reminder date based on local timezone date.
+        local_today = datetime.now(PHNOM_PENH_TZ).date()
+        reminder_date = local_today + timedelta(days=days)
+        # --- MODIFICATION END ---
         context.user_data['reminder_date_part'] = reminder_date
         text = f"Date: <b>{button_text}</b>\n\nGot it. And at what time? (e.g., 09:00, 17:30)"
         await context.bot.send_message(chat_id=query.message.chat_id, text=text, parse_mode='HTML')
@@ -634,6 +655,8 @@ async def _save_reminder_and_confirm(update: Update, context: ContextTypes.DEFAU
     message_to_use = update.message
 
     if response and 'error' not in response:
+        # Note: The reminder datetime itself might need to be localized before saving
+        # if the scheduler runs in UTC, but here we assume the scheduler logic handles naive datetimes correctly based on server TZ.
         reminder_date_obj = datetime.fromisoformat(context.user_data['reminder_datetime'])
         await message_to_use.reply_text(
             f"✅ Got it! I will remind you on {reminder_date_obj.strftime('%d %b %Y at %H:%M')}.",
@@ -736,7 +759,11 @@ async def received_forgot_day(update: Update, context: ContextTypes.DEFAULT_TYPE
         return FORGOT_CUSTOM_DATE
 
     days_ago = int(choice)
-    forgotten_datetime = datetime.combine(datetime.utcnow().date() - timedelta(days=days_ago), time(12, 0))
+    # --- MODIFICATION START ---
+    # Calculate forgotten date based on local timezone date.
+    local_today = datetime.now(PHNOM_PENH_TZ).date()
+    forgotten_datetime = datetime.combine(local_today - timedelta(days=days_ago), time(12, 0))
+    # --- MODIFICATION END ---
     context.user_data['timestamp'] = forgotten_datetime.isoformat()
 
     text = f"Date: <b>{button_text}</b>\n\nGot it. Was it an expense or an income?"
@@ -974,3 +1001,4 @@ reminder_conversation_handler = ConversationHandler(
     fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
     per_message=False
 )
+# --- End of modified file: telegram_bot/handlers.py ---
