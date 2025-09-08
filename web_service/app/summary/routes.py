@@ -10,7 +10,6 @@ summary_bp = Blueprint('summary', __name__, url_prefix='/summary')
 
 # --- MODIFICATION START ---
 # Define categories to exclude from operational income/expense summaries.
-# These categories affect balance but are not regular spending/earning.
 FINANCIAL_TRANSACTION_CATEGORIES = [
     'Loan Lent',         # Expense type from lending money to someone
     'Debt Repayment',    # Expense type from repaying a debt you owed
@@ -19,17 +18,22 @@ FINANCIAL_TRANSACTION_CATEGORIES = [
     'Initial Balance'    # Adjustment type for setting initial account value
 ]
 
-# Define local timezone for accurate date calculations
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
-# --- MODIFICATION END ---
+UTC_TZ = ZoneInfo("UTC")
 
+def create_utc_range(start_date_local, end_date_local):
+    """Converts local start/end dates into a timezone-aware UTC range for querying."""
+    # Create aware datetime objects in the local timezone
+    aware_start_dt = datetime.combine(start_date_local, time.min, tzinfo=PHNOM_PENH_TZ)
+    aware_end_dt = datetime.combine(end_date_local, time.max, tzinfo=PHNOM_PENH_TZ)
+    # Convert to UTC
+    return aware_start_dt.astimezone(UTC_TZ), aware_end_dt.astimezone(UTC_TZ)
+# --- MODIFICATION END ---
 
 def get_date_ranges():
     """Helper function to get start and end datetimes for various periods."""
-    # --- MODIFICATION START: Use local timezone for date calculation ---
-    # Fixes inconsistency where server date (UTC) differs from user's local date.
+    # Use local timezone to define "today"
     today = datetime.now(PHNOM_PENH_TZ).date()
-    # --- MODIFICATION END ---
 
     # This Week (assuming week starts on Monday)
     start_of_week = today - timedelta(days=today.weekday())
@@ -48,13 +52,15 @@ def get_date_ranges():
     end_of_last_month = start_of_month - timedelta(days=1)
     start_of_last_month = end_of_last_month.replace(day=1)
 
+    # --- MODIFICATION START: Convert all ranges to UTC ---
     return {
-        "today": (datetime.combine(today, time.min), datetime.combine(today, time.max)),
-        "this_week": (datetime.combine(start_of_week, time.min), datetime.combine(end_of_week, time.max)),
-        "last_week": (datetime.combine(start_of_last_week, time.min), datetime.combine(end_of_last_week, time.max)),
-        "this_month": (datetime.combine(start_of_month, time.min), datetime.combine(end_of_month, time.max)),
-        "last_month": (datetime.combine(start_of_last_month, time.min), datetime.combine(end_of_last_month, time.max)),
+        "today": create_utc_range(today, today),
+        "this_week": create_utc_range(start_of_week, end_of_week),
+        "last_week": create_utc_range(start_of_last_week, end_of_last_week),
+        "this_month": create_utc_range(start_of_month, end_of_month),
+        "last_month": create_utc_range(start_of_last_month, end_of_last_month),
     }
+    # --- MODIFICATION END ---
 
 
 def calculate_period_summary(start_date, end_date, db):
@@ -62,9 +68,8 @@ def calculate_period_summary(start_date, end_date, db):
     pipeline = [
         {'$match': {
             'timestamp': {'$gte': start_date, '$lte': end_date},
-            # --- MODIFICATION START: Filter out non-operational transactions ---
+            # Filter out non-operational transactions for summary In/Out figures
             'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}
-            # --- MODIFICATION END ---
         }},
         {
             '$group': {
@@ -92,7 +97,7 @@ def calculate_period_summary(start_date, end_date, db):
 def get_detailed_summary():
     db = current_app.db
 
-    # 1. Calculate Balances (All transactions included to reflect true cash on hand)
+    # 1. Calculate Balances (All transactions included)
     khr_pipeline = [
         {'$match': {'accountName': 'KHR Account'}},
         {'$group': {'_id': '$type', 'total': {'$sum': '$amount'}}}
@@ -111,7 +116,7 @@ def get_detailed_summary():
     usd_expense = next((item['total'] for item in usd_results if item['_id'] == 'expense'), 0)
     usd_balance = usd_income - usd_expense
 
-    # 2. Calculate Debts (Data provided by a separate pipeline from the debts collection)
+    # 2. Calculate Debts (Grouped by person/currency for display)
     pipeline_debts = [
         {'$match': {'status': 'open'}},
         {'$group': {
@@ -130,8 +135,8 @@ def get_detailed_summary():
     # 3. Calculate Period Summaries (Filtered logic applied via calculate_period_summary)
     date_ranges = get_date_ranges()
     period_summaries = {}
-    for period, (start, end) in date_ranges.items():
-        period_summaries[period] = calculate_period_summary(start, end, db)
+    for period, (start_utc, end_utc) in date_ranges.items():
+        period_summaries[period] = calculate_period_summary(start_utc, end_utc, db)
 
     # 4. Combine all data
     summary = {
