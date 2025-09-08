@@ -12,10 +12,7 @@ from telegram.ext import (
 import keyboards
 import api_client
 from datetime import datetime, timedelta, time
-# --- MODIFICATION START ---
-# Import ZoneInfo for timezone-aware calculations (Python 3.9+)
 from zoneinfo import ZoneInfo
-# --- MODIFICATION END ---
 from decorators import restricted
 from collections import defaultdict
 
@@ -30,10 +27,7 @@ from collections import defaultdict
     REMINDER_PURPOSE, REMINDER_ASK_DATE, REMINDER_CUSTOM_DATE, REMINDER_ASK_TIME
 ) = range(23)
 
-# --- MODIFICATION START ---
-# Define the local timezone for accurate date calculations based on user's location
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
-# --- MODIFICATION END ---
 
 # --- Helper Function ---
 def format_summary_message(summary_data):
@@ -78,12 +72,15 @@ def format_summary_message(summary_data):
         return f"    ⬆️ In: {income_str}\n    ⬇️ Out: {expense_str}"
 
     periods = summary_data.get('periods', {})
-    activity_text = "" # Default to empty string
-    if periods: # Check if period data exists before trying to format it
+    activity_text = ""
+    if periods:
         today_text = f"<b>Today:</b>\n{format_period_line(periods.get('today', {}))}"
         this_week_text = f"<b>This Week:</b>\n{format_period_line(periods.get('this_week', {}))}"
         this_month_text = f"<b>This Month:</b>\n{format_period_line(periods.get('this_month', {}))}"
-        activity_text = f"<b>Activity (Operational):</b>\n{today_text}\n{this_week_text}\n{this_month_text}"
+
+        # --- MODIFICATION START: Clarify summary title ---
+        activity_text = f"<b>Operational Activity (Excl. Loans):</b>\n{today_text}\n{this_week_text}\n{this_month_text}"
+        # --- MODIFICATION END ---
 
     # --- Combine All Parts ---
     return (
@@ -102,12 +99,31 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = keyboards.main_menu_keyboard()
     chat_id = update.effective_chat.id
 
+    # --- MODIFICATION START: Refresh summary on start/return ---
     if update.callback_query:
         await update.callback_query.answer()
+        summary_data = api_client.get_detailed_summary()
+        summary_text = format_summary_message(summary_data)
+        try:
+            await update.callback_query.edit_message_text(
+                text + summary_text,
+                parse_mode='HTML',
+                reply_markup=keyboard
+            )
+        except Exception: # Fails if message content is identical, ignore error.
+            pass
+    else:
+        # Send full summary on initial /start command
+        summary_data = api_client.get_detailed_summary()
+        summary_text = format_summary_message(summary_data)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=text + summary_text,
+            parse_mode='HTML',
+            reply_markup=keyboard
+        )
+    # --- MODIFICATION END ---
 
-    # Send message or edit existing message. Editing is generally better for callback queries.
-    # To keep logic simple for now, send new message.
-    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
     return ConversationHandler.END
 
 
@@ -121,8 +137,8 @@ async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     summary_text = format_summary_message(summary_data)
     text = "🔍 Here is your quick summary:" + summary_text
 
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
+    # Edit message to show updated summary
+    await query.edit_message_text(
         text=text,
         parse_mode='HTML',
         reply_markup=keyboards.main_menu_keyboard()
@@ -149,10 +165,8 @@ async def generate_report_for_period(update: Update, context: ContextTypes.DEFAU
     await query.answer()
     period = query.data.split('_')[-1]
 
-    # --- MODIFICATION START: Timezone Correction ---
-    # Use timezone-aware date for "today" to match user's local timezone.
+    # Timezone fix already applied in the provided source code:
     today = datetime.now(PHNOM_PENH_TZ).date()
-    # --- MODIFICATION END ---
     start_date, end_date = None, None
 
     if period == "today":
@@ -169,13 +183,13 @@ async def generate_report_for_period(update: Update, context: ContextTypes.DEFAU
         end_date = next_month_first_day - timedelta(days=1)
 
     if start_date and end_date:
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text=f"📈 Generating your report for {start_date.strftime('%b %d')} to {end_date.strftime('%b %d')}..."
-        )
+        await query.edit_message_text(text=f"📈 Generating your report for {start_date.strftime('%b %d')} to {end_date.strftime('%b %d')}...")
+
         chart = api_client.get_chart(start_date, end_date)
 
         if chart:
+            # Delete "Generating report..." message before sending photo
+            await query.message.delete()
             await context.bot.send_photo(chat_id=query.message.chat_id, photo=chart)
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
@@ -183,9 +197,8 @@ async def generate_report_for_period(update: Update, context: ContextTypes.DEFAU
                 reply_markup=keyboards.main_menu_keyboard()
             )
         else:
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text="Could not generate report. No data found for this period.",
+            await query.edit_message_text(
+                text="Could not generate report. No operational expense data found for this period.",
                 reply_markup=keyboards.main_menu_keyboard()
             )
 
@@ -473,21 +486,16 @@ async def iou_received_date_choice(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
     choice = query.data
 
-    prompt = "Who did you lend money to?" if context.user_data[
-                                                 'iou_type'] == 'lent' else "Who did you borrow money from?"
+    prompt = "Who did you lend money to?" if context.user_data['iou_type'] == 'lent' else "Who did you borrow money from?"
 
     if choice == 'iou_date_today':
-        # No timestamp set here; backend will default to current time.
         await context.bot.send_message(chat_id=query.message.chat_id, text=prompt)
         return IOU_PERSON
     elif choice == 'iou_date_yesterday':
-        # --- MODIFICATION START: Timezone Correction ---
         local_today = datetime.now(PHNOM_PENH_TZ).date()
         local_yesterday = local_today - timedelta(days=1)
-        # Create a timezone-aware datetime object for local noon on that day.
         aware_dt = datetime.combine(local_yesterday, time(12, 0), tzinfo=PHNOM_PENH_TZ)
         context.user_data['timestamp'] = aware_dt.isoformat()
-        # --- MODIFICATION END ---
         await context.bot.send_message(chat_id=query.message.chat_id, text=prompt)
         return IOU_PERSON
     elif choice == 'iou_date_custom':
@@ -501,14 +509,10 @@ async def iou_received_custom_date(update: Update, context: ContextTypes.DEFAULT
     date_str = update.message.text
     try:
         custom_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        # --- MODIFICATION START: Timezone Correction ---
-        # Create a timezone-aware datetime object for local noon on the custom date.
         aware_dt = datetime.combine(custom_date, time(12, 0), tzinfo=PHNOM_PENH_TZ)
         context.user_data['timestamp'] = aware_dt.isoformat()
-        # --- MODIFICATION END ---
 
-        prompt = "Who did you lend money to?" if context.user_data[
-                                                     'iou_type'] == 'lent' else "Who did you borrow money from?"
+        prompt = "Who did you lend money to?" if context.user_data['iou_type'] == 'lent' else "Who did you borrow money from?"
         await update.message.reply_text(prompt)
         return IOU_PERSON
     except ValueError:
@@ -612,10 +616,8 @@ async def received_reminder_date_choice(update: Update, context: ContextTypes.DE
 
     try:
         days = int(choice)
-        # --- MODIFICATION START: Timezone Correction ---
         local_today = datetime.now(PHNOM_PENH_TZ).date()
         reminder_date = local_today + timedelta(days=days)
-        # --- MODIFICATION END ---
         context.user_data['reminder_date_part'] = reminder_date
         text = f"Date: <b>{button_text}</b>\n\nGot it. And at what time? (e.g., 09:00, 17:30)"
         await context.bot.send_message(chat_id=query.message.chat_id, text=text, parse_mode='HTML')
@@ -645,11 +647,8 @@ async def received_reminder_time(update: Update, context: ContextTypes.DEFAULT_T
         reminder_time = datetime.strptime(time_str, "%H:%M").time()
         reminder_date = context.user_data['reminder_date_part']
 
-        # --- MODIFICATION START: Timezone Correction ---
-        # Create timezone-aware datetime for the reminder schedule.
         aware_reminder_dt = datetime.combine(reminder_date, reminder_time, tzinfo=PHNOM_PENH_TZ)
         context.user_data['reminder_datetime'] = aware_reminder_dt.isoformat()
-        # --- MODIFICATION END ---
         return await _save_reminder_and_confirm(update, context)
     except ValueError:
         await update.message.reply_text("Invalid time format. Please use HH:MM (24-hour format, e.g., 09:00 or 17:30).")
@@ -669,7 +668,6 @@ async def _save_reminder_and_confirm(update: Update, context: ContextTypes.DEFAU
 
     if response and 'error' not in response:
         reminder_date_obj = datetime.fromisoformat(context.user_data['reminder_datetime'])
-        # Format the display time back to local time for confirmation message.
         await message_to_use.reply_text(
             f"✅ Got it! I will remind you on {reminder_date_obj.astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y at %H:%M')}.",
             reply_markup=keyboards.main_menu_keyboard()
@@ -771,13 +769,10 @@ async def received_forgot_day(update: Update, context: ContextTypes.DEFAULT_TYPE
         return FORGOT_CUSTOM_DATE
 
     days_ago = int(choice)
-    # --- MODIFICATION START: Timezone Correction ---
     local_today = datetime.now(PHNOM_PENH_TZ).date()
     forgotten_date = local_today - timedelta(days=days_ago)
-    # Create a timezone-aware datetime object for local noon on that day.
     aware_dt = datetime.combine(forgotten_date, time(12, 0), tzinfo=PHNOM_PENH_TZ)
     context.user_data['timestamp'] = aware_dt.isoformat()
-    # --- MODIFICATION END ---
 
     text = f"Date: <b>{button_text}</b>\n\nGot it. Was it an expense or an income?"
     await context.bot.send_message(
@@ -793,10 +788,8 @@ async def received_forgot_custom_date(update: Update, context: ContextTypes.DEFA
     date_str = update.message.text
     try:
         custom_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        # --- MODIFICATION START: Timezone Correction ---
         aware_dt = datetime.combine(custom_date, time(12, 0), tzinfo=PHNOM_PENH_TZ)
         context.user_data['timestamp'] = aware_dt.isoformat()
-        # --- MODIFICATION END ---
         await update.message.reply_text(
             "Got it. Was it an expense or an income?",
             reply_markup=keyboards.forgot_type_keyboard()
@@ -925,7 +918,13 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if update.callback_query:
         await update.callback_query.answer()
-    await context.bot.send_message(chat_id=chat_id, text=message, reply_markup=keyboard)
+        try:
+            await update.callback_query.edit_message_text(text=message, reply_markup=keyboard)
+        except Exception: # Message might not be editable or a different error occurred
+            await context.bot.send_message(chat_id=chat_id, text=message, reply_markup=keyboard)
+    else:
+        await context.bot.send_message(chat_id=chat_id, text=message, reply_markup=keyboard)
+
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -1017,4 +1016,3 @@ reminder_conversation_handler = ConversationHandler(
     fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
     per_message=False
 )
-# --- End of modified file: telegram_bot/handlers.py ---

@@ -12,9 +12,9 @@ analytics_bp = Blueprint('analytics', __name__, url_prefix='/analytics')
 FINANCIAL_TRANSACTION_CATEGORIES = [
     'Loan Lent',         # Expense type from lending money to someone
     'Debt Repayment',    # Expense type from repaying a debt you owed
-    'Loan Received',     # Income type from borrowing money from someone (for completeness)
-    'Debt Settled',      # Income type from someone repaying a debt to you (for completeness)
-    'Initial Balance'    # Adjustment type for setting initial account value
+    'Loan Received',     # Income type (for completeness in exclusion lists)
+    'Debt Settled',      # Income type (for completeness in exclusion lists)
+    'Initial Balance'    # Adjustment type
 ]
 # --- MODIFICATION END ---
 
@@ -38,8 +38,7 @@ def get_report_chart():
         {'$match': {
             'timestamp': {'$gte': start_date, '$lte': end_date},
             'type': 'expense',
-            # --- MODIFICATION START ---
-            # Exclude all financial adjustment categories from the expense report.
+            # --- MODIFICATION START: Use standardized exclusion list ---
             'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}
             # --- MODIFICATION END ---
         }},
@@ -70,8 +69,9 @@ def get_report_chart():
     fig, ax = plt.subplots()
     ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
     ax.axis('equal')
-    # Update title to reflect operational focus
+    # --- MODIFICATION START: Clarify chart title ---
     title = f"Operational Expenses from {start_date.strftime('%d %b')} to {end_date.strftime('%d %b %Y')}"
+    # --- MODIFICATION END ---
     plt.title(title)
 
     buf = io.BytesIO()

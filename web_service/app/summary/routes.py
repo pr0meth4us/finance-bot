@@ -3,6 +3,7 @@
 from flask import Blueprint, jsonify, current_app
 # --- MODIFICATION START ---
 from datetime import datetime, time, date, timedelta
+from zoneinfo import ZoneInfo
 # --- MODIFICATION END ---
 
 summary_bp = Blueprint('summary', __name__, url_prefix='/summary')
@@ -18,34 +19,52 @@ FINANCIAL_TRANSACTION_CATEGORIES = [
     'Initial Balance'    # Adjustment type for setting initial account value
 ]
 
+# Define local timezone for accurate date calculations
+PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
+# --- MODIFICATION END ---
+
+
 def get_date_ranges():
     """Helper function to get start and end datetimes for various periods."""
-    # In a production system with multiple users, we'd pass timezone from user.
-    # For a personal bot, we assume server time or a fixed timezone.
-    today = date.today()
+    # --- MODIFICATION START: Use local timezone for date calculation ---
+    # Fixes inconsistency where server date (UTC) differs from user's local date.
+    today = datetime.now(PHNOM_PENH_TZ).date()
+    # --- MODIFICATION END ---
 
     # This Week (assuming week starts on Monday)
     start_of_week = today - timedelta(days=today.weekday())
     end_of_week = start_of_week + timedelta(days=6)
+
+    # Last Week
+    end_of_last_week = start_of_week - timedelta(days=1)
+    start_of_last_week = end_of_last_week - timedelta(days=6)
 
     # This Month
     start_of_month = today.replace(day=1)
     next_month = start_of_month.replace(day=28) + timedelta(days=4)
     end_of_month = next_month - timedelta(days=next_month.day)
 
+    # Last Month
+    end_of_last_month = start_of_month - timedelta(days=1)
+    start_of_last_month = end_of_last_month.replace(day=1)
+
     return {
         "today": (datetime.combine(today, time.min), datetime.combine(today, time.max)),
         "this_week": (datetime.combine(start_of_week, time.min), datetime.combine(end_of_week, time.max)),
+        "last_week": (datetime.combine(start_of_last_week, time.min), datetime.combine(end_of_last_week, time.max)),
         "this_month": (datetime.combine(start_of_month, time.min), datetime.combine(end_of_month, time.max)),
+        "last_month": (datetime.combine(start_of_last_month, time.min), datetime.combine(end_of_last_month, time.max)),
     }
 
-def calculate_operational_summary(start_date, end_date, db):
-    """Calculates income/expense excluding financial adjustments."""
+
+def calculate_period_summary(start_date, end_date, db):
+    """Helper to run aggregation for a specific time period."""
     pipeline = [
         {'$match': {
             'timestamp': {'$gte': start_date, '$lte': end_date},
-            # Filter out loan/balance transactions
+            # --- MODIFICATION START: Filter out non-operational transactions ---
             'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}
+            # --- MODIFICATION END ---
         }},
         {
             '$group': {
@@ -65,15 +84,15 @@ def calculate_operational_summary(start_date, end_date, db):
         currency = item['_id']['currency']
         if trans_type in period_summary:
             period_summary[trans_type][currency] = item['total']
+
     return period_summary
-# --- MODIFICATION END ---
 
 
-@summary_bp.route('/balance', methods=['GET'])
-def get_balance_summary():
+@summary_bp.route('/detailed', methods=['GET'])
+def get_detailed_summary():
     db = current_app.db
 
-    # 1. Calculate Total Balances (All transactions included to reflect true cash on hand)
+    # 1. Calculate Balances (All transactions included to reflect true cash on hand)
     khr_pipeline = [
         {'$match': {'accountName': 'KHR Account'}},
         {'$group': {'_id': '$type', 'total': {'$sum': '$amount'}}}
@@ -92,32 +111,33 @@ def get_balance_summary():
     usd_expense = next((item['total'] for item in usd_results if item['_id'] == 'expense'), 0)
     usd_balance = usd_income - usd_expense
 
-    # 2. Calculate Open Debts (This logic remains separate)
-    borrowed_pipeline = [
-        {'$match': {'status': 'open', 'type': 'borrowed'}},
-        {'$group': {'_id': '$currency', 'total': {'$sum': '$remainingAmount'}}}
+    # 2. Calculate Debts (Data provided by a separate pipeline from the debts collection)
+    pipeline_debts = [
+        {'$match': {'status': 'open'}},
+        {'$group': {
+            '_id': {'type': '$type', 'currency': '$currency'},
+            'totalAmount': {'$sum': '$remainingAmount'}
+        }}
     ]
-    borrowed_results = list(db.debts.aggregate(borrowed_pipeline))
+    debt_results = list(db.debts.aggregate(pipeline_debts))
+    debts_owed_to_you = [d for d in debt_results if d['_id']['type'] == 'lent']
+    debts_owed_by_you = [d for d in debt_results if d['_id']['type'] == 'borrowed']
 
-    lent_pipeline = [
-        {'$match': {'status': 'open', 'type': 'lent'}},
-        {'$group': {'_id': '$currency', 'total': {'$sum': '$remainingAmount'}}}
-    ]
-    lent_results = list(db.debts.aggregate(lent_pipeline))
+    # Reformat debt data for frontend compatibility
+    formatted_debts_to_you = [{'total': d['totalAmount'], '_id': d['_id']['currency']} for d in debts_owed_to_you]
+    formatted_debts_by_you = [{'total': d['totalAmount'], '_id': d['_id']['currency']} for d in debts_owed_by_you]
 
-    # --- MODIFICATION START ---
-    # 3. Calculate Operational Period Summaries (Filtered logic applied here)
+    # 3. Calculate Period Summaries (Filtered logic applied via calculate_period_summary)
     date_ranges = get_date_ranges()
     period_summaries = {}
     for period, (start, end) in date_ranges.items():
-        period_summaries[period] = calculate_operational_summary(start, end, db)
-    # --- MODIFICATION END ---
+        period_summaries[period] = calculate_period_summary(start, end, db)
 
+    # 4. Combine all data
     summary = {
         'balances': {'KHR': khr_balance, 'USD': usd_balance},
-        'debts_owed_by_you': borrowed_results,
-        'debts_owed_to_you': lent_results,
-        # Add new period summary data to response
+        'debts_owed_by_you': formatted_debts_by_you,
+        'debts_owed_to_you': formatted_debts_to_you,
         'periods': period_summaries
     }
 
