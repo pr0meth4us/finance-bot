@@ -83,6 +83,8 @@ def report_period_keyboard():
             InlineKeyboardButton("🗓️ This Month", callback_data='report_period_this_month'),
             InlineKeyboardButton("🗓️ Last Week", callback_data='report_period_last_week'),
         ],
+        # --- ADD THIS LINE ---
+        [InlineKeyboardButton("🗓️ Custom Range", callback_data='report_period_custom')],
         [InlineKeyboardButton("‹ Back", callback_data='start')],
     ]
     return InlineKeyboardMarkup(keyboard)

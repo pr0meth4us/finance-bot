@@ -27,6 +27,9 @@ from collections import defaultdict
     REMINDER_PURPOSE, REMINDER_ASK_DATE, REMINDER_CUSTOM_DATE, REMINDER_ASK_TIME
 ) = range(23)
 
+# --- MODIFICATION: Added states for report conversation ---
+CHOOSE_REPORT_PERIOD, REPORT_ASK_START_DATE, REPORT_ASK_END_DATE = range(23, 26)
+
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
 # --- Helper Function ---
@@ -107,7 +110,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=keyboard
             )
         except Exception:
-            pass
+            pass # Ignore if message hasn't changed or other minor issues
     else:
         summary_data = api_client.get_detailed_summary()
         summary_text = format_summary_message(summary_data)
@@ -138,88 +141,144 @@ async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# --- Report Generation ---
+# --- MODIFICATION START: Report Generation Conversation ---
+
+async def _generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE, start_date, end_date):
+    """Shared logic to generate and send report chart."""
+    chat_id = update.effective_chat.id
+    loading_message = None
+
+    # Send loading message or edit existing one
+    loading_text = f"📈 Generating your report for {start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')}..."
+
+    if update.callback_query:
+        message_to_edit = update.callback_query.message
+    else:
+        message_to_edit = update.message
+
+    try:
+        await message_to_edit.edit_text(text=loading_text)
+    except Exception:
+        # If edit fails (e.g., message text is identical, or called from a text input), send new message.
+        # This part requires careful handling depending on flow origin. For simplicity, we assume we can edit or proceed.
+        pass
+
+    # API Call
+    chart = api_client.get_chart(start_date, end_date)
+
+    # Delete loading message before sending photo/final message
+    try:
+        await message_to_edit.delete()
+    except Exception:
+        pass # Ignore deletion errors
+
+    if chart:
+        await context.bot.send_photo(chat_id=chat_id, photo=chart)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="Report sent! What's next?",
+            reply_markup=keyboards.main_menu_keyboard()
+        )
+    else:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="Could not generate report. No operational expense data found for this period.",
+            reply_markup=keyboards.main_menu_keyboard()
+        )
+
 @restricted
 async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the menu for selecting a report period."""
+    """Displays the menu for selecting a report period. Entry point for conversation."""
     query = update.callback_query
     await query.answer()
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
-        text="What period would you like a report for?",
+    await query.edit_message_text(
+        "What period would you like a report for?",
         reply_markup=keyboards.report_period_keyboard()
     )
+    return CHOOSE_REPORT_PERIOD
 
 
-# --- MODIFICATION START: Added debug print statements ---
 @restricted
-async def generate_report_for_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Fetches and sends the analytics chart for the selected period."""
+async def process_report_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles standard period selection or transitions to custom date entry."""
     query = update.callback_query
     await query.answer()
 
-    # --- Debug Start ---
-    print("\n--- DEBUG: generate_report_for_period called ---")
+    callback_prefix = "report_period_"
     try:
-        print(f"[Debug] Callback data received: {query.data}")
-        period = query.data.split('_')[-1]
-        print(f"[Debug] Parsed period variable: '{period}'")
-    except Exception as e:
-        print(f"[Debug] Error parsing period: {e}")
-        return
-    # --- Debug End ---
+        period = query.data[len(callback_prefix):]
+    except Exception:
+        return ConversationHandler.END # Safety exit
 
     today = datetime.now(PHNOM_PENH_TZ).date()
     start_date, end_date = None, None
 
     if period == "today":
-        print("[Debug] Calculating date range for: today")
         start_date = end_date = today
     elif period == "this_week":
-        print("[Debug] Calculating date range for: this_week")
         start_date = today - timedelta(days=today.weekday())
         end_date = start_date + timedelta(days=6)
     elif period == "last_week":
-        print("[Debug] Calculating date range for: last_week")
         end_date = today - timedelta(days=today.weekday() + 1)
         start_date = end_date - timedelta(days=6)
     elif period == "this_month":
-        print("[Debug] Calculating date range for: this_month")
         start_date = today.replace(day=1)
         next_month_first_day = (start_date.replace(day=28) + timedelta(days=4)).replace(day=1)
         end_date = next_month_first_day - timedelta(days=1)
-
-    # --- Debug Start ---
-    print(f"[Debug] Calculated start_date: {start_date}")
-    print(f"[Debug] Calculated end_date: {end_date}")
-    # --- Debug End ---
+    elif period == "custom":
+        await query.edit_message_text("Please enter the start date (YYYY-MM-DD):")
+        return REPORT_ASK_START_DATE
 
     if start_date and end_date:
-        print("[Debug] Date range successfully calculated. Attempting API call...")
-        try:
-            await query.edit_message_text(text=f"📈 Generating your report for {start_date.strftime('%b %d')} to {end_date.strftime('%b %d')}...")
-        except Exception as e:
-            print(f"[Debug] Error editing message: {e}. Sending new message instead.")
-            await context.bot.send_message(chat_id=query.message.chat_id, text=f"📈 Generating your report for {start_date.strftime('%b %d')} to {end_date.strftime('%b %d')}...")
-
-        chart = api_client.get_chart(start_date, end_date)
-        print(f"[Debug] API call complete. Chart data received: {chart is not None}")
-
-        if chart:
-            await context.bot.send_photo(chat_id=query.message.chat_id, photo=chart)
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text="Report sent! What's next?",
-                reply_markup=keyboards.main_menu_keyboard()
-            )
-        else:
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text="Could not generate report. No operational expense data found for this period.",
-                reply_markup=keyboards.main_menu_keyboard()
-            )
+        await _generate_report(update, context, start_date, end_date)
+        return ConversationHandler.END
     else:
-        print("[Debug] ERROR: start_date or end_date not set. Logic branch missed for period.")
+        # Fallback in case a button a_dded without logic here
+        await query.edit_message_text("Invalid selection.", reply_markup=keyboards.main_menu_keyboard())
+        return ConversationHandler.END
+
+
+@restricted
+async def received_report_start_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives and validates the custom start date."""
+    date_str = update.message.text
+    try:
+        start_date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+        context.user_data['report_start_date'] = start_date_obj
+        await update.message.reply_text(f"Start date set to {start_date_obj.strftime('%Y-%m-%d')}. Now, please enter the end date (YYYY-MM-DD):")
+        return REPORT_ASK_END_DATE
+    except ValueError:
+        await update.message.reply_text("Invalid date format. Please use YYYY-MM-DD.")
+        return REPORT_ASK_START_DATE
+
+
+@restricted
+async def received_report_end_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives validates end date, and generates the report."""
+    date_str = update.message.text
+    try:
+        end_date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+        start_date_obj = context.user_data.get('report_start_date')
+
+        if not start_date_obj:
+            await update.message.reply_text("Error: Start date not found. Cancelling operation.", reply_markup=keyboards.main_menu_keyboard())
+            return ConversationHandler.END
+
+        if end_date_obj < start_date_obj:
+            await update.message.reply_text("End date cannot be earlier than start date. Please enter the end date again:")
+            return REPORT_ASK_END_DATE
+
+        # Call generation logic (note: update object here is a Message, not CallbackQuery)
+        await _generate_report(update, context, start_date_obj, end_date_obj)
+
+    except ValueError:
+        await update.message.reply_text("Invalid date format. Please use YYYY-MM-DD.")
+        return REPORT_ASK_END_DATE
+    finally:
+        context.user_data.pop('report_start_date', None)
+
+    return ConversationHandler.END
+
 # --- MODIFICATION END ---
 
 
@@ -922,8 +981,6 @@ async def save_transaction_and_end(update: Update, context: ContextTypes.DEFAULT
     summary_data = api_client.get_detailed_summary()
     summary_text = format_summary_message(summary_data)
 
-    # If called from a conversation with message editing (like 'forgot log'), we might want to edit.
-    # But for simplicity and robustness, sending a new reply a_lways works.
     await context.bot.send_message(
         chat_id=message_to_use.chat_id,
         text=base_text + summary_text,
@@ -1038,6 +1095,18 @@ reminder_conversation_handler = ConversationHandler(
         REMINDER_ASK_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_reminder_time)],
     },
     fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
+    per_message=False
+)
+
+# --- MODIFICATION: New Conversation Handler for Reports ---
+report_conversation_handler = ConversationHandler(
+    entry_points=[CallbackQueryHandler(report_menu, pattern='^report_menu$')],
+    states={
+        CHOOSE_REPORT_PERIOD: [CallbackQueryHandler(process_report_choice, pattern='^report_period_')],
+        REPORT_ASK_START_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_report_start_date)],
+        REPORT_ASK_END_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_report_end_date)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel), CallbackQueryHandler(start, pattern='^start$')],
     per_message=False
 )
 # --- End of modified file: telegram_bot/handlers.py ---

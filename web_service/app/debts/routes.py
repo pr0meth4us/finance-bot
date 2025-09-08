@@ -1,4 +1,4 @@
-# --- Start of modified file: web_service/app/debts/routes.py ---
+# --- File: web_service/app/debts/routes.py ---
 
 from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime
@@ -6,11 +6,9 @@ from bson import ObjectId
 
 debts_bp = Blueprint('debts', __name__, url_prefix='/debts')
 
-
 def serialize_debt(doc):
     doc['_id'] = str(doc['_id'])
     return doc
-
 
 @debts_bp.route('/', methods=['POST'])
 def add_debt():
@@ -23,6 +21,12 @@ def add_debt():
     except ValueError:
         return jsonify({'error': 'Amount must be a number'}), 400
 
+    timestamp_str = data.get('timestamp')
+    try:
+        created_at = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.utcnow()
+    except ValueError:
+        created_at = datetime.utcnow()
+
     debt = {
         "type": data['type'],
         "person": data['person'],
@@ -30,48 +34,83 @@ def add_debt():
         "remainingAmount": amount,
         "currency": data['currency'],
         "status": "open",
+        "purpose": data.get("purpose", ""),
         "repayments": [],
-        "created_at": datetime.utcnow()
+        "created_at": created_at
     }
 
-    # --- MODIFICATION START: Create corresponding transaction for balance calculation ---
-    # When a loan is created, we create a transaction to update the main account balance.
     account_name = "USD Account" if data['currency'] == "USD" else "KHR Account"
     tx_data = {
         "amount": amount,
         "currency": data['currency'],
         "accountName": account_name,
-        "timestamp": datetime.utcnow(),
-        "description": f"Loan {data['type']} {data['person']}" # Description for clarity
+        "timestamp": created_at,
+        "description": f"Loan {data['type']} {data['person']}"
     }
 
     if data['type'] == 'lent':
         tx_data['type'] = 'expense'
-        tx_data['categoryId'] = 'Loan Lent' # Categorize as non-operational expense
+        tx_data['categoryId'] = 'Loan Lent'
     else: # type == 'borrowed'
         tx_data['type'] = 'income'
-        tx_data['categoryId'] = 'Loan Received' # Categorize as non-operational income
+        tx_data['categoryId'] = 'Loan Received'
 
     current_app.db.transactions.insert_one(tx_data)
-    # --- MODIFICATION END ---
-
     result = current_app.db.debts.insert_one(debt)
     return jsonify({'message': 'Debt recorded', 'id': str(result.inserted_id)}), 201
 
-
+# --- START OF MODIFICATION ---
 @debts_bp.route('/', methods=['GET'])
 def get_open_debts():
-    debts = list(current_app.db.debts.find({'status': 'open'}))
-    return jsonify([serialize_debt(d) for d in debts])
-
+    """
+    Fetches open debts and groups them by person and currency to provide a summary.
+    This matches the expectation of the frontend keyboard `iou_list_keyboard`.
+    """
+    pipeline = [
+        {'$match': {'status': 'open'}},
+        {
+            '$group': {
+                '_id': {
+                    'person': '$person',
+                    'currency': '$currency',
+                    'type': '$type'
+                },
+                'totalAmount': {'$sum': '$remainingAmount'}, # Key expected by frontend
+                'count': {'$sum': 1}                     # Key expected by frontend
+            }
+        },
+        {
+            '$project': {
+                '_id': 0,
+                'person': '$_id.person',
+                'currency': '$_id.currency',
+                'type': '$_id.type',
+                'totalAmount': '$totalAmount',
+                'count': '$count'
+            }
+        },
+        {'$sort': {'person': 1}}
+    ]
+    grouped_debts = list(current_app.db.debts.aggregate(pipeline))
+    return jsonify(grouped_debts)
+# --- END OF MODIFICATION ---
 
 @debts_bp.route('/<debt_id>', methods=['GET'])
 def get_debt_details(debt_id):
     debt = current_app.db.debts.find_one({'_id': ObjectId(debt_id)})
     if not debt:
         return jsonify({'error': 'Debt not found'}), 404
-    return jsonify(serialize_debt(debt))
+    return jsonify(serialize_debt(doc))
 
+@debts_bp.route('/person/<person_name>/<currency>', methods=['GET'])
+def get_debts_by_person_and_currency(person_name, currency):
+    query_filter = {
+        'person': person_name,
+        'currency': currency,
+        'status': 'open'
+    }
+    debts = list(current_app.db.debts.find(query_filter).sort('created_at', 1))
+    return jsonify([serialize_debt(d) for d in debts])
 
 @debts_bp.route('/<debt_id>/repay', methods=['POST'])
 def record_repayment(debt_id):
@@ -88,11 +127,9 @@ def record_repayment(debt_id):
     if not debt:
         return jsonify({'error': 'Debt not found'}), 404
 
-    # Check for over-repayment. Allow for small floating point inaccuracies.
     if repayment_amount > debt['remainingAmount'] + 0.001:
         return jsonify({'error': f"Repayment ({repayment_amount}) cannot be greater than the remaining amount ({debt['remainingAmount']})"}), 400
 
-    # Create transaction for repayment
     account_name = "USD Account" if debt['currency'] == "USD" else "KHR Account"
     tx = {
         "amount": repayment_amount,
@@ -127,4 +164,3 @@ def record_repayment(debt_id):
         'message': 'Repayment recorded successfully',
         'remainingAmount': new_remaining_amount
     })
-# --- End of modified file: web_service/app/debts/routes.py ---
