@@ -53,7 +53,7 @@ def format_summary_message(summary_data):
 
     debt_text = f"<b>Debts:</b>\n➡️ <b>You are owed:</b>\n{owed_to_you_text}\n⬅️ <b>You owe:</b>\n{owed_by_you_text}"
 
-    # --- Activity Periods (Operational Summary) ---
+    # --- Activity Periods ---
     def format_period_line(period_data):
         """Helper to format a single period's income/expense line."""
         income = period_data.get('income', {})
@@ -77,10 +77,7 @@ def format_summary_message(summary_data):
         today_text = f"<b>Today:</b>\n{format_period_line(periods.get('today', {}))}"
         this_week_text = f"<b>This Week:</b>\n{format_period_line(periods.get('this_week', {}))}"
         this_month_text = f"<b>This Month:</b>\n{format_period_line(periods.get('this_month', {}))}"
-
-        # --- MODIFICATION START: Clarify summary title ---
         activity_text = f"<b>Operational Activity (Excl. Loans):</b>\n{today_text}\n{this_week_text}\n{this_month_text}"
-        # --- MODIFICATION END ---
 
     # --- Combine All Parts ---
     return (
@@ -99,7 +96,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = keyboards.main_menu_keyboard()
     chat_id = update.effective_chat.id
 
-    # --- MODIFICATION START: Refresh summary on start/return ---
     if update.callback_query:
         await update.callback_query.answer()
         summary_data = api_client.get_detailed_summary()
@@ -110,10 +106,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode='HTML',
                 reply_markup=keyboard
             )
-        except Exception: # Fails if message content is identical, ignore error.
+        except Exception:
             pass
     else:
-        # Send full summary on initial /start command
         summary_data = api_client.get_detailed_summary()
         summary_text = format_summary_message(summary_data)
         await context.bot.send_message(
@@ -122,7 +117,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='HTML',
             reply_markup=keyboard
         )
-    # --- MODIFICATION END ---
 
     return ConversationHandler.END
 
@@ -137,7 +131,6 @@ async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     summary_text = format_summary_message(summary_data)
     text = "🔍 Here is your quick summary:" + summary_text
 
-    # Edit message to show updated summary
     await query.edit_message_text(
         text=text,
         parse_mode='HTML',
@@ -158,38 +151,61 @@ async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# --- MODIFICATION START: Added debug print statements ---
 @restricted
 async def generate_report_for_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Fetches and sends the analytics chart for the selected period."""
     query = update.callback_query
     await query.answer()
-    period = query.data.split('_')[-1]
 
-    # Timezone fix already applied in the provided source code:
+    # --- Debug Start ---
+    print("\n--- DEBUG: generate_report_for_period called ---")
+    try:
+        print(f"[Debug] Callback data received: {query.data}")
+        period = query.data.split('_')[-1]
+        print(f"[Debug] Parsed period variable: '{period}'")
+    except Exception as e:
+        print(f"[Debug] Error parsing period: {e}")
+        return
+    # --- Debug End ---
+
     today = datetime.now(PHNOM_PENH_TZ).date()
     start_date, end_date = None, None
 
     if period == "today":
+        print("[Debug] Calculating date range for: today")
         start_date = end_date = today
     elif period == "this_week":
+        print("[Debug] Calculating date range for: this_week")
         start_date = today - timedelta(days=today.weekday())
         end_date = start_date + timedelta(days=6)
     elif period == "last_week":
+        print("[Debug] Calculating date range for: last_week")
         end_date = today - timedelta(days=today.weekday() + 1)
         start_date = end_date - timedelta(days=6)
     elif period == "this_month":
+        print("[Debug] Calculating date range for: this_month")
         start_date = today.replace(day=1)
         next_month_first_day = (start_date.replace(day=28) + timedelta(days=4)).replace(day=1)
         end_date = next_month_first_day - timedelta(days=1)
 
+    # --- Debug Start ---
+    print(f"[Debug] Calculated start_date: {start_date}")
+    print(f"[Debug] Calculated end_date: {end_date}")
+    # --- Debug End ---
+
     if start_date and end_date:
-        await query.edit_message_text(text=f"📈 Generating your report for {start_date.strftime('%b %d')} to {end_date.strftime('%b %d')}...")
+        print("[Debug] Date range successfully calculated. Attempting API call...")
+        try:
+            await query.edit_message_text(text=f"📈 Generating your report for {start_date.strftime('%b %d')} to {end_date.strftime('%b %d')}...")
+        except Exception as e:
+            print(f"[Debug] Error editing message: {e}. Sending new message instead.")
+            await context.bot.send_message(chat_id=query.message.chat_id, text=f"📈 Generating your report for {start_date.strftime('%b %d')} to {end_date.strftime('%b %d')}...")
 
         chart = api_client.get_chart(start_date, end_date)
+        print(f"[Debug] API call complete. Chart data received: {chart is not None}")
 
         if chart:
-            # Delete "Generating report..." message before sending photo
-            await query.message.delete()
             await context.bot.send_photo(chat_id=query.message.chat_id, photo=chart)
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
@@ -197,10 +213,14 @@ async def generate_report_for_period(update: Update, context: ContextTypes.DEFAU
                 reply_markup=keyboards.main_menu_keyboard()
             )
         else:
-            await query.edit_message_text(
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
                 text="Could not generate report. No operational expense data found for this period.",
                 reply_markup=keyboards.main_menu_keyboard()
             )
+    else:
+        print("[Debug] ERROR: start_date or end_date not set. Logic branch missed for period.")
+# --- MODIFICATION END ---
 
 
 # --- Rate Update Conversation ---
@@ -901,8 +921,12 @@ async def save_transaction_and_end(update: Update, context: ContextTypes.DEFAULT
     base_text = "✅ Transaction recorded successfully!" if response else "❌ Failed to record transaction."
     summary_data = api_client.get_detailed_summary()
     summary_text = format_summary_message(summary_data)
-    await message_to_use.reply_text(
-        base_text + summary_text,
+
+    # If called from a conversation with message editing (like 'forgot log'), we might want to edit.
+    # But for simplicity and robustness, sending a new reply a_lways works.
+    await context.bot.send_message(
+        chat_id=message_to_use.chat_id,
+        text=base_text + summary_text,
         parse_mode='HTML',
         reply_markup=keyboards.main_menu_keyboard()
     )
@@ -920,7 +944,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.answer()
         try:
             await update.callback_query.edit_message_text(text=message, reply_markup=keyboard)
-        except Exception: # Message might not be editable or a different error occurred
+        except Exception:
             await context.bot.send_message(chat_id=chat_id, text=message, reply_markup=keyboard)
     else:
         await context.bot.send_message(chat_id=chat_id, text=message, reply_markup=keyboard)
@@ -1016,3 +1040,4 @@ reminder_conversation_handler = ConversationHandler(
     fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
     per_message=False
 )
+# --- End of modified file: telegram_bot/handlers.py ---
