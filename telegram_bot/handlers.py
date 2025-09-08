@@ -59,7 +59,7 @@ def format_summary_message(summary_data):
 
     debt_text = f"<b>Debts:</b>\n➡️ <b>You are owed:</b>\n{owed_to_you_text}\n⬅️ <b>You owe:</b>\n{owed_by_you_text}"
 
-    # --- Activity Periods ---
+    # --- Activity Periods (Operational Summary) ---
     def format_period_line(period_data):
         """Helper to format a single period's income/expense line."""
         income = period_data.get('income', {})
@@ -78,11 +78,12 @@ def format_summary_message(summary_data):
         return f"    ⬆️ In: {income_str}\n    ⬇️ Out: {expense_str}"
 
     periods = summary_data.get('periods', {})
-    today_text = f"<b>Today:</b>\n{format_period_line(periods.get('today', {}))}"
-    this_week_text = f"<b>This Week:</b>\n{format_period_line(periods.get('this_week', {}))}"
-    this_month_text = f"<b>This Month:</b>\n{format_period_line(periods.get('this_month', {}))}"
-
-    activity_text = f"<b>Activity:</b>\n{today_text}\n{this_week_text}\n{this_month_text}"
+    activity_text = "" # Default to empty string
+    if periods: # Check if period data exists before trying to format it
+        today_text = f"<b>Today:</b>\n{format_period_line(periods.get('today', {}))}"
+        this_week_text = f"<b>This Week:</b>\n{format_period_line(periods.get('this_week', {}))}"
+        this_month_text = f"<b>This Month:</b>\n{format_period_line(periods.get('this_month', {}))}"
+        activity_text = f"<b>Activity (Operational):</b>\n{today_text}\n{this_week_text}\n{this_month_text}"
 
     # --- Combine All Parts ---
     return (
@@ -104,6 +105,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.answer()
 
+    # Send message or edit existing message. Editing is generally better for callback queries.
+    # To keep logic simple for now, send new message.
     await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
     return ConversationHandler.END
 
@@ -146,8 +149,10 @@ async def generate_report_for_period(update: Update, context: ContextTypes.DEFAU
     await query.answer()
     period = query.data.split('_')[-1]
 
+    # --- MODIFICATION START: Timezone Correction ---
     # Use timezone-aware date for "today" to match user's local timezone.
     today = datetime.now(PHNOM_PENH_TZ).date()
+    # --- MODIFICATION END ---
     start_date, end_date = None, None
 
     if period == "today":
@@ -374,7 +379,9 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     direction = "Owes you" if debt['type'] == 'lent' else "You owe"
     purpose_text = f"<b>Purpose:</b> {debt['purpose']}\n" if debt.get('purpose') else ""
-    created_date_str = datetime.fromisoformat(debt['created_at']).strftime('%d %b %Y, %I:%M %p')
+    # Format timestamp to local time for display
+    created_date_obj = datetime.fromisoformat(debt['created_at'].replace('Z', '+00:00'))
+    created_date_str = created_date_obj.astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
     date_text = f"<b>Date Created:</b> {created_date_str}\n"
     text = (
         f"<b>Debt Details:</b>\n"
@@ -470,18 +477,17 @@ async def iou_received_date_choice(update: Update, context: ContextTypes.DEFAULT
                                                  'iou_type'] == 'lent' else "Who did you borrow money from?"
 
     if choice == 'iou_date_today':
-        # No timestamp set here; backend will default to datetime.utcnow() for current time.
+        # No timestamp set here; backend will default to current time.
         await context.bot.send_message(chat_id=query.message.chat_id, text=prompt)
         return IOU_PERSON
     elif choice == 'iou_date_yesterday':
-        # --- REFINED MODIFICATION START ---
-        # Calculate "yesterday" based on local timezone date.
+        # --- MODIFICATION START: Timezone Correction ---
         local_today = datetime.now(PHNOM_PENH_TZ).date()
         local_yesterday = local_today - timedelta(days=1)
         # Create a timezone-aware datetime object for local noon on that day.
         aware_dt = datetime.combine(local_yesterday, time(12, 0), tzinfo=PHNOM_PENH_TZ)
         context.user_data['timestamp'] = aware_dt.isoformat()
-        # --- REFINED MODIFICATION END ---
+        # --- MODIFICATION END ---
         await context.bot.send_message(chat_id=query.message.chat_id, text=prompt)
         return IOU_PERSON
     elif choice == 'iou_date_custom':
@@ -494,12 +500,12 @@ async def iou_received_custom_date(update: Update, context: ContextTypes.DEFAULT
     """Handles the custom date input for an IOU."""
     date_str = update.message.text
     try:
-        # --- REFINED MODIFICATION START ---
         custom_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        # --- MODIFICATION START: Timezone Correction ---
         # Create a timezone-aware datetime object for local noon on the custom date.
         aware_dt = datetime.combine(custom_date, time(12, 0), tzinfo=PHNOM_PENH_TZ)
         context.user_data['timestamp'] = aware_dt.isoformat()
-        # --- REFINED MODIFICATION END ---
+        # --- MODIFICATION END ---
 
         prompt = "Who did you lend money to?" if context.user_data[
                                                      'iou_type'] == 'lent' else "Who did you borrow money from?"
@@ -606,9 +612,10 @@ async def received_reminder_date_choice(update: Update, context: ContextTypes.DE
 
     try:
         days = int(choice)
-        # Calculate future reminder date based on local timezone date.
+        # --- MODIFICATION START: Timezone Correction ---
         local_today = datetime.now(PHNOM_PENH_TZ).date()
         reminder_date = local_today + timedelta(days=days)
+        # --- MODIFICATION END ---
         context.user_data['reminder_date_part'] = reminder_date
         text = f"Date: <b>{button_text}</b>\n\nGot it. And at what time? (e.g., 09:00, 17:30)"
         await context.bot.send_message(chat_id=query.message.chat_id, text=text, parse_mode='HTML')
@@ -638,12 +645,11 @@ async def received_reminder_time(update: Update, context: ContextTypes.DEFAULT_T
         reminder_time = datetime.strptime(time_str, "%H:%M").time()
         reminder_date = context.user_data['reminder_date_part']
 
-        # --- REFINED MODIFICATION START ---
+        # --- MODIFICATION START: Timezone Correction ---
         # Create timezone-aware datetime for the reminder schedule.
-        # This ensures the scheduler interprets the time correctly based on local time.
         aware_reminder_dt = datetime.combine(reminder_date, reminder_time, tzinfo=PHNOM_PENH_TZ)
         context.user_data['reminder_datetime'] = aware_reminder_dt.isoformat()
-        # --- REFINED MODIFICATION END ---
+        # --- MODIFICATION END ---
         return await _save_reminder_and_confirm(update, context)
     except ValueError:
         await update.message.reply_text("Invalid time format. Please use HH:MM (24-hour format, e.g., 09:00 or 17:30).")
@@ -765,14 +771,13 @@ async def received_forgot_day(update: Update, context: ContextTypes.DEFAULT_TYPE
         return FORGOT_CUSTOM_DATE
 
     days_ago = int(choice)
-    # --- REFINED MODIFICATION START ---
-    # Calculate forgotten date based on local timezone date.
+    # --- MODIFICATION START: Timezone Correction ---
     local_today = datetime.now(PHNOM_PENH_TZ).date()
     forgotten_date = local_today - timedelta(days=days_ago)
     # Create a timezone-aware datetime object for local noon on that day.
     aware_dt = datetime.combine(forgotten_date, time(12, 0), tzinfo=PHNOM_PENH_TZ)
     context.user_data['timestamp'] = aware_dt.isoformat()
-    # --- REFINED MODIFICATION END ---
+    # --- MODIFICATION END ---
 
     text = f"Date: <b>{button_text}</b>\n\nGot it. Was it an expense or an income?"
     await context.bot.send_message(
@@ -787,12 +792,11 @@ async def received_forgot_day(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def received_forgot_custom_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     date_str = update.message.text
     try:
-        # --- REFINED MODIFICATION START ---
         custom_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        # Create a timezone-aware datetime object for local noon on the custom date.
+        # --- MODIFICATION START: Timezone Correction ---
         aware_dt = datetime.combine(custom_date, time(12, 0), tzinfo=PHNOM_PENH_TZ)
         context.user_data['timestamp'] = aware_dt.isoformat()
-        # --- REFINED MODIFICATION END ---
+        # --- MODIFICATION END ---
         await update.message.reply_text(
             "Got it. Was it an expense or an income?",
             reply_markup=keyboards.forgot_type_keyboard()
@@ -809,18 +813,18 @@ async def received_forgot_type(update: Update, context: ContextTypes.DEFAULT_TYP
 
     button_text = "Expense" if "expense" in query.data else "Income"
     context.user_data['type'] = query.data.split('_')[-1]
-    emoji = "💸" if context.user_data['type'] == 'expense' else "💰"
 
     text = f"Type: <b>{button_text}</b>\n\nEnter the amount:"
     await context.bot.send_message(chat_id=query.message.chat_id, text=text, parse_mode='HTML')
     return AMOUNT
 
 
-# --- Add Transaction Conversation (Shared Logic) ---
+# --- Add Transaction Conversation (Shared Logic for Forgot Log and New Transaction) ---
 @restricted
 async def add_transaction_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    context.user_data.clear() # Clear context for new transaction
     context.user_data['type'] = 'expense' if query.data == 'add_expense' else 'income'
     emoji = "💸" if context.user_data['type'] == 'expense' else "💰"
     await context.bot.send_message(chat_id=query.message.chat_id, text=f"{emoji} Enter the amount:")

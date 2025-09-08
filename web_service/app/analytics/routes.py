@@ -1,3 +1,5 @@
+# --- Start of modified file: web_service/app/analytics/routes.py ---
+
 import io
 from flask import Blueprint, current_app, Response, request
 from datetime import datetime, timedelta, time
@@ -5,6 +7,16 @@ import matplotlib.pyplot as plt
 
 analytics_bp = Blueprint('analytics', __name__, url_prefix='/analytics')
 
+# --- MODIFICATION START ---
+# Define categories to exclude from operational expense reports.
+FINANCIAL_TRANSACTION_CATEGORIES = [
+    'Loan Lent',         # Expense type from lending money to someone
+    'Debt Repayment',    # Expense type from repaying a debt you owed
+    'Loan Received',     # Income type from borrowing money from someone (for completeness)
+    'Debt Settled',      # Income type from someone repaying a debt to you (for completeness)
+    'Initial Balance'    # Adjustment type for setting initial account value
+]
+# --- MODIFICATION END ---
 
 @analytics_bp.route('/report/chart', methods=['GET'])
 def get_report_chart():
@@ -26,13 +38,10 @@ def get_report_chart():
         {'$match': {
             'timestamp': {'$gte': start_date, '$lte': end_date},
             'type': 'expense',
-            'categoryId': {
-                '$nin': [
-                    'Loan Lent',
-                    'Debt Repayment',
-                    'Initial Balance'
-                ]
-            }
+            # --- MODIFICATION START ---
+            # Exclude all financial adjustment categories from the expense report.
+            'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}
+            # --- MODIFICATION END ---
         }},
         {'$addFields': {
             'amount_in_usd': {
@@ -53,7 +62,7 @@ def get_report_chart():
     data = list(current_app.db.transactions.aggregate(pipeline))
 
     if not data:
-        return Response("No lifestyle expense data found for the selected period.", status=404)
+        return Response("No operational expense data found for the selected period.", status=404)
 
     labels = [item['_id'] for item in data]
     sizes = [item['total'] for item in data]
@@ -61,7 +70,8 @@ def get_report_chart():
     fig, ax = plt.subplots()
     ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
     ax.axis('equal')
-    title = f"Lifestyle Expenses from {start_date.strftime('%d %b')} to {end_date.strftime('%d %b %Y')}"
+    # Update title to reflect operational focus
+    title = f"Operational Expenses from {start_date.strftime('%d %b')} to {end_date.strftime('%d %b %Y')}"
     plt.title(title)
 
     buf = io.BytesIO()
@@ -70,3 +80,4 @@ def get_report_chart():
     plt.close(fig)
 
     return Response(buf.getvalue(), mimetype='image/png')
+# --- End of modified file: web_service/app/analytics/routes.py ---
