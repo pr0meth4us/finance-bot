@@ -24,16 +24,17 @@ def main():
     app.add_handler(handlers.set_balance_conversation_handler)
     app.add_handler(handlers.forgot_conversation_handler)
     app.add_handler(handlers.reminder_conversation_handler)
-    # --- MODIFICATION: Added report conversation handler ---
     app.add_handler(handlers.report_conversation_handler)
+    # --- START OF MODIFICATION ---
+    # Add the new conversation handler for editing transactions
+    app.add_handler(handlers.edit_tx_conversation_handler)
+    # --- END OF MODIFICATION ---
 
     # --- Register Standalone Command Handlers ---
     app.add_handler(CommandHandler("start", handlers.start))
 
     # --- Register Standalone Callback Query Handlers ---
     app.add_handler(CallbackQueryHandler(handlers.start, pattern='^start$'))
-    # --- MODIFICATION: Removed standalone report handler, now part of conversation ---
-    # app.add_handler(CallbackQueryHandler(handlers.generate_report_for_period, pattern='^report_period_')) # Replaced by report_conversation_handler
     app.add_handler(CallbackQueryHandler(handlers.quick_check, pattern='^quick_check$'))
 
     # History callbacks

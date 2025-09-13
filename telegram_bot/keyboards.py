@@ -23,8 +23,8 @@ def main_menu_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
+
 def reminder_date_keyboard():
-    """Keyboard for selecting a reminder date."""
     keyboard = [
         [
             InlineKeyboardButton("Tomorrow", callback_data='remind_date_1'),
@@ -38,7 +38,6 @@ def reminder_date_keyboard():
 
 
 def forgot_day_keyboard():
-    """Keyboard to select which past day to log for."""
     keyboard = [
         [
             InlineKeyboardButton("Yesterday", callback_data='forgot_day_1'),
@@ -49,8 +48,8 @@ def forgot_day_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
+
 def iou_date_keyboard():
-    """Keyboard for selecting an IOU date."""
     keyboard = [
         [
             InlineKeyboardButton("Today", callback_data='iou_date_today'),
@@ -63,7 +62,6 @@ def iou_date_keyboard():
 
 
 def forgot_type_keyboard():
-    """Keyboard to select transaction type for a forgotten log."""
     keyboard = [
         [
             InlineKeyboardButton("💸 Expense", callback_data='forgot_type_expense'),
@@ -83,7 +81,6 @@ def report_period_keyboard():
             InlineKeyboardButton("🗓️ This Month", callback_data='report_period_this_month'),
             InlineKeyboardButton("🗓️ Last Week", callback_data='report_period_last_week'),
         ],
-        # --- ADD THIS LINE ---
         [InlineKeyboardButton("🗓️ Custom Range", callback_data='report_period_custom')],
         [InlineKeyboardButton("‹ Back", callback_data='start')],
     ]
@@ -111,27 +108,26 @@ def iou_menu_keyboard():
 
 
 def iou_list_keyboard(grouped_debts):
-    """Creates a keyboard for debts grouped by person and currency."""
     keyboard = []
     lent = [d for d in grouped_debts if d['type'] == 'lent']
     borrowed = [d for d in grouped_debts if d['type'] == 'borrowed']
 
-    # Using ':' as a safer separator for callback data
     if lent:
         for debt in lent:
             label = f"Owed by {debt['person']}: {debt['totalAmount']:,.2f} {debt['currency']} ({debt['count']})"
-            keyboard.append([InlineKeyboardButton(label, callback_data=f"iou:person:{debt['person']}:{debt['currency']}")])
+            keyboard.append(
+                [InlineKeyboardButton(label, callback_data=f"iou:person:{debt['person']}:{debt['currency']}")])
     if borrowed:
         for debt in borrowed:
             label = f"You owe {debt['person']}: {debt['totalAmount']:,.2f} {debt['currency']} ({debt['count']})"
-            keyboard.append([InlineKeyboardButton(label, callback_data=f"iou:person:{debt['person']}:{debt['currency']}")])
+            keyboard.append(
+                [InlineKeyboardButton(label, callback_data=f"iou:person:{debt['person']}:{debt['currency']}")])
 
     keyboard.append([InlineKeyboardButton("‹ Back", callback_data='iou_menu')])
     return InlineKeyboardMarkup(keyboard)
 
 
 def iou_person_detail_keyboard(person_debts, person_name, currency):
-    """Creates a keyboard for an individual person's debts, including the date."""
     keyboard = [
         [InlineKeyboardButton(f"💰 Record Repayment ({currency})", callback_data=f"iou:repay:{person_name}:{currency}")]
     ]
@@ -147,7 +143,6 @@ def iou_person_detail_keyboard(person_debts, person_name, currency):
 
 
 def iou_detail_keyboard(debt_id, person_name, currency):
-    """Creates keyboard for a single debt, with a back button to the person's list."""
     keyboard = [
         [InlineKeyboardButton("‹ Back to List", callback_data=f"iou:person:{person_name}:{currency}")],
     ]
@@ -165,7 +160,6 @@ def currency_keyboard():
 
 
 def expense_categories_keyboard():
-    """* Categories specifically for expenses. *"""
     keyboard = [
         [InlineKeyboardButton("🍔 Food", callback_data='cat_Food')],
         [
@@ -183,7 +177,6 @@ def expense_categories_keyboard():
 
 
 def income_categories_keyboard():
-    """* New keyboard specifically for income sources. *"""
     keyboard = [
         [InlineKeyboardButton("💼 Salary", callback_data='cat_Salary')],
         [InlineKeyboardButton("📈 Bonus", callback_data='cat_Bonus')],
@@ -210,8 +203,9 @@ def history_keyboard(transactions):
         amount = tx.get('amount', 0)
         currency = tx.get('currency', 'N/A')
         category = tx.get('categoryId', 'Unknown')
+        tx_type_emoji = "⬇️" if tx.get('type') == 'expense' else "⬆️"
 
-        label = f"{amount:,.2f} {currency} - {category}"
+        label = f"{tx_type_emoji} {amount:,.2f} {currency} - {category}"
         callback = f"manage_tx_{tx['_id']}"
         keyboard.append([InlineKeyboardButton(label, callback_data=callback)])
 
@@ -221,10 +215,32 @@ def history_keyboard(transactions):
 
 def manage_tx_keyboard(tx_id):
     keyboard = [
-        [InlineKeyboardButton("🗑️ Delete", callback_data=f'delete_tx_{tx_id}')],
+        [
+            InlineKeyboardButton("✏️ Edit", callback_data=f'edit_tx_{tx_id}'),
+            InlineKeyboardButton("🗑️ Delete", callback_data=f'delete_tx_{tx_id}')
+        ],
         [InlineKeyboardButton("‹ Back to History", callback_data='history')],
     ]
     return InlineKeyboardMarkup(keyboard)
+
+
+# --- START OF MODIFICATION ---
+def edit_tx_options_keyboard(tx_id):
+    """Keyboard with options for which field to edit."""
+    keyboard = [
+        [
+            InlineKeyboardButton("💰 Amount", callback_data=f'edit_field_amount_{tx_id}'),
+            InlineKeyboardButton("🏷️ Category", callback_data=f'edit_field_categoryId_{tx_id}'),
+        ],
+        [
+            InlineKeyboardButton("📝 Description", callback_data=f'edit_field_description_{tx_id}'),
+        ],
+        [InlineKeyboardButton("‹ Cancel Edit", callback_data=f'manage_tx_{tx_id}')],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+# --- END OF MODIFICATION ---
 
 
 def confirm_delete_keyboard(tx_id):
@@ -235,3 +251,4 @@ def confirm_delete_keyboard(tx_id):
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
+

@@ -1,17 +1,28 @@
-# --- File: web_service/app/debts/routes.py ---
-
 from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime
 from bson import ObjectId
 
 debts_bp = Blueprint('debts', __name__, url_prefix='/debts')
 
+
 def serialize_debt(doc):
-    doc['_id'] = str(doc['_id'])
+    """
+    Serializes a debt document from MongoDB for JSON responses.
+    Converts ObjectId to string and datetime to ISO 8601 format string.
+    """
+    if '_id' in doc:
+        doc['_id'] = str(doc['_id'])
+
+    # Explicitly convert datetime to ISO 8601 format string to ensure frontend compatibility
+    if 'created_at' in doc and isinstance(doc['created_at'], datetime):
+        doc['created_at'] = doc['created_at'].isoformat()
+
     return doc
+
 
 @debts_bp.route('/', methods=['POST'])
 def add_debt():
+    """Adds a new debt and a corresponding transaction to reflect the balance change."""
     data = request.json
     if not all(k in data for k in ['type', 'person', 'amount', 'currency']):
         return jsonify({'error': 'Missing required fields'}), 400
@@ -24,7 +35,7 @@ def add_debt():
     timestamp_str = data.get('timestamp')
     try:
         created_at = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.utcnow()
-    except ValueError:
+    except (ValueError, TypeError):
         created_at = datetime.utcnow()
 
     debt = {
@@ -51,7 +62,7 @@ def add_debt():
     if data['type'] == 'lent':
         tx_data['type'] = 'expense'
         tx_data['categoryId'] = 'Loan Lent'
-    else: # type == 'borrowed'
+    else:
         tx_data['type'] = 'income'
         tx_data['categoryId'] = 'Loan Received'
 
@@ -59,12 +70,12 @@ def add_debt():
     result = current_app.db.debts.insert_one(debt)
     return jsonify({'message': 'Debt recorded', 'id': str(result.inserted_id)}), 201
 
-# --- START OF MODIFICATION ---
+
 @debts_bp.route('/', methods=['GET'])
 def get_open_debts():
     """
     Fetches open debts and groups them by person and currency to provide a summary.
-    This matches the expectation of the frontend keyboard `iou_list_keyboard`.
+    This aggregation provides the `totalAmount` and `count` fields expected by the bot's keyboard.
     """
     pipeline = [
         {'$match': {'status': 'open'}},
@@ -75,8 +86,8 @@ def get_open_debts():
                     'currency': '$currency',
                     'type': '$type'
                 },
-                'totalAmount': {'$sum': '$remainingAmount'}, # Key expected by frontend
-                'count': {'$sum': 1}                     # Key expected by frontend
+                'totalAmount': {'$sum': '$remainingAmount'},
+                'count': {'$sum': 1}
             }
         },
         {
@@ -93,17 +104,20 @@ def get_open_debts():
     ]
     grouped_debts = list(current_app.db.debts.aggregate(pipeline))
     return jsonify(grouped_debts)
-# --- END OF MODIFICATION ---
+
 
 @debts_bp.route('/<debt_id>', methods=['GET'])
 def get_debt_details(debt_id):
+    """Fetches the details of a single debt document by its ID."""
     debt = current_app.db.debts.find_one({'_id': ObjectId(debt_id)})
     if not debt:
         return jsonify({'error': 'Debt not found'}), 404
-    return jsonify(serialize_debt(doc))
+    return jsonify(serialize_debt(debt))
+
 
 @debts_bp.route('/person/<person_name>/<currency>', methods=['GET'])
 def get_debts_by_person_and_currency(person_name, currency):
+    """Fetches all individual open debts for a specific person and currency."""
     query_filter = {
         'person': person_name,
         'currency': currency,
@@ -112,55 +126,66 @@ def get_debts_by_person_and_currency(person_name, currency):
     debts = list(current_app.db.debts.find(query_filter).sort('created_at', 1))
     return jsonify([serialize_debt(d) for d in debts])
 
-@debts_bp.route('/<debt_id>/repay', methods=['POST'])
-def record_repayment(debt_id):
+
+@debts_bp.route('/person/<person_name>/<currency>/repay', methods=['POST'])
+def record_lump_sum_repayment(person_name, currency):
+    """Handles a lump-sum repayment, applying it to the oldest debts first."""
     data = request.json
     if 'amount' not in data:
         return jsonify({'error': 'Repayment amount is required'}), 400
 
     try:
         repayment_amount = float(data['amount'])
-    except ValueError:
+        if repayment_amount <= 0:
+            return jsonify({'error': 'Amount must be a positive number'}), 400
+    except (ValueError, TypeError):
         return jsonify({'error': 'Amount must be a number'}), 400
 
-    debt = current_app.db.debts.find_one({'_id': ObjectId(debt_id)})
-    if not debt:
-        return jsonify({'error': 'Debt not found'}), 404
+    query_filter = {'person': person_name, 'currency': currency, 'status': 'open'}
+    debts_to_repay = list(current_app.db.debts.find(query_filter).sort('created_at', 1))
 
-    if repayment_amount > debt['remainingAmount'] + 0.001:
-        return jsonify({'error': f"Repayment ({repayment_amount}) cannot be greater than the remaining amount ({debt['remainingAmount']})"}), 400
+    if not debts_to_repay:
+        return jsonify({'error': 'No open debts found for this person and currency'}), 404
 
-    account_name = "USD Account" if debt['currency'] == "USD" else "KHR Account"
-    tx = {
-        "amount": repayment_amount,
-        "currency": debt['currency'],
-        "accountName": account_name,
-        "timestamp": datetime.utcnow()
-    }
-    if debt['type'] == 'lent':
-        tx['type'] = 'income'
-        tx['categoryId'] = 'Debt Settled'
-        tx['description'] = f"Repayment from {debt['person']}"
-    else:
-        tx['type'] = 'expense'
-        tx['categoryId'] = 'Debt Repayment'
-        tx['description'] = f"Repayment to {debt['person']}"
+    total_remaining = sum(d['remainingAmount'] for d in debts_to_repay)
+    if repayment_amount > total_remaining + 0.001:  # Allow for float inaccuracies
+        return jsonify(
+            {'error': f'Repayment amount {repayment_amount} is greater than total owed {total_remaining:.2f}'}), 400
 
-    current_app.db.transactions.insert_one(tx)
+    amount_to_apply = repayment_amount
+    debt_type = debts_to_repay[0]['type']
 
-    new_remaining_amount = debt['remainingAmount'] - repayment_amount
-    new_status = 'settled' if new_remaining_amount <= 0.001 else 'open'
+    for debt in debts_to_repay:
+        if amount_to_apply <= 0:
+            break
 
-    current_app.db.debts.update_one(
-        {'_id': ObjectId(debt_id)},
-        {
-            '$inc': {'remainingAmount': -repayment_amount},
-            '$push': {'repayments': {'amount': repayment_amount, 'date': datetime.utcnow()}},
-            '$set': {'status': new_status}
+        repayment_for_this_debt = min(amount_to_apply, debt['remainingAmount'])
+
+        new_remaining = debt['remainingAmount'] - repayment_for_this_debt
+        new_status = 'settled' if new_remaining <= 0.001 else 'open'
+
+        current_app.db.debts.update_one(
+            {'_id': debt['_id']},
+            {
+                '$inc': {'remainingAmount': -repayment_for_this_debt},
+                '$push': {'repayments': {'amount': repayment_for_this_debt, 'date': datetime.utcnow()}},
+                '$set': {'status': new_status}
+            }
+        )
+
+        account_name = "USD Account" if currency == "USD" else "KHR Account"
+        tx_category = 'Debt Settled' if debt_type == 'lent' else 'Debt Repayment'
+        tx_type = 'income' if debt_type == 'lent' else 'expense'
+        tx_desc = f"Repayment from {person_name}" if debt_type == 'lent' else f"Repayment to {person_name}"
+
+        tx = {
+            "type": tx_type, "amount": repayment_for_this_debt, "currency": currency,
+            "categoryId": tx_category, "accountName": account_name,
+            "description": tx_desc, "timestamp": datetime.utcnow()
         }
-    )
+        current_app.db.transactions.insert_one(tx)
 
-    return jsonify({
-        'message': 'Repayment recorded successfully',
-        'remainingAmount': new_remaining_amount
-    })
+        amount_to_apply -= repayment_for_this_debt
+
+    return jsonify(
+        {'message': f'Successfully recorded repayment of {repayment_amount:,.2f} {currency} for {person_name}.'})

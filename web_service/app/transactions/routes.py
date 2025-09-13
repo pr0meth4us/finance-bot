@@ -7,7 +7,16 @@ transactions_bp = Blueprint('transactions', __name__, url_prefix='/transactions'
 
 
 def serialize_tx(tx):
-    tx['_id'] = str(tx['_id'])
+    """
+    Serializes a transaction document from MongoDB for JSON responses.
+    Converts ObjectId and datetime to JSON-friendly string formats.
+    """
+    if '_id' in tx:
+        tx['_id'] = str(tx['_id'])
+
+    if 'timestamp' in tx and isinstance(tx['timestamp'], datetime):
+        tx['timestamp'] = tx['timestamp'].isoformat()
+
     return tx
 
 
@@ -17,7 +26,6 @@ def add_transaction():
     if not all(k in data for k in ['type', 'amount', 'currency', 'categoryId', 'accountName']):
         return jsonify({'error': 'Missing required fields'}), 400
 
-    # Determine the timestamp: use provided one or default to now
     timestamp_str = data.get('timestamp')
     if timestamp_str:
         timestamp = datetime.fromisoformat(timestamp_str)
@@ -43,14 +51,72 @@ def add_transaction():
 
 @transactions_bp.route('/recent', methods=['GET'])
 def get_recent_transactions():
-    limit = int(request.args.get('limit', 5))
+    limit = int(request.args.get('limit', 10))
     txs = list(current_app.db.transactions.find().sort('timestamp', -1).limit(limit))
     return jsonify([serialize_tx(tx) for tx in txs])
 
 
+@transactions_bp.route('/<tx_id>', methods=['GET'])
+def get_transaction(tx_id):
+    try:
+        transaction = current_app.db.transactions.find_one({'_id': ObjectId(tx_id)})
+        if transaction:
+            return jsonify(serialize_tx(transaction))
+        else:
+            return jsonify({'error': 'Transaction not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+# --- START OF MODIFICATION ---
+# New route to update an existing transaction
+@transactions_bp.route('/<tx_id>', methods=['PUT'])
+def update_transaction(tx_id):
+    """Updates one or more fields of a specific transaction."""
+    data = request.json
+    if not data:
+        return jsonify({'error': 'No update data provided'}), 400
+
+    # Build the update payload dynamically
+    update_fields = {}
+    allowed_fields = ['amount', 'categoryId', 'description']
+    for field in allowed_fields:
+        if field in data:
+            if field == 'amount':
+                try:
+                    update_fields[field] = float(data[field])
+                except (ValueError, TypeError):
+                    return jsonify({'error': 'Invalid amount format'}), 400
+            else:
+                update_fields[field] = data[field]
+
+    if not update_fields:
+        return jsonify({'error': 'No valid fields to update'}), 400
+
+    try:
+        result = current_app.db.transactions.update_one(
+            {'_id': ObjectId(tx_id)},
+            {'$set': update_fields}
+        )
+        if result.matched_count:
+            return jsonify({'message': 'Transaction updated successfully'})
+        else:
+            return jsonify({'error': 'Transaction not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# --- END OF MODIFICATION ---
+
+
 @transactions_bp.route('/<tx_id>', methods=['DELETE'])
 def delete_transaction(tx_id):
-    result = current_app.db.transactions.delete_one({'_id': ObjectId(tx_id)})
-    if result.deleted_count:
-        return jsonify({'message': 'Transaction deleted'})
-    return jsonify({'error': 'Transaction not found'}), 404
+    try:
+        result = current_app.db.transactions.delete_one({'_id': ObjectId(tx_id)})
+        if result.deleted_count:
+            return jsonify({'message': 'Transaction deleted'})
+        else:
+            return jsonify({'error': 'Transaction not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+

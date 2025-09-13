@@ -15,6 +15,11 @@ from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 from decorators import restricted
 from collections import defaultdict
+# --- START OF MODIFICATION ---
+import io
+import matplotlib.pyplot as plt
+# --- END OF MODIFICATION ---
+
 
 # --- Conversation States ---
 (
@@ -27,10 +32,16 @@ from collections import defaultdict
     REMINDER_PURPOSE, REMINDER_ASK_DATE, REMINDER_CUSTOM_DATE, REMINDER_ASK_TIME
 ) = range(23)
 
-# --- MODIFICATION: Added states for report conversation ---
 CHOOSE_REPORT_PERIOD, REPORT_ASK_START_DATE, REPORT_ASK_END_DATE = range(23, 26)
 
+# --- START OF MODIFICATION ---
+# Add new states for the transaction editing conversation
+EDIT_CHOOSE_FIELD, EDIT_GET_NEW_VALUE, EDIT_GET_NEW_CATEGORY = range(26, 29)
+# --- END OF MODIFICATION ---
+
+
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
+
 
 # --- Helper Function ---
 def format_summary_message(summary_data):
@@ -110,7 +121,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=keyboard
             )
         except Exception:
-            pass # Ignore if message hasn't changed or other minor issues
+            pass  # Ignore if message hasn't changed or other minor issues
     else:
         summary_data = api_client.get_detailed_summary()
         summary_text = format_summary_message(summary_data)
@@ -141,50 +152,115 @@ async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# --- MODIFICATION START: Report Generation Conversation ---
+# --- START OF MODIFICATION ---
+# --- Report Generation Conversation ---
+
+def _format_report_summary_message(data):
+    """Formats the detailed report data into a readable string."""
+    summary = data.get('summary', {})
+    income = summary.get('totalIncomeUSD', 0)
+    expense = summary.get('totalExpenseUSD', 0)
+    net = summary.get('netSavingsUSD', 0)
+
+    start_date = datetime.fromisoformat(data['startDate']).strftime('%b %d, %Y')
+    end_date = datetime.fromisoformat(data['endDate']).strftime('%b %d, %Y')
+
+    header = f"📊 <b>Financial Report</b>\n🗓️ <i>{start_date} to {end_date}</i>\n\n"
+    summary_text = (
+        f"<b>Summary (in USD):</b>\n"
+        f"⬆️ Total Income: ${income:,.2f}\n"
+        f"⬇️ Total Expense: ${expense:,.2f}\n"
+        f"<b>Net: ${net:,.2f}</b> {'✅' if net >= 0 else '🔻'}\n\n"
+    )
+
+    expense_breakdown = data.get('expenseBreakdown', [])
+    expense_text = "<b>Top Expenses:</b>\n"
+    if expense_breakdown:
+        for item in expense_breakdown[:5]: # Show top 5
+            expense_text += f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
+    else:
+        expense_text += "    - No expenses recorded.\n"
+
+    return header + summary_text + expense_text
+
+
+def _create_income_expense_chart(data):
+    """Creates a simple bar chart comparing income and expense."""
+    summary = data.get('summary', {})
+    income = summary.get('totalIncomeUSD', 0)
+    expense = summary.get('totalExpenseUSD', 0)
+
+    if income == 0 and expense == 0:
+        return None
+
+    labels = ['Income', 'Expense']
+    values = [income, expense]
+    colors = ['#4CAF50', '#F44336'] # Green for income, Red for expense
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    bars = ax.bar(labels, values, color=colors)
+    ax.set_ylabel('Amount (USD)')
+    ax.set_title('Income vs. Expense')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+
+    # Add values on top of bars
+    for bar in bars:
+        yval = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2.0, yval, f'${yval:,.2f}', va='bottom', ha='center')
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight')
+    buf.seek(0)
+    plt.close(fig)
+    return buf.getvalue()
+
 
 async def _generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE, start_date, end_date):
-    """Shared logic to generate and send report chart."""
+    """Shared logic to generate and send report summary and chart."""
     chat_id = update.effective_chat.id
-    loading_message = None
-
-    # Send loading message or edit existing one
     loading_text = f"📈 Generating your report for {start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')}..."
 
-    if update.callback_query:
-        message_to_edit = update.callback_query.message
-    else:
-        message_to_edit = update.message
+    message_to_edit = update.callback_query.message if update.callback_query else update.message
 
     try:
         await message_to_edit.edit_text(text=loading_text)
-    except Exception:
-        # If edit fails (e.g., message text is identical, or called from a text input), send new message.
-        # This part requires careful handling depending on flow origin. For simplicity, we assume we can edit or proceed.
-        pass
+    except Exception: # Might fail if it's not a callback, so we send a new message
+        loading_message = await context.bot.send_message(chat_id=chat_id, text=loading_text)
+        message_to_edit = loading_message
 
-    # API Call
-    chart = api_client.get_chart(start_date, end_date)
 
-    # Delete loading message before sending photo/final message
+    report_data = api_client.get_detailed_report(start_date, end_date)
+
     try:
         await message_to_edit.delete()
     except Exception:
-        pass # Ignore deletion errors
+        pass  # Ignore deletion errors
 
-    if chart:
-        await context.bot.send_photo(chat_id=chat_id, photo=chart)
+    if report_data:
+        # 1. Format and send the text summary
+        summary_message = _format_report_summary_message(report_data)
+        await context.bot.send_message(chat_id=chat_id, text=summary_message, parse_mode='HTML')
+
+        # 2. Generate and send the chart
+        chart_image = _create_income_expense_chart(report_data)
+        if chart_image:
+            await context.bot.send_photo(chat_id=chat_id, photo=chart_image)
+
+        # 3. Send final message
         await context.bot.send_message(
             chat_id=chat_id,
-            text="Report sent! What's next?",
+            text="Report complete! What's next?",
             reply_markup=keyboards.main_menu_keyboard()
         )
     else:
         await context.bot.send_message(
             chat_id=chat_id,
-            text="Could not generate report. No operational expense data found for this period.",
+            text="Could not generate report. No operational data found for this period.",
             reply_markup=keyboards.main_menu_keyboard()
         )
+# --- END OF MODIFICATION ---
 
 @restricted
 async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -208,7 +284,7 @@ async def process_report_choice(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         period = query.data[len(callback_prefix):]
     except Exception:
-        return ConversationHandler.END # Safety exit
+        return ConversationHandler.END  # Safety exit
 
     today = datetime.now(PHNOM_PENH_TZ).date()
     start_date, end_date = None, None
@@ -233,7 +309,6 @@ async def process_report_choice(update: Update, context: ContextTypes.DEFAULT_TY
         await _generate_report(update, context, start_date, end_date)
         return ConversationHandler.END
     else:
-        # Fallback in case a button a_dded without logic here
         await query.edit_message_text("Invalid selection.", reply_markup=keyboards.main_menu_keyboard())
         return ConversationHandler.END
 
@@ -245,7 +320,8 @@ async def received_report_start_date(update: Update, context: ContextTypes.DEFAU
     try:
         start_date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
         context.user_data['report_start_date'] = start_date_obj
-        await update.message.reply_text(f"Start date set to {start_date_obj.strftime('%Y-%m-%d')}. Now, please enter the end date (YYYY-MM-DD):")
+        await update.message.reply_text(
+            f"Start date set to {start_date_obj.strftime('%Y-%m-%d')}.\nNow, please enter the end date (YYYY-MM-DD):")
         return REPORT_ASK_END_DATE
     except ValueError:
         await update.message.reply_text("Invalid date format. Please use YYYY-MM-DD.")
@@ -261,14 +337,15 @@ async def received_report_end_date(update: Update, context: ContextTypes.DEFAULT
         start_date_obj = context.user_data.get('report_start_date')
 
         if not start_date_obj:
-            await update.message.reply_text("Error: Start date not found. Cancelling operation.", reply_markup=keyboards.main_menu_keyboard())
+            await update.message.reply_text("Error: Start date not found. Cancelling operation.",
+                                            reply_markup=keyboards.main_menu_keyboard())
             return ConversationHandler.END
 
         if end_date_obj < start_date_obj:
-            await update.message.reply_text("End date cannot be earlier than start date. Please enter the end date again:")
+            await update.message.reply_text(
+                "End date cannot be earlier than start date. Please enter the end date again:")
             return REPORT_ASK_END_DATE
 
-        # Call generation logic (note: update object here is a Message, not CallbackQuery)
         await _generate_report(update, context, start_date_obj, end_date_obj)
 
     except ValueError:
@@ -278,8 +355,6 @@ async def received_report_end_date(update: Update, context: ContextTypes.DEFAULT
         context.user_data.pop('report_start_date', None)
 
     return ConversationHandler.END
-
-# --- MODIFICATION END ---
 
 
 # --- Rate Update Conversation ---
@@ -324,11 +399,12 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text_to_send = "No recent transactions found."
         reply_markup_to_send = keyboards.main_menu_keyboard()
 
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
-        text=text_to_send,
-        reply_markup=reply_markup_to_send
-    )
+    # We need to edit the existing message if we came from a back button
+    if query.message.text != text_to_send:
+        await query.edit_message_text(
+            text=text_to_send,
+            reply_markup=reply_markup_to_send
+        )
 
 
 @restricted
@@ -337,10 +413,36 @@ async def manage_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     tx_id = query.data.split('_')[-1]
-    text = f"Managing Transaction ID: ...{tx_id[-6:]}"
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
+
+    tx_details = api_client.get_transaction_details(tx_id)
+    if not tx_details:
+        await query.edit_message_text("Error: Could not fetch transaction details.",
+                                      reply_markup=keyboards.history_keyboard([]))
+        return
+
+    tx_type_emoji = "⬇️ Expense" if tx_details.get('type') == 'expense' else "⬆️ Income"
+    amount = tx_details.get('amount', 0)
+    currency = tx_details.get('currency', '')
+    category = tx_details.get('categoryId', 'N/A')
+    description = tx_details.get('description', 'No description')
+
+    # Format timestamp for display
+    created_date_obj = datetime.fromisoformat(tx_details['timestamp'].replace('Z', '+00:00'))
+    created_date_str = created_date_obj.astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
+
+    text = (
+        f"<b>Transaction Details:</b>\n\n"
+        f"<b>Type:</b> {tx_type_emoji}\n"
+        f"<b>Amount:</b> {amount:,.2f} {currency}\n"
+        f"<b>Category:</b> {category}\n"
+        f"<b>Description:</b> {description}\n"
+        f"<b>Date:</b> {created_date_str}\n\n"
+        "What would you like to do?"
+    )
+
+    await query.edit_message_text(
         text=text,
+        parse_mode='HTML',
         reply_markup=keyboards.manage_tx_keyboard(tx_id)
     )
 
@@ -351,9 +453,8 @@ async def delete_transaction_prompt(update: Update, context: ContextTypes.DEFAUL
     query = update.callback_query
     await query.answer()
     tx_id = query.data.split('_')[-1]
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
-        text="⚠️ Are you sure you want to delete this transaction?",
+    await query.edit_message_text(
+        text="⚠️ Are you sure you want to delete this transaction? This action cannot be undone.",
         reply_markup=keyboards.confirm_delete_keyboard(tx_id)
     )
 
@@ -362,19 +463,158 @@ async def delete_transaction_prompt(update: Update, context: ContextTypes.DEFAUL
 async def delete_transaction_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Deletes the transaction after confirmation."""
     query = update.callback_query
-    await query.answer()
+    await query.answer("Deleting...")
     tx_id = query.data.split('_')[-1]
     success = api_client.delete_transaction(tx_id)
 
-    text_to_send = "🗑️ Transaction successfully deleted." if success else "❌ Error: Could not delete transaction."
-    await context.bot.send_message(chat_id=query.message.chat_id, text=text_to_send)
+    if success:
+        await query.edit_message_text("🗑️ Transaction successfully deleted.")
+        # Brief pause before showing the updated history
+        import asyncio
+        await asyncio.sleep(1.5)
+        await history_menu(update, context)
+    else:
+        await query.edit_message_text("❌ Error: Could not delete transaction.",
+                                      reply_markup=keyboards.manage_tx_keyboard(tx_id))
 
-    transactions = api_client.get_recent_transactions()
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
-        text="Here is the updated history:",
-        reply_markup=keyboards.history_keyboard(transactions)
+
+# --- START OF MODIFICATION ---
+
+# --- Edit Transaction Conversation ---
+
+async def _update_transaction_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Helper to perform the API call, confirm to user, and end conversation."""
+    tx_id = context.user_data.get('edit_tx_id')
+    field_to_edit = context.user_data.get('edit_tx_field')
+    new_value = context.user_data.get('edit_tx_new_value')
+
+    message_to_use = update.message or update.callback_query.message
+
+    if not all([tx_id, field_to_edit, new_value is not None]):
+        await context.bot.send_message(
+            chat_id=message_to_use.chat_id,
+            text="❌ An error occurred. Missing data to perform update. Please try again.",
+            reply_markup=keyboards.main_menu_keyboard()
+        )
+        return ConversationHandler.END
+
+    update_data = {field_to_edit: new_value}
+    response = api_client.update_transaction(tx_id, update_data)
+
+    if response and 'error' not in response:
+        base_text = f"✅ Transaction successfully updated!"
+        summary_data = api_client.get_detailed_summary()
+        summary_text = format_summary_message(summary_data)
+        await context.bot.send_message(
+            chat_id=message_to_use.chat_id,
+            text=base_text + summary_text,
+            parse_mode='HTML',
+            reply_markup=keyboards.main_menu_keyboard()
+        )
+    else:
+        error_msg = response.get('error',
+                                'Could not update transaction.') if response else 'Could not update transaction.'
+        await context.bot.send_message(
+            chat_id=message_to_use.chat_id,
+            text=f"❌ Error: {error_msg}",
+            reply_markup=keyboards.main_menu_keyboard()
+        )
+
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+@restricted
+async def edit_transaction_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point for the edit conversation. Shows fields that can be edited."""
+    query = update.callback_query
+    await query.answer()
+    tx_id = query.data.split('_')[-1]
+
+    # Store tx_id and fetch details to determine tx type (income/expense)
+    context.user_data.clear()
+    transaction = api_client.get_transaction_details(tx_id)
+    if not transaction:
+        await query.edit_message_text("❌ Error: Could not find transaction. It may have been deleted.",
+                                      reply_markup=keyboards.main_menu_keyboard())
+        return ConversationHandler.END
+
+    context.user_data['edit_tx_id'] = tx_id
+    context.user_data['edit_tx_type'] = transaction.get('type')  # Store for category keyboard
+
+    await query.edit_message_text(
+        "Which field would you like to edit?",
+        reply_markup=keyboards.edit_tx_options_keyboard(tx_id)
     )
+    return EDIT_CHOOSE_FIELD
+
+
+async def edit_choose_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the user's choice of which field to edit."""
+    query = update.callback_query
+    await query.answer()
+
+    parts = query.data.split('_')
+    field_to_edit = parts[2]
+
+    context.user_data['edit_tx_field'] = field_to_edit
+
+    if field_to_edit == 'categoryId':
+        tx_type = context.user_data.get('edit_tx_type')
+        keyboard = keyboards.income_categories_keyboard() if tx_type == 'income' else keyboards.expense_categories_keyboard()
+        await query.edit_message_text("Please select the new category:", reply_markup=keyboard)
+        return EDIT_GET_NEW_CATEGORY
+
+    elif field_to_edit == 'amount':
+        await query.edit_message_text("Please enter the new amount:")
+        return EDIT_GET_NEW_VALUE
+
+    elif field_to_edit == 'description':
+        await query.edit_message_text("Please enter the new description:")
+        return EDIT_GET_NEW_VALUE
+
+    return ConversationHandler.END  # Fallback
+
+
+async def edit_received_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives text input for the new amount or description."""
+    field_to_edit = context.user_data.get('edit_tx_field')
+    new_value_str = update.message.text
+
+    if field_to_edit == 'amount':
+        try:
+            new_value = float(new_value_str)
+            context.user_data['edit_tx_new_value'] = new_value
+        except ValueError:
+            await update.message.reply_text("Invalid amount. Please enter a valid number.")
+            return EDIT_GET_NEW_VALUE
+    else:  # Description
+        context.user_data['edit_tx_new_value'] = new_value_str
+
+    return await _update_transaction_and_confirm(update, context)
+
+
+async def edit_received_new_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives the new category from the keyboard callback."""
+    query = update.callback_query
+    await query.answer()
+
+    new_category = query.data.split('_')[1]
+
+    if new_category == 'other':
+        # Custom category handling is complex for this flow, let's treat it as a string for now.
+        await query.edit_message_text(
+            "Editing to a custom category is not yet supported in this flow. Please choose a standard one.")
+        tx_type = context.user_data.get('edit_tx_type')
+        keyboard = keyboards.income_categories_keyboard() if tx_type == 'income' else keyboards.expense_categories_keyboard()
+        await query.message.reply_markup(keyboard)
+        return EDIT_GET_NEW_CATEGORY
+
+    context.user_data['edit_tx_new_value'] = new_category
+    return await _update_transaction_and_confirm(update, context)
+
+
+# --- END OF MODIFICATION ---
 
 
 # --- IOU / Debt Management ---
@@ -383,8 +623,7 @@ async def iou_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the IOU management menu."""
     query = update.callback_query
     await query.answer()
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
+    await query.edit_message_text(
         text="🤝 Let's manage your IOUs.",
         reply_markup=keyboards.iou_menu_keyboard()
     )
@@ -404,8 +643,7 @@ async def iou_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text_to_send = "You have no open debts! 👍"
         reply_markup_to_send = keyboards.iou_menu_keyboard()
 
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
+    await query.edit_message_text(
         text=text_to_send,
         reply_markup=reply_markup_to_send
     )
@@ -419,18 +657,16 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = query.data.split(':')
 
     if len(parts) != 4:
-        await context.bot.send_message(chat_id=query.message.chat_id,
-                                       text="Error: Invalid or outdated button. Please go back and try again.",
-                                       reply_markup=keyboards.iou_menu_keyboard())
+        await query.edit_message_text(text="Error: Invalid or outdated button. Please go back and try again.",
+                                      reply_markup=keyboards.iou_menu_keyboard())
         return
 
     _, _, person_name, currency = parts
     person_debts = api_client.get_debts_by_person_and_currency(person_name, currency)
 
     if not person_debts:
-        await context.bot.send_message(chat_id=query.message.chat_id,
-                                       text=f"❌ Could not find any open {currency} debts for {person_name}.",
-                                       reply_markup=keyboards.iou_menu_keyboard())
+        await query.edit_message_text(text=f"❌ Could not find any open {currency} debts for {person_name}.",
+                                      reply_markup=keyboards.iou_menu_keyboard())
         return
 
     total = sum(d['remainingAmount'] for d in person_debts)
@@ -441,8 +677,7 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Select a specific loan to view, or record a repayment:"
     )
 
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
+    await query.edit_message_text(
         text=text,
         parse_mode='HTML',
         reply_markup=keyboards.iou_person_detail_keyboard(person_debts, person_name, currency)
@@ -457,16 +692,15 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = query.data.split(':')
 
     if len(parts) != 5:
-        await context.bot.send_message(chat_id=query.message.chat_id,
-                                       text="Error: Invalid or outdated button. Please go back and try again.",
-                                       reply_markup=keyboards.iou_menu_keyboard())
+        await query.edit_message_text(text="Error: Invalid or outdated button. Please go back and try again.",
+                                      reply_markup=keyboards.iou_menu_keyboard())
         return
 
     _, _, debt_id, person_name, currency = parts
     debt = api_client.get_debt_details(debt_id)
     if not debt:
-        await context.bot.send_message(chat_id=query.message.chat_id, text="❌ Error: Could not find this debt.",
-                                       reply_markup=keyboards.iou_menu_keyboard())
+        await query.edit_message_text(text="❌ Error: Could not find this debt.",
+                                      reply_markup=keyboards.iou_menu_keyboard())
         return
 
     direction = "Owes you" if debt['type'] == 'lent' else "You owe"
@@ -484,8 +718,7 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<b>Remaining Balance:</b> {debt.get('remainingAmount', 0):,.2f} {debt.get('currency', '')}"
     )
 
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
+    await query.edit_message_text(
         text=text,
         parse_mode='HTML',
         reply_markup=keyboards.iou_detail_keyboard(debt_id, person_name, currency)
@@ -501,9 +734,9 @@ async def repay_lump_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = query.data.split(':')
 
     if len(parts) != 4:
-        await context.bot.send_message(chat_id=query.message.chat_id,
-                                       text="Error: Invalid or outdated button. Please go back and try again.",
-                                       reply_markup=keyboards.iou_menu_keyboard())
+        await query.edit_message_text(
+            text="Error: Invalid or outdated button. Please go back and try again.",
+            reply_markup=keyboards.iou_menu_keyboard())
         return ConversationHandler.END
 
     _, _, person_name, currency = parts
@@ -565,7 +798,8 @@ async def iou_received_date_choice(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
     choice = query.data
 
-    prompt = "Who did you lend money to?" if context.user_data['iou_type'] == 'lent' else "Who did you borrow money from?"
+    prompt = "Who did you lend money to?" if context.user_data[
+                                                 'iou_type'] == 'lent' else "Who did you borrow money from?"
 
     if choice == 'iou_date_today':
         await context.bot.send_message(chat_id=query.message.chat_id, text=prompt)
@@ -591,7 +825,8 @@ async def iou_received_custom_date(update: Update, context: ContextTypes.DEFAULT
         aware_dt = datetime.combine(custom_date, time(12, 0), tzinfo=PHNOM_PENH_TZ)
         context.user_data['timestamp'] = aware_dt.isoformat()
 
-        prompt = "Who did you lend money to?" if context.user_data['iou_type'] == 'lent' else "Who did you borrow money from?"
+        prompt = "Who did you lend money to?" if context.user_data[
+                                                     'iou_type'] == 'lent' else "Who did you borrow money from?"
         await update.message.reply_text(prompt)
         return IOU_PERSON
     except ValueError:
@@ -896,7 +1131,7 @@ async def received_forgot_type(update: Update, context: ContextTypes.DEFAULT_TYP
 async def add_transaction_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    context.user_data.clear() # Clear context for new transaction
+    context.user_data.clear()  # Clear context for new transaction
     context.user_data['type'] = 'expense' if query.data == 'add_expense' else 'income'
     emoji = "💸" if context.user_data['type'] == 'expense' else "💰"
     await context.bot.send_message(chat_id=query.message.chat_id, text=f"{emoji} Enter the amount:")
@@ -1025,6 +1260,23 @@ tx_conversation_handler = ConversationHandler(
     per_message=False
 )
 
+# --- START OF MODIFICATION ---
+edit_tx_conversation_handler = ConversationHandler(
+    entry_points=[CallbackQueryHandler(edit_transaction_start, pattern='^edit_tx_')],
+    states={
+        EDIT_CHOOSE_FIELD: [CallbackQueryHandler(edit_choose_field, pattern='^edit_field_')],
+        EDIT_GET_NEW_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_received_new_value)],
+        EDIT_GET_NEW_CATEGORY: [CallbackQueryHandler(edit_received_new_category, pattern='^cat_')]
+    },
+    fallbacks=[
+        CommandHandler('cancel', cancel),
+        CommandHandler('start', start),
+        CallbackQueryHandler(cancel, pattern='^cancel_conversation$')
+    ],
+    per_message=False
+)
+# --- END OF MODIFICATION ---
+
 repay_lump_conversation_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(repay_lump_start, pattern='^iou:repay:')],
     states={
@@ -1098,7 +1350,6 @@ reminder_conversation_handler = ConversationHandler(
     per_message=False
 )
 
-# --- MODIFICATION: New Conversation Handler for Reports ---
 report_conversation_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(report_menu, pattern='^report_menu$')],
     states={
