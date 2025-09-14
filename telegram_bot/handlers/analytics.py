@@ -41,7 +41,7 @@ async def process_report_choice(update: Update, context: ContextTypes.DEFAULT_TY
     """Handles standard period selection or transitions to custom date entry."""
     query = update.callback_query
     await query.answer()
-    period = query.data.split('_')[-1]
+    period = query.data.replace('report_period_', '')  # <-- FIX: Correctly parse callback data
 
     if period == "custom":
         await query.edit_message_text("Please enter the start date (YYYY-MM-DD):")
@@ -56,8 +56,15 @@ async def process_report_choice(update: Update, context: ContextTypes.DEFAULT_TY
         "this_month": (today.replace(day=1),
                        (today.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1))
     }
-    start_date, end_date = date_ranges.get(period)
-    await _generate_report(update, context, start_date, end_date)
+
+    date_pair = date_ranges.get(period)
+    if date_pair:
+        start_date, end_date = date_pair
+        await _generate_report(update, context, start_date, end_date)
+    else:
+        # Fallback if period is not found, though it shouldn't happen with the fix
+        await query.edit_message_text("Invalid period selected.", reply_markup=keyboards.main_menu_keyboard())
+
     return ConversationHandler.END
 
 
@@ -136,7 +143,7 @@ async def process_habits_choice(update: Update, context: ContextTypes.DEFAULT_TY
     """Generates and sends the habits report for the selected period."""
     query = update.callback_query
     await query.answer()
-    period = query.data.split('_')[-1]
+    period = query.data.replace('report_period_', '')  # <-- FIX: Correctly parse callback data
 
     if period == "custom":
         await query.edit_message_text(
@@ -153,15 +160,20 @@ async def process_habits_choice(update: Update, context: ContextTypes.DEFAULT_TY
         "this_month": (today.replace(day=1),
                        (today.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1))
     }
-    start_date, end_date = date_ranges.get(period)
 
-    await query.edit_message_text("🧠 Analyzing your habits...")
-    habits_data = api_client.get_spending_habits(start_date, end_date)
+    date_pair = date_ranges.get(period)
+    if date_pair:
+        start_date, end_date = date_pair
+        await query.edit_message_text("🧠 Analyzing your habits...")
+        habits_data = api_client.get_spending_habits(start_date, end_date)
 
-    if habits_data:
-        message = _format_habits_message(habits_data)
-        await query.edit_message_text(text=message, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
+        if habits_data:
+            message = _format_habits_message(habits_data)
+            await query.edit_message_text(text=message, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
+        else:
+            await query.edit_message_text("Could not find enough data to analyze your habits for this period.",
+                                          reply_markup=keyboards.main_menu_keyboard())
     else:
-        await query.edit_message_text("Could not find enough data to analyze your habits for this period.",
-                                      reply_markup=keyboards.main_menu_keyboard())
+        await query.edit_message_text("Invalid period selected.", reply_markup=keyboards.main_menu_keyboard())
+
     return ConversationHandler.END
