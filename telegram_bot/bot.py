@@ -25,10 +25,8 @@ def main():
     app.add_handler(handlers.forgot_conversation_handler)
     app.add_handler(handlers.reminder_conversation_handler)
     app.add_handler(handlers.report_conversation_handler)
-    # --- START OF MODIFICATION ---
-    # Add the new conversation handler for editing transactions
     app.add_handler(handlers.edit_tx_conversation_handler)
-    # --- END OF MODIFICATION ---
+    app.add_handler(handlers.habits_conversation_handler) # New handler
 
     # --- Register Standalone Command Handlers ---
     app.add_handler(CommandHandler("start", handlers.start))
@@ -48,6 +46,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handlers.iou_view, pattern='^iou_view$'))
     app.add_handler(CallbackQueryHandler(handlers.iou_person_detail, pattern='^iou:person:'))
     app.add_handler(CallbackQueryHandler(handlers.iou_detail, pattern='^iou:detail:'))
+    app.add_handler(CallbackQueryHandler(handlers.debt_analysis, pattern='^debt_analysis$')) # New handler
 
 
     print("🚀 Bot is running...")
@@ -56,4 +55,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-# --- End of modified file: telegram_bot/bot.py ---

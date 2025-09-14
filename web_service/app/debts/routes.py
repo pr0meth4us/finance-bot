@@ -1,3 +1,4 @@
+# --- Start of modified file: web_service/app/debts/routes.py ---
 from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime
 from bson import ObjectId
@@ -189,3 +190,52 @@ def record_lump_sum_repayment(person_name, currency):
 
     return jsonify(
         {'message': f'Successfully recorded repayment of {repayment_amount:,.2f} {currency} for {person_name}.'})
+
+
+@debts_bp.route('/analysis', methods=['GET'])
+def get_debt_analysis():
+    """
+    Analyzes open debts to find concentration by person and the average
+    age of outstanding debts.
+    """
+    now = datetime.utcnow()
+
+    # --- 1. Debt Concentration ---
+    concentration_pipeline = [
+        {'$match': {'status': 'open'}},
+        {'$group': {
+            '_id': {'person': '$person', 'type': '$type'},
+            'totalAmount': {'$sum': '$remainingAmount'}
+        }},
+        {'$sort': {'totalAmount': -1}},
+        {'$project': {
+            '_id': 0,
+            'person': '$_id.person',
+            'type': '$_id.type',
+            'total': '$totalAmount'
+        }}
+    ]
+
+    # --- 2. Debt Aging ---
+    aging_pipeline = [
+        {'$match': {'status': 'open'}},
+        {'$project': {
+            'person': '$person',
+            'age_in_days': {
+                '$divide': [{'$subtract': [now, '$created_at']}, 1000 * 60 * 60 * 24]
+            }
+        }},
+        {'$group': {
+            '_id': '$person',
+            'averageAgeDays': {'$avg': '$age_in_days'},
+            'count': {'$sum': 1}
+        }},
+        {'$sort': {'averageAgeDays': -1}}
+    ]
+
+    analysis = {
+        'concentration': list(current_app.db.debts.aggregate(concentration_pipeline)),
+        'aging': list(current_app.db.debts.aggregate(aging_pipeline))
+    }
+
+    return jsonify(analysis)

@@ -21,7 +21,6 @@ def get_detailed_summary():
 def add_debt(data):
     try:
         res = requests.post(f"{BASE_URL}/debts/", json=data, timeout=10)
-
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
@@ -36,7 +35,6 @@ def add_reminder(data):
         return res.json()
     except requests.exceptions.RequestException as e:
         print(f"API Error adding reminder: {e}")
-
         return None
 
 
@@ -54,7 +52,6 @@ def get_debts_by_person_and_currency(person_name, currency):
     try:
         encoded_name = urllib.parse.quote(person_name)
         res = requests.get(f"{BASE_URL}/debts/person/{encoded_name}/{currency}", timeout=10)
-
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
@@ -69,7 +66,6 @@ def get_debt_details(debt_id):
         return res.json()
     except requests.exceptions.RequestException as e:
         print(f"API Error fetching debt details: {e}")
-
         return None
 
 
@@ -84,7 +80,6 @@ def record_lump_sum_repayment(person_name, currency, amount):
     except requests.exceptions.RequestException as e:
         print(f"API Error recording lump-sum repayment: {e}")
         try:
-
             return e.response.json()
         except:
             return {'error': 'A network error occurred.'}
@@ -130,7 +125,6 @@ def get_transaction_details(tx_id):
         return None
 
 
-# --- START OF MODIFICATION ---
 def update_transaction(tx_id, data):
     """Sends a PUT request to update a transaction."""
     try:
@@ -142,20 +136,16 @@ def update_transaction(tx_id, data):
         return None
 
 
-# --- END OF MODIFICATION ---
-
 def delete_transaction(tx_id):
     try:
         res = requests.delete(f"{BASE_URL}/transactions/{tx_id}", timeout=10)
         res.raise_for_status()
-
         return True
     except requests.exceptions.RequestException as e:
         print(f"API Error deleting transaction: {e}")
         return False
 
 
-# --- START OF MODIFICATION ---
 def get_detailed_report(start_date=None, end_date=None):
     """Fetches detailed report data (income, expense, net) from the API."""
     try:
@@ -171,6 +161,29 @@ def get_detailed_report(start_date=None, end_date=None):
     except requests.exceptions.RequestException as e:
         print(f"API Error fetching detailed report: {e}")
         return None
-# --- END OF MODIFICATION ---
 
-# --- End of modified file: telegram_bot/api_client.py ---
+
+def get_spending_habits(start_date, end_date):
+    """Fetches spending habits analysis from the API."""
+    try:
+        params = {
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat()
+        }
+        res = requests.get(f"{BASE_URL}/analytics/habits", params=params, timeout=20)
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error fetching spending habits: {e}")
+        return None
+
+
+def get_debt_analysis():
+    """Fetches debt analysis data from the API."""
+    try:
+        res = requests.get(f"{BASE_URL}/debts/analysis", timeout=15)
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error fetching debt analysis: {e}")
+        return None

@@ -1,3 +1,4 @@
+# --- Start of modified file: telegram_bot/keyboards.py ---
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from datetime import datetime
 
@@ -17,7 +18,10 @@ def main_menu_keyboard():
             InlineKeyboardButton("🔔 Set Reminder", callback_data='set_reminder_start')
         ],
         [InlineKeyboardButton("📖 History", callback_data='history')],
-        [InlineKeyboardButton("📈 Report", callback_data='report_menu')],
+        [
+            InlineKeyboardButton("📈 Report", callback_data='report_menu'),
+            InlineKeyboardButton("🧠 Habits", callback_data='habits_menu')
+        ],
         [InlineKeyboardButton("⚙️ Update Rate", callback_data='update_rate')],
         [InlineKeyboardButton("🤝 IOU / Debts", callback_data='iou_menu')],
     ]
@@ -102,6 +106,7 @@ def iou_menu_keyboard():
         [InlineKeyboardButton("➡️ I Lent Money", callback_data='iou_lent')],
         [InlineKeyboardButton("⬅️ I Borrowed Money", callback_data='iou_borrowed')],
         [InlineKeyboardButton("📖 View Open Debts", callback_data='iou_view')],
+        [InlineKeyboardButton("🔬 Debt Analysis", callback_data='debt_analysis')],
         [InlineKeyboardButton("‹ Back to Main Menu", callback_data='start')],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -224,7 +229,6 @@ def manage_tx_keyboard(tx_id):
     return InlineKeyboardMarkup(keyboard)
 
 
-# --- START OF MODIFICATION ---
 def edit_tx_options_keyboard(tx_id):
     """Keyboard with options for which field to edit."""
     keyboard = [
@@ -240,9 +244,6 @@ def edit_tx_options_keyboard(tx_id):
     return InlineKeyboardMarkup(keyboard)
 
 
-# --- END OF MODIFICATION ---
-
-
 def confirm_delete_keyboard(tx_id):
     keyboard = [
         [
@@ -251,4 +252,3 @@ def confirm_delete_keyboard(tx_id):
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
-
