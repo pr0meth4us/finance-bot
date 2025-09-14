@@ -1,8 +1,9 @@
-# --- Start of file: telegram_bot/handlers/helpers.py ---
+# --- Start of modified file: telegram_bot/handlers/helpers.py ---
 
 from datetime import datetime
 import io
 import matplotlib.pyplot as plt
+
 
 def format_summary_message(summary_data):
     """Formats the detailed summary data into a readable string."""
@@ -27,14 +28,21 @@ def format_summary_message(summary_data):
 
     debt_text = f"<b>Debts:</b>\n➡️ <b>You are owed:</b>\n{owed_to_you_text}\n⬅️ <b>You owe:</b>\n{owed_by_you_text}"
 
-    # --- Activity Periods ---
+    # --- Activity Periods (FIXED KHR FORMATTING) ---
     def format_period_line(period_data):
         income = period_data.get('income', {})
         expense = period_data.get('expense', {})
-        income_parts = [f"{v:,.2f} {k}" for k, v in income.items() if v > 0]
-        expense_parts = [f"{v:,.2f} {k}" for k, v in expense.items() if v > 0]
-        income_str = ' & '.join(income_parts) or "0"
-        expense_str = ' & '.join(expense_parts) or "0"
+
+        income_parts = []
+        if income.get('USD', 0) > 0: income_parts.append(f"{income['USD']:,.2f} USD")
+        if income.get('KHR', 0) > 0: income_parts.append(f"{income['KHR']:,.0f} KHR")
+        income_str = ' & '.join(income_parts) if income_parts else "0"
+
+        expense_parts = []
+        if expense.get('USD', 0) > 0: expense_parts.append(f"{expense['USD']:,.2f} USD")
+        if expense.get('KHR', 0) > 0: expense_parts.append(f"{expense['KHR']:,.0f} KHR")
+        expense_str = ' & '.join(expense_parts) if expense_parts else "0"
+
         return f"    ⬆️ In: {income_str}\n    ⬇️ Out: {expense_str}"
 
     periods = summary_data.get('periods', {})
@@ -47,16 +55,28 @@ def format_summary_message(summary_data):
 
     return f"\n\n--- Your Current Status ---\n{balance_text}\n\n{debt_text}\n\n{activity_text}"
 
+
 def _format_report_summary_message(data):
     """Formats the detailed report data into a readable string."""
     summary = data.get('summary', {})
-    income = summary.get('totalIncomeUSD', 0)
-    expense = summary.get('totalExpenseUSD', 0)
-    net = summary.get('netSavingsUSD', 0)
     start_date = datetime.fromisoformat(data['startDate']).strftime('%b %d, %Y')
     end_date = datetime.fromisoformat(data['endDate']).strftime('%b %d, %Y')
 
+    # --- START OF MODIFICATION: New Balance Overview Section ---
+    start_balance = summary.get('balanceAtStartUSD', 0)
+    end_balance = summary.get('balanceAtEndUSD', 0)
+
     header = f"📊 <b>Financial Report</b>\n🗓️ <i>{start_date} to {end_date}</i>\n\n"
+    balance_overview_text = (
+        f"<b>Balance Overview (in USD):</b>\n"
+        f"▫️ Starting Balance: ${start_balance:,.2f}\n"
+        f"▫️ Ending Balance: ${end_balance:,.2f}\n\n"
+    )
+    # --- END OF MODIFICATION ---
+
+    income = summary.get('totalIncomeUSD', 0)
+    expense = summary.get('totalExpenseUSD', 0)
+    net = summary.get('netSavingsUSD', 0)
     summary_text = (
         f"<b>Operational Summary (in USD):</b>\n"
         f"⬆️ Total Income: ${income:,.2f}\n"
@@ -83,15 +103,20 @@ def _format_report_summary_message(data):
     fin_summary = data.get('financialSummary', {})
     financial_text = "\n<b>Loan & Debt Activity (in USD):</b>\n"
     financial_lines = [
-        f"    - Lent to others: ${fin_summary['totalLentUSD']:,.2f}" if fin_summary.get('totalLentUSD', 0) > 0 else None,
-        f"    - Borrowed from others: ${fin_summary['totalBorrowedUSD']:,.2f}" if fin_summary.get('totalBorrowedUSD', 0) > 0 else None,
-        f"    - Repayments received: ${fin_summary['totalRepaidToYouUSD']:,.2f}" if fin_summary.get('totalRepaidToYouUSD', 0) > 0 else None,
-        f"    - Repayments made: ${fin_summary['totalYouRepaidUSD']:,.2f}" if fin_summary.get('totalYouRepaidUSD', 0) > 0 else None
+        f"    - Lent to others: ${fin_summary['totalLentUSD']:,.2f}" if fin_summary.get('totalLentUSD',
+                                                                                        0) > 0 else None,
+        f"    - Borrowed from others: ${fin_summary['totalBorrowedUSD']:,.2f}" if fin_summary.get('totalBorrowedUSD',
+                                                                                                  0) > 0 else None,
+        f"    - Repayments received: ${fin_summary['totalRepaidToYouUSD']:,.2f}" if fin_summary.get(
+            'totalRepaidToYouUSD', 0) > 0 else None,
+        f"    - Repayments made: ${fin_summary['totalYouRepaidUSD']:,.2f}" if fin_summary.get('totalYouRepaidUSD',
+                                                                                              0) > 0 else None
     ]
     active_lines = [line for line in financial_lines if line]
     financial_text += "\n".join(active_lines) if active_lines else "    - No loan or debt activity."
 
-    return header + summary_text + expense_text + income_text + financial_text
+    return header + balance_overview_text + summary_text + expense_text + income_text + financial_text
+
 
 def _create_income_expense_chart(data):
     """Creates a simple bar chart comparing income and expense."""
@@ -118,6 +143,7 @@ def _create_income_expense_chart(data):
     buf.seek(0)
     return buf.getvalue()
 
+
 def _create_expense_pie_chart(data):
     """Creates a pie chart for the expense breakdown."""
     expense_breakdown = data.get('expenseBreakdown', [])
@@ -141,6 +167,7 @@ def _create_expense_pie_chart(data):
     buf.seek(0)
     return buf.getvalue()
 
+
 def _format_habits_message(data):
     """Formats the spending habits data into a readable string."""
     if not data:
@@ -148,11 +175,13 @@ def _format_habits_message(data):
 
     time_text = "<b>🕒 Spending by Time of Day:</b>\n"
     by_time = sorted(data.get('byTimeOfDay', []), key=lambda x: x.get('total', 0), reverse=True)
-    time_text += "\n".join([f"    - {item['period']}: ${item['total']:,.2f}" for item in by_time]) or "    - Not enough data.\n"
+    time_text += "\n".join(
+        [f"    - {item['period']}: ${item['total']:,.2f}" for item in by_time]) or "    - Not enough data.\n"
 
     day_text = "\n<b>📅 Spending by Day of Week:</b>\n"
     by_day = sorted(data.get('byDayOfWeek', []), key=lambda x: x.get('total', 0), reverse=True)
-    day_text += "\n".join([f"    - {item['day']}s: ${item['total']:,.2f}" for item in by_day]) or "    - Not enough data.\n"
+    day_text += "\n".join(
+        [f"    - {item['day']}s: ${item['total']:,.2f}" for item in by_day]) or "    - Not enough data.\n"
 
     keyword_text = "\n<b>🏷️ Common Spending Keywords:</b>\n"
     by_keyword = data.get('keywordsByCategory', [])
