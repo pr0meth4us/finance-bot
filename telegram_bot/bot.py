@@ -1,5 +1,3 @@
-# --- Start of file: telegram_bot/bot.py ---
-
 import os
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from dotenv import load_dotenv
