@@ -118,7 +118,7 @@ def _format_report_summary_message(data):
     return header + balance_overview_text + summary_text + expense_text + income_text + financial_text
 
 
-def _create_income_expense_chart(data):
+def _create_income_expense_chart(data, start_date, end_date):
     """Creates a simple bar chart comparing income and expense."""
     summary = data.get('summary', {})
     income = summary.get('totalIncomeUSD', 0)
@@ -126,17 +126,25 @@ def _create_income_expense_chart(data):
     if income == 0 and expense == 0:
         return None
 
+    date_range_str = f"{start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')}"
+
     labels = ['Income', 'Expense']
     values = [income, expense]
     colors = ['#4CAF50', '#F44336']
     fig, ax = plt.subplots(figsize=(6, 5))
+
+    # --- MODIFICATION ---
+    ax.set_title('Operational Income vs. Expense', pad=20)  # Add padding for subtitle
+    plt.suptitle(date_range_str, y=0.93, fontsize=10)  # Add subtitle with date range
+
     bars = ax.bar(labels, values, color=colors)
     ax.set_ylabel('Amount (USD)')
-    ax.set_title('Operational Income vs. Expense')
     ax.spines[['top', 'right']].set_visible(False)
+
     for bar in bars:
         yval = bar.get_height()
         plt.text(bar.get_x() + bar.get_width() / 2.0, yval, f'${yval:,.2f}', va='bottom', ha='center')
+
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight')
     plt.close(fig)
@@ -144,11 +152,13 @@ def _create_income_expense_chart(data):
     return buf.getvalue()
 
 
-def _create_expense_pie_chart(data):
+def _create_expense_pie_chart(data, start_date, end_date):
     """Creates a pie chart for the expense breakdown."""
     expense_breakdown = data.get('expenseBreakdown', [])
     if not expense_breakdown or data.get('summary', {}).get('totalExpenseUSD', 0) == 0:
         return None
+
+    date_range_str = f"{start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')}"
 
     labels = [item['category'] for item in expense_breakdown]
     sizes = [item['totalUSD'] for item in expense_breakdown]
@@ -157,10 +167,15 @@ def _create_expense_pie_chart(data):
         explode[sizes.index(max(sizes))] = 0.05
 
     fig, ax = plt.subplots(figsize=(7, 6))
+
+    # --- MODIFICATION ---
+    ax.set_title('Expense Breakdown', pad=20)  # Add padding for subtitle
+    plt.suptitle(date_range_str, y=0.93, fontsize=10)  # Add subtitle with date range
+
     ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90, pctdistance=0.85, explode=explode)
     ax.axis('equal')
-    ax.set_title('Expense Breakdown')
     fig.gca().add_artist(plt.Circle((0, 0), 0.70, fc='white'))
+
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight')
     plt.close(fig)
@@ -172,7 +187,6 @@ def _format_habits_message(data):
     """Formats the spending habits data into a readable string."""
     if not data:
         return "Could not analyze spending habits."
-
     time_text = "<b>🕒 Spending by Time of Day:</b>\n"
     by_time = sorted(data.get('byTimeOfDay', []), key=lambda x: x.get('total', 0), reverse=True)
     time_text += "\n".join(

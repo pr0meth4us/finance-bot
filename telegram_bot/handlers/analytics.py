@@ -41,7 +41,7 @@ async def process_report_choice(update: Update, context: ContextTypes.DEFAULT_TY
     """Handles standard period selection or transitions to custom date entry."""
     query = update.callback_query
     await query.answer()
-    period = query.data.replace('report_period_', '')  # <-- FIX: Correctly parse callback data
+    period = query.data.replace('report_period_', '')
 
     if period == "custom":
         await query.edit_message_text("Please enter the start date (YYYY-MM-DD):")
@@ -62,7 +62,6 @@ async def process_report_choice(update: Update, context: ContextTypes.DEFAULT_TY
         start_date, end_date = date_pair
         await _generate_report(update, context, start_date, end_date)
     else:
-        # Fallback if period is not found, though it shouldn't happen with the fix
         await query.edit_message_text("Invalid period selected.", reply_markup=keyboards.main_menu_keyboard())
 
     return ConversationHandler.END
@@ -114,10 +113,13 @@ async def _generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE, s
     if report_data:
         summary_message = _format_report_summary_message(report_data)
         await context.bot.send_message(chat_id=chat_id, text=summary_message, parse_mode='HTML')
-        if bar_chart := _create_income_expense_chart(report_data):
+
+        # --- MODIFICATION: Pass dates to chart functions ---
+        if bar_chart := _create_income_expense_chart(report_data, start_date, end_date):
             await context.bot.send_photo(chat_id=chat_id, photo=bar_chart)
-        if pie_chart := _create_expense_pie_chart(report_data):
+        if pie_chart := _create_expense_pie_chart(report_data, start_date, end_date):
             await context.bot.send_photo(chat_id=chat_id, photo=pie_chart)
+
         await context.bot.send_message(chat_id=chat_id, text="Report complete! What's next?",
                                        reply_markup=keyboards.main_menu_keyboard())
     else:
@@ -143,7 +145,7 @@ async def process_habits_choice(update: Update, context: ContextTypes.DEFAULT_TY
     """Generates and sends the habits report for the selected period."""
     query = update.callback_query
     await query.answer()
-    period = query.data.replace('report_period_', '')  # <-- FIX: Correctly parse callback data
+    period = query.data.replace('report_period_', '')
 
     if period == "custom":
         await query.edit_message_text(
