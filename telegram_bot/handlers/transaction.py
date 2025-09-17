@@ -70,9 +70,21 @@ async def received_forgot_type(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        context.user_data['amount'] = float(update.message.text)
-        await update.message.reply_text("Which currency?", reply_markup=keyboards.currency_keyboard())
-        return CURRENCY
+        amount = float(update.message.text)
+        context.user_data['amount'] = amount
+
+        if amount < 100:
+            # Auto-select USD and skip to category selection
+            currency = "USD"
+            context.user_data['currency'] = currency
+            context.user_data['accountName'] = "USD Account"
+            keyboard = keyboards.income_categories_keyboard() if context.user_data.get('type') == 'income' else keyboards.expense_categories_keyboard()
+            await update.message.reply_text(f"Amount: <b>{amount:,.2f} USD</b> (auto-selected)\n\nWhich category?", parse_mode='HTML', reply_markup=keyboard)
+            return CATEGORY
+        else:
+            # Ask for currency as usual
+            await update.message.reply_text("Which currency?", reply_markup=keyboards.currency_keyboard())
+            return CURRENCY
     except ValueError:
         await update.message.reply_text("Please enter a valid number.")
         return AMOUNT
@@ -150,10 +162,11 @@ async def manage_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     emoji = "⬇️ Expense" if tx['type'] == 'expense' else "⬆️ Income"
     date_str = datetime.fromisoformat(tx['timestamp'].replace('Z', '+00:00')).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
+    amount_format = ",.0f" if tx['currency'] == 'KHR' else ",.2f"
     text = (
         f"<b>Transaction Details:</b>\n\n"
         f"<b>Type:</b> {emoji}\n"
-        f"<b>Amount:</b> {tx['amount']:,.2f} {tx['currency']}\n"
+        f"<b>Amount:</b> {tx['amount']:{amount_format}} {tx['currency']}\n"
         f"<b>Category:</b> {tx['categoryId']}\n"
         f"<b>Description:</b> {tx.get('description') or 'N/A'}\n"
         f"<b>Date:</b> {date_str}\n\n"

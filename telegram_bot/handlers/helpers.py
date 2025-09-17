@@ -50,8 +50,9 @@ def format_summary_message(summary_data):
     if periods:
         today_text = f"<b>Today:</b>\n{format_period_line(periods.get('today', {}))}"
         this_week_text = f"<b>This Week:</b>\n{format_period_line(periods.get('this_week', {}))}"
+        last_week_text = f"<b>Last Week:</b>\n{format_period_line(periods.get('last_week', {}))}"
         this_month_text = f"<b>This Month:</b>\n{format_period_line(periods.get('this_month', {}))}"
-        activity_text = f"<b>Operational Activity (Excl. Loans):</b>\n{today_text}\n{this_week_text}\n{this_month_text}"
+        activity_text = f"<b>Operational Activity (Excl. Loans):</b>\n{today_text}\n{this_week_text}\n{last_week_text}\n{this_month_text}"
 
     return f"\n\n--- Your Current Status ---\n{balance_text}\n\n{debt_text}\n\n{activity_text}"
 
@@ -106,7 +107,7 @@ def _format_report_summary_message(data):
         f"    - Lent to others: ${fin_summary['totalLentUSD']:,.2f}" if fin_summary.get('totalLentUSD',
                                                                                         0) > 0 else None,
         f"    - Borrowed from others: ${fin_summary['totalBorrowedUSD']:,.2f}" if fin_summary.get('totalBorrowedUSD',
-                                                                                                  0) > 0 else None,
+                                                                                                   0) > 0 else None,
         f"    - Repayments received: ${fin_summary['totalRepaidToYouUSD']:,.2f}" if fin_summary.get(
             'totalRepaidToYouUSD', 0) > 0 else None,
         f"    - Repayments made: ${fin_summary['totalYouRepaidUSD']:,.2f}" if fin_summary.get('totalYouRepaidUSD',

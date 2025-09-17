@@ -119,12 +119,14 @@ def iou_list_keyboard(grouped_debts):
 
     if lent:
         for debt in lent:
-            label = f"Owed by {debt['person']}: {debt['totalAmount']:,.2f} {debt['currency']} ({debt['count']})"
+            amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
+            label = f"Owed by {debt['person']}: {debt['totalAmount']:{amount_format}} {debt['currency']} ({debt['count']})"
             keyboard.append(
                 [InlineKeyboardButton(label, callback_data=f"iou:person:{debt['person']}:{debt['currency']}")])
     if borrowed:
         for debt in borrowed:
-            label = f"You owe {debt['person']}: {debt['totalAmount']:,.2f} {debt['currency']} ({debt['count']})"
+            amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
+            label = f"You owe {debt['person']}: {debt['totalAmount']:{amount_format}} {debt['currency']} ({debt['count']})"
             keyboard.append(
                 [InlineKeyboardButton(label, callback_data=f"iou:person:{debt['person']}:{debt['currency']}")])
 
@@ -139,7 +141,8 @@ def iou_person_detail_keyboard(person_debts, person_name, currency):
     for debt in person_debts:
         created_date = datetime.fromisoformat(debt['created_at']).strftime('%d %b')
         purpose = debt.get('purpose') or 'No purpose'
-        label = f"{debt['remainingAmount']:,.2f} {debt['currency']} ({created_date}) - {purpose}"
+        amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
+        label = f"{debt['remainingAmount']:{amount_format}} {debt['currency']} ({created_date}) - {purpose}"
         callback = f"iou:detail:{debt['_id']}:{person_name}:{currency}"
         keyboard.append([InlineKeyboardButton(label, callback_data=callback)])
 
@@ -224,7 +227,8 @@ def history_keyboard(transactions):
         category = tx.get('categoryId', 'Unknown')
         tx_type_emoji = "⬇️" if tx.get('type') == 'expense' else "⬆️"
 
-        label = f"{tx_type_emoji} {amount:,.2f} {currency} - {category}"
+        amount_format = ",.0f" if currency == 'KHR' else ",.2f"
+        label = f"{tx_type_emoji} {amount:{amount_format}} {currency} - {category}"
         callback = f"manage_tx_{tx['_id']}"
         keyboard.append([InlineKeyboardButton(label, callback_data=callback)])
 

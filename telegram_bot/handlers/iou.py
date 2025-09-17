@@ -50,19 +50,20 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     person_debts = api_client.get_debts_by_person_and_currency(person_name, currency)
     if not person_debts:
         await query.edit_message_text(f"❌ Could not find any open {currency} debts for {person_name}.",
-                                      reply_markup=keyboards.iou_menu_keyboard())
+                                       reply_markup=keyboards.iou_menu_keyboard())
         return
 
     total = sum(d['remainingAmount'] for d in person_debts)
     direction = "owes you" if person_debts[0]['type'] == 'lent' else "you owe"
+    amount_format = ",.0f" if currency == 'KHR' else ",.2f"
     text = (
         f"<b>Debts for {person_name}</b> ({direction})\n"
-        f"<b>Total Remaining:</b> {total:,.2f} {currency}\n\n"
+        f"<b>Total Remaining:</b> {total:{amount_format}} {currency}\n\n"
         "Select a specific loan to view, or record a repayment:"
     )
     await query.edit_message_text(text=text, parse_mode='HTML',
                                   reply_markup=keyboards.iou_person_detail_keyboard(person_debts, person_name,
-                                                                                    currency))
+                                                                                     currency))
 
 
 @restricted
@@ -80,13 +81,14 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     purpose_text = f"<b>Purpose:</b> {debt['purpose']}\n" if debt.get('purpose') else ""
     created_date = datetime.fromisoformat(debt['created_at'].replace('Z', '+00:00')).astimezone(PHNOM_PENH_TZ).strftime(
         '%d %b %Y, %I:%M %p')
+    amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
     text = (
         f"<b>Debt Details:</b>\n"
         f"<b>Person:</b> {debt['person']} ({direction})\n"
         f"<b>Date Created:</b> {created_date}\n"
         f"{purpose_text}"
-        f"<b>Original Amount:</b> {debt['originalAmount']:,.2f} {debt['currency']}\n"
-        f"<b>Remaining Balance:</b> {debt['remainingAmount']:,.2f} {debt['currency']}"
+        f"<b>Original Amount:</b> {debt['originalAmount']:{amount_format}} {debt['currency']}\n"
+        f"<b>Remaining Balance:</b> {debt['remainingAmount']:{amount_format}} {debt['currency']}"
     )
     await query.edit_message_text(text=text, parse_mode='HTML',
                                   reply_markup=keyboards.iou_detail_keyboard(debt_id, person_name, currency))
@@ -141,7 +143,7 @@ async def iou_received_date_choice(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
     choice = query.data
     prompt = "Who did you lend money to?" if context.user_data[
-                                                 'iou_type'] == 'lent' else "Who did you borrow money from?"
+                                               'iou_type'] == 'lent' else "Who did you borrow money from?"
 
     if choice == 'iou_date_today':
         await query.message.reply_text(prompt)
@@ -178,9 +180,21 @@ async def iou_received_person(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def iou_received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        context.user_data['iou_amount'] = float(update.message.text)
-        await update.message.reply_text("Which currency?", reply_markup=keyboards.currency_keyboard())
-        return IOU_CURRENCY
+        amount = float(update.message.text)
+        context.user_data['iou_amount'] = amount
+
+        if amount < 100:
+            # Auto-select USD and skip to purpose
+            currency = "USD"
+            context.user_data['iou_currency'] = currency
+            await update.message.reply_text(
+                f"Amount: <b>{amount:,.2f} USD</b> (auto-selected)\n\nWhat was this for? (e.g., Lunch, Deposit)",
+                parse_mode='HTML')
+            return IOU_PURPOSE
+        else:
+            # Ask for currency as usual
+            await update.message.reply_text("Which currency?", reply_markup=keyboards.currency_keyboard())
+            return IOU_CURRENCY
     except ValueError:
         await update.message.reply_text("Please enter a valid number for the amount.")
         return IOU_AMOUNT
