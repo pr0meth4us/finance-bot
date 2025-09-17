@@ -165,18 +165,32 @@ def currency_keyboard():
 
 
 def expense_categories_keyboard():
+    """ --- THIS FUNCTION HAS BEEN UPDATED --- """
     keyboard = [
-        [InlineKeyboardButton("🍔 Food", callback_data='cat_Food')],
         [
-            InlineKeyboardButton("🍹 Drink", callback_data='cat_Drink'),
+            InlineKeyboardButton("🍔 Food", callback_data='cat_Food'),
+            InlineKeyboardButton("🍹 Drink", callback_data='cat_Drink')
+        ],
+        [
+            InlineKeyboardButton("🚗 Transport", callback_data='cat_Transport'),
+            InlineKeyboardButton("🛍️ Shopping", callback_data='cat_Shopping')
+        ],
+        [
+            InlineKeyboardButton("🧾 Bills", callback_data='cat_Bills'), # Restored
+            InlineKeyboardButton("💡 Utilities", callback_data='cat_Utilities') # Kept
+        ],
+        [
+            InlineKeyboardButton("🎬 Entertainment", callback_data='cat_Entertainment'),
+            InlineKeyboardButton("🧴 Personal Care", callback_data='cat_Personal Care')
+        ],
+        [
+            InlineKeyboardButton("💼 Work", callback_data='cat_Work'),
             InlineKeyboardButton("🍺 Alcohol", callback_data='cat_Alcohol')
         ],
-        [InlineKeyboardButton("🚗 Transport", callback_data='cat_Transport')],
-        [InlineKeyboardButton("🛍️ Shopping", callback_data='cat_Shopping')],
-        [InlineKeyboardButton("💡 Bills", callback_data='cat_Bills')],
-        [InlineKeyboardButton("🎬 Entertainment", callback_data='cat_Entertainment')],
-        [InlineKeyboardButton("🏠 Rent", callback_data='cat_Rent')],
-        [InlineKeyboardButton("📝 Other", callback_data='cat_other')],
+        [
+            InlineKeyboardButton("❓ Forgot", callback_data='cat_Forgot'),
+            InlineKeyboardButton("📝 Other", callback_data='cat_other')
+        ],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -233,8 +247,8 @@ def edit_tx_options_keyboard(tx_id):
     """Keyboard with options for which field to edit."""
     keyboard = [
         [
-            InlineKeyboardButton("💰 Amount", callback_data=f'edit_field_amount_{tx_id}'),
-            InlineKeyboardButton("🏷️ Category", callback_data=f'edit_field_categoryId_{tx_id}'),
+            InlineKeyboardButton("💰 Amount", callback_data='edit_field_amount_{tx_id}'),
+            InlineKeyboardButton("🏷️ Category", callback_data='edit_field_categoryId_{tx_id}'),
         ],
         [
             InlineKeyboardButton("📝 Description", callback_data=f'edit_field_description_{tx_id}'),
