@@ -179,8 +179,8 @@ def expense_categories_keyboard():
             InlineKeyboardButton("🛍️ Shopping", callback_data='cat_Shopping')
         ],
         [
-            InlineKeyboardButton("🧾 Bills", callback_data='cat_Bills'), # Restored
-            InlineKeyboardButton("💡 Utilities", callback_data='cat_Utilities') # Kept
+            InlineKeyboardButton("🧾 Bills", callback_data='cat_Bills'),
+            InlineKeyboardButton("💡 Utilities", callback_data='cat_Utilities')
         ],
         [
             InlineKeyboardButton("🎬 Entertainment", callback_data='cat_Entertainment'),
@@ -189,6 +189,10 @@ def expense_categories_keyboard():
         [
             InlineKeyboardButton("💼 Work", callback_data='cat_Work'),
             InlineKeyboardButton("🍺 Alcohol", callback_data='cat_Alcohol')
+        ],
+        [
+            InlineKeyboardButton("🤝 For Others", callback_data='cat_For Others'),
+            InlineKeyboardButton("💊 Health", callback_data='cat_Health')
         ],
         [
             InlineKeyboardButton("❓ Forgot", callback_data='cat_Forgot'),
