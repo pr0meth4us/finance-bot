@@ -214,7 +214,7 @@ async def iou_received_purpose(update: Update, context: ContextTypes.DEFAULT_TYP
     """Receives the purpose and saves the new IOU."""
     debt_data = {
         "type": context.user_data.get('iou_type'),
-        "person": update.message.text.strip(),
+        "person": context.user_data.get('iou_person'),
         "amount": context.user_data.get('iou_amount'),
         "currency": context.user_data.get('iou_currency'),
         "purpose": update.message.text.strip(),
