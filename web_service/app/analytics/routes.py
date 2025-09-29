@@ -5,6 +5,7 @@ from flask import Blueprint, current_app, Response, request, jsonify
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 import matplotlib.pyplot as plt
+import re
 
 analytics_bp = Blueprint('analytics', __name__, url_prefix='/analytics')
 
@@ -18,6 +19,115 @@ FINANCIAL_TRANSACTION_CATEGORIES = [
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 UTC_TZ = ZoneInfo("UTC")
+
+
+def get_date_ranges_for_search():
+    """Helper for analytics endpoints to get UTC date ranges."""
+    today = datetime.now(PHNOM_PENH_TZ).date()
+    start_of_week = today - timedelta(days=today.weekday())
+    start_of_month = today.replace(day=1)
+    end_of_last_week = start_of_week - timedelta(days=1)
+    start_of_last_week = end_of_last_week - timedelta(days=6)
+
+    def create_utc_range(start_local, end_local):
+        aware_start = datetime.combine(start_local, time.min, tzinfo=PHNOM_PENH_TZ)
+        aware_end = datetime.combine(end_local, time.max, tzinfo=PHNOM_PENH_TZ)
+        return aware_start.astimezone(UTC_TZ), aware_end.astimezone(UTC_TZ)
+
+    return {
+        "today": create_utc_range(today, today),
+        "this_week": create_utc_range(start_of_week, start_of_week + timedelta(days=6)),
+        "last_week": create_utc_range(start_of_last_week, end_of_last_week),
+        "this_month": create_utc_range(start_of_month, (start_of_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1))
+    }
+
+
+@analytics_bp.route('/search', methods=['POST'])
+def search_transactions():
+    """Performs an advanced search and sums up matching transactions."""
+    params = request.json
+    db = current_app.db
+
+    # 1. Build Match Stage
+    match_stage = {}
+
+    # Date filtering
+    date_filter = {}
+    if params.get('period'):
+        ranges = get_date_ranges_for_search()
+        if params['period'] in ranges:
+            start_utc, end_utc = ranges[params['period']]
+            date_filter['$gte'] = start_utc
+            date_filter['$lte'] = end_utc
+    elif params.get('start_date') and params.get('end_date'):
+        start_local = datetime.fromisoformat(params['start_date']).date()
+        end_local = datetime.fromisoformat(params['end_date']).date()
+        aware_start = datetime.combine(start_local, time.min, tzinfo=PHNOM_PENH_TZ)
+        aware_end = datetime.combine(end_local, time.max, tzinfo=PHNOM_PENH_TZ)
+        date_filter['$gte'] = aware_start.astimezone(UTC_TZ)
+        date_filter['$lte'] = aware_end.astimezone(UTC_TZ)
+
+    if date_filter:
+        match_stage['timestamp'] = date_filter
+
+    # Type filtering
+    if params.get('transaction_type'):
+        match_stage['type'] = params['transaction_type']
+
+    # Category filtering
+    if params.get('categories'):
+        categories_regex = [re.compile(f'^{re.escape(c.strip())}$', re.IGNORECASE) for c in params['categories']]
+        match_stage['categoryId'] = {'$in': categories_regex}
+
+    # Keyword filtering
+    if params.get('keywords'):
+        keywords = params['keywords']
+        keyword_logic = params.get('keyword_logic', 'OR').upper()
+
+        if keyword_logic == 'AND':
+            match_stage['$and'] = [{'description': re.compile(k, re.IGNORECASE)} for k in keywords]
+        else: # OR
+            regex_str = '|'.join([re.escape(k) for k in keywords])
+            match_stage['description'] = re.compile(regex_str, re.IGNORECASE)
+
+    # 2. Build Aggregation Pipeline
+    pipeline = []
+    if match_stage:
+        pipeline.append({'$match': match_stage})
+
+    pipeline.append({
+        '$group': {
+            '_id': '$currency',
+            'totalAmount': {'$sum': '$amount'},
+            'count': {'$sum': 1}
+        }
+    })
+
+    results = list(db.transactions.aggregate(pipeline))
+
+    # 3. Format Response
+    summary = {
+        'total_usd': 0,
+        'total_khr': 0,
+        'count': 0,
+        'usd_tx_count': 0,
+        'khr_tx_count': 0
+    }
+    total_count = 0
+    seen_currencies = set()
+
+    for res in results:
+        currency = res['_id']
+        if currency == 'USD':
+            summary['total_usd'] = res['totalAmount']
+            summary['usd_tx_count'] = res['count']
+        elif currency == 'KHR':
+            summary['total_khr'] = res['totalAmount']
+            summary['khr_tx_count'] = res['count']
+
+    summary['count'] = summary['usd_tx_count'] + summary['khr_tx_count']
+
+    return jsonify(summary)
 
 
 @analytics_bp.route('/report/detailed', methods=['GET'])

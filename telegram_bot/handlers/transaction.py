@@ -111,7 +111,7 @@ async def received_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ASK_REMARK
 
 async def received_custom_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['categoryId'] = update.message.text.strip()
+    context.user_data['categoryId'] = update.message.text.strip().title()
     await update.message.reply_text("Add a remark/description?", reply_markup=keyboards.ask_remark_keyboard())
     return ASK_REMARK
 

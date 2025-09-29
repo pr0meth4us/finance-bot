@@ -72,24 +72,49 @@ def calculate_period_summary(start_date, end_date, db):
             'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}
         }},
         {
+            '$addFields': {
+                'amount_in_usd': {
+                    '$cond': {
+                        'if': {'$eq': ['$currency', 'USD']},
+                        'then': '$amount',
+                        'else': {
+                            '$let': {
+                                'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', 4100.0]}},
+                                'in': {'$cond': {'if': {'$gt': ['$$rate', 0]}, 'then': {'$divide': ['$amount', '$$rate']}, 'else': {'$divide': ['$amount', 4100.0]}}}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        {
             '$group': {
                 '_id': {'type': '$type', 'currency': '$currency'},
-                'total': {'$sum': '$amount'}
+                'total': {'$sum': '$amount'},
+                'totalUSD': {'$sum': '$amount_in_usd'}
             }
         }
     ]
     results = list(db.transactions.aggregate(pipeline))
 
     period_summary = {
-        'income': {},
-        'expense': {}
+        'income': {}, 'expense': {}, 'net_usd': 0
     }
+    total_income_usd = 0
+    total_expense_usd = 0
+
     for item in results:
         trans_type = item['_id']['type']
         currency = item['_id']['currency']
         if trans_type in period_summary:
             period_summary[trans_type][currency] = item['total']
 
+        if trans_type == 'income':
+            total_income_usd += item['totalUSD']
+        elif trans_type == 'expense':
+            total_expense_usd += item['totalUSD']
+
+    period_summary['net_usd'] = total_income_usd - total_expense_usd
     return period_summary
 
 

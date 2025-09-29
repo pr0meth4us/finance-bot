@@ -2,6 +2,7 @@
 from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime
 from bson import ObjectId
+import re
 
 debts_bp = Blueprint('debts', __name__, url_prefix='/debts')
 
@@ -41,7 +42,7 @@ def add_debt():
 
     debt = {
         "type": data['type'],
-        "person": data['person'],
+        "person": data['person'].strip().title(),
         "originalAmount": amount,
         "remainingAmount": amount,
         "currency": data['currency'],
@@ -120,7 +121,7 @@ def get_debt_details(debt_id):
 def get_debts_by_person_and_currency(person_name, currency):
     """Fetches all individual open debts for a specific person and currency."""
     query_filter = {
-        'person': person_name,
+        'person': re.compile(f'^{re.escape(person_name)}$', re.IGNORECASE),
         'currency': currency,
         'status': 'open'
     }
@@ -142,7 +143,11 @@ def record_lump_sum_repayment(person_name, currency):
     except (ValueError, TypeError):
         return jsonify({'error': 'Amount must be a number'}), 400
 
-    query_filter = {'person': person_name, 'currency': currency, 'status': 'open'}
+    query_filter = {
+        'person': re.compile(f'^{re.escape(person_name)}$', re.IGNORECASE),
+        'currency': currency,
+        'status': 'open'
+    }
     debts_to_repay = list(current_app.db.debts.find(query_filter).sort('created_at', 1))
 
     if not debts_to_repay:

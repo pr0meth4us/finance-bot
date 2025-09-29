@@ -50,7 +50,7 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     person_debts = api_client.get_debts_by_person_and_currency(person_name, currency)
     if not person_debts:
         await query.edit_message_text(f"❌ Could not find any open {currency} debts for {person_name}.",
-                                       reply_markup=keyboards.iou_menu_keyboard())
+                                      reply_markup=keyboards.iou_menu_keyboard())
         return
 
     total = sum(d['remainingAmount'] for d in person_debts)
@@ -63,7 +63,7 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await query.edit_message_text(text=text, parse_mode='HTML',
                                   reply_markup=keyboards.iou_person_detail_keyboard(person_debts, person_name,
-                                                                                     currency))
+                                                                                    currency))
 
 
 @restricted
@@ -143,7 +143,7 @@ async def iou_received_date_choice(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
     choice = query.data
     prompt = "Who did you lend money to?" if context.user_data[
-                                               'iou_type'] == 'lent' else "Who did you borrow money from?"
+                                                 'iou_type'] == 'lent' else "Who did you borrow money from?"
 
     if choice == 'iou_date_today':
         await query.message.reply_text(prompt)
@@ -173,7 +173,7 @@ async def iou_received_custom_date(update: Update, context: ContextTypes.DEFAULT
 
 
 async def iou_received_person(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['iou_person'] = update.message.text.strip()
+    context.user_data['iou_person'] = update.message.text.strip().title()
     await update.message.reply_text("How much?")
     return IOU_AMOUNT
 

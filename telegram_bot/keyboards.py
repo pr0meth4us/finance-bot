@@ -17,7 +17,10 @@ def main_menu_keyboard():
             InlineKeyboardButton("📊 Set Balance", callback_data='set_balance_start'),
             InlineKeyboardButton("🔔 Set Reminder", callback_data='set_reminder_start')
         ],
-        [InlineKeyboardButton("📖 History", callback_data='history')],
+        [
+            InlineKeyboardButton("📖 History", callback_data='history'),
+            InlineKeyboardButton("🔎 Advanced Search", callback_data='advanced_search')
+        ],
         [
             InlineKeyboardButton("📈 Report", callback_data='report_menu'),
             InlineKeyboardButton("🧠 Habits", callback_data='habits_menu')
@@ -75,7 +78,7 @@ def forgot_type_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-def report_period_keyboard():
+def report_period_keyboard(is_search=False):
     keyboard = [
         [
             InlineKeyboardButton("🗓️ Today", callback_data='report_period_today'),
@@ -86,7 +89,38 @@ def report_period_keyboard():
             InlineKeyboardButton("🗓️ Last Week", callback_data='report_period_last_week'),
         ],
         [InlineKeyboardButton("🗓️ Custom Range", callback_data='report_period_custom')],
-        [InlineKeyboardButton("‹ Back", callback_data='start')],
+    ]
+    if is_search:
+        keyboard.append([InlineKeyboardButton("♾️ All Time", callback_data='report_period_all_time')])
+
+    keyboard.append([InlineKeyboardButton("‹ Back", callback_data='start')])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def search_type_keyboard():
+    keyboard = [
+        [
+            InlineKeyboardButton("💸 Expense", callback_data='search_type_expense'),
+            InlineKeyboardButton("💰 Income", callback_data='search_type_income')
+        ],
+        [InlineKeyboardButton("🌐 All Types", callback_data='search_type_all')],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def skip_keyboard(callback_data):
+    keyboard = [
+        [InlineKeyboardButton("⏩ Skip", callback_data=callback_data)],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def search_keyword_logic_keyboard():
+    keyboard = [
+        [
+            InlineKeyboardButton("Must contain ALL (AND)", callback_data='search_logic_and'),
+            InlineKeyboardButton("Contains ANY (OR)", callback_data='search_logic_or')
+        ]
     ]
     return InlineKeyboardMarkup(keyboard)
 

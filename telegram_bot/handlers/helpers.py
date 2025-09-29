@@ -48,13 +48,64 @@ def format_summary_message(summary_data):
     periods = summary_data.get('periods', {})
     activity_text = ""
     if periods:
+        this_month_net = periods.get('this_month', {}).get('net_usd', 0)
+        net_emoji = '✅' if this_month_net >= 0 else '🔻'
+
         today_text = f"<b>Today:</b>\n{format_period_line(periods.get('today', {}))}"
         this_week_text = f"<b>This Week:</b>\n{format_period_line(periods.get('this_week', {}))}"
         last_week_text = f"<b>Last Week:</b>\n{format_period_line(periods.get('last_week', {}))}"
         this_month_text = f"<b>This Month:</b>\n{format_period_line(periods.get('this_month', {}))}"
-        activity_text = f"<b>Operational Activity (Excl. Loans):</b>\n{today_text}\n{this_week_text}\n{last_week_text}\n{this_month_text}"
+        this_month_net_text = f"    <b>Net: ${this_month_net:,.2f}</b> {net_emoji}"
+
+        activity_text = f"<b>Operational Activity (Excl. Loans):</b>\n{today_text}\n{this_week_text}\n{last_week_text}\n{this_month_text}\n{this_month_net_text}"
 
     return f"\n\n--- Your Current Status ---\n{balance_text}\n\n{debt_text}\n\n{activity_text}"
+
+
+def format_search_results(params, results):
+    """Formats the results from the advanced search API into a readable string."""
+    if not results or results.get('count', 0) == 0:
+        return "No transactions found matching your criteria."
+
+    header = "<b>🔎 Search Results</b>\n\n"
+
+    # Build a summary of the query
+    query_summary = []
+    if params.get('period'):
+        query_summary.append(f"<b>Period:</b> {params['period'].replace('_', ' ').title()}")
+    elif params.get('start_date'):
+        start = datetime.fromisoformat(params['start_date']).strftime('%b %d, %Y')
+        end = datetime.fromisoformat(params['end_date']).strftime('%b %d, %Y')
+        query_summary.append(f"<b>Period:</b> {start} to {end}")
+
+    if params.get('transaction_type'):
+        query_summary.append(f"<b>Type:</b> {params['transaction_type'].title()}")
+
+    if params.get('categories'):
+        query_summary.append(f"<b>Categories:</b> {', '.join(params['categories'])}")
+
+    if params.get('keywords'):
+        logic = params.get('keyword_logic', 'OR')
+        query_summary.append(f"<b>Keywords:</b> {', '.join(params['keywords'])} (Logic: {logic})")
+
+    header += "\n".join(query_summary) + "\n\n"
+
+    # Build the results summary
+    total_text = "<b>Total Sum:</b>\n"
+    total_parts = []
+    if results.get('total_usd', 0) > 0:
+        total_parts.append(f"💵 {results['total_usd']:,.2f} USD")
+    if results.get('total_khr', 0) > 0:
+        total_parts.append(f"៛ {results['total_khr']:,.0f} KHR")
+
+    if not total_parts:
+        total_text += "    $0.00"
+    else:
+        total_text += " & ".join(total_parts)
+
+    count_text = f"\nFound <b>{results['count']}</b> matching transaction(s)."
+
+    return header + total_text + count_text
 
 
 def _format_report_summary_message(data):
@@ -107,7 +158,7 @@ def _format_report_summary_message(data):
         f"    - Lent to others: ${fin_summary['totalLentUSD']:,.2f}" if fin_summary.get('totalLentUSD',
                                                                                         0) > 0 else None,
         f"    - Borrowed from others: ${fin_summary['totalBorrowedUSD']:,.2f}" if fin_summary.get('totalBorrowedUSD',
-                                                                                                   0) > 0 else None,
+                                                                                                  0) > 0 else None,
         f"    - Repayments received: ${fin_summary['totalRepaidToYouUSD']:,.2f}" if fin_summary.get(
             'totalRepaidToYouUSD', 0) > 0 else None,
         f"    - Repayments made: ${fin_summary['totalYouRepaidUSD']:,.2f}" if fin_summary.get('totalYouRepaidUSD',

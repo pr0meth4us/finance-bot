@@ -187,3 +187,14 @@ def get_debt_analysis():
     except requests.exceptions.RequestException as e:
         print(f"API Error fetching debt analysis: {e}")
         return None
+
+
+def search_transactions(params):
+    """Sends a POST request to the advanced search endpoint."""
+    try:
+        res = requests.post(f"{BASE_URL}/analytics/search", json=params, timeout=20)
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error searching transactions: {e}")
+        return None
