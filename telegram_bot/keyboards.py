@@ -241,11 +241,22 @@ def expense_categories_keyboard():
 
 def income_categories_keyboard():
     keyboard = [
-        [InlineKeyboardButton("💼 Salary", callback_data='cat_Salary')],
-        [InlineKeyboardButton("📈 Bonus", callback_data='cat_Bonus')],
-        [InlineKeyboardButton("🎁 Gift", callback_data='cat_Gift')],
-        [InlineKeyboardButton("📈 Investment", callback_data='cat_Investment')],
-        [InlineKeyboardButton("📝 Other", callback_data='cat_other')],
+        [
+            InlineKeyboardButton("💼 Salary", callback_data='cat_Salary'),
+            InlineKeyboardButton("📈 Bonus", callback_data='cat_Bonus')
+        ],
+        [
+            InlineKeyboardButton("💻 Freelance", callback_data='cat_Freelance'),
+            InlineKeyboardButton("📊 Commission", callback_data='cat_Commission')
+        ],
+        [
+            InlineKeyboardButton("💸 Allowance", callback_data='cat_Allowance'),
+            InlineKeyboardButton("🎁 Gift", callback_data='cat_Gift')
+        ],
+        [
+            InlineKeyboardButton("📈 Investment", callback_data='cat_Investment'),
+            InlineKeyboardButton("📝 Other", callback_data='cat_other')
+        ],
     ]
     return InlineKeyboardMarkup(keyboard)
 

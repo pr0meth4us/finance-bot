@@ -18,8 +18,12 @@ COMMAND_MAP = {
 @restricted
 async def quick_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles quick commands like /coffee 1.5"""
+    command_name = "command"
     try:
-        command = context.command.lower()
+        # The command is the first word in the message, without the '/'
+        command_with_slash = update.message.text.split()[0]
+        command = command_with_slash[1:].lower()
+        command_name = command
 
         if not context.args:
             await update.message.reply_text(
@@ -56,7 +60,7 @@ async def quick_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     except (IndexError, ValueError):
         await update.message.reply_text(
-            f"⚠️ Invalid format. Use: /{context.command} <amount>\nExample: /{context.command} 1.5"
+            f"⚠️ Invalid format. Use: /{command_name} <amount>\nExample: /{command_name} 1.5"
         )
     except Exception as e:
         await update.message.reply_text(f"An error occurred: {e}")
