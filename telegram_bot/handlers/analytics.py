@@ -48,13 +48,16 @@ async def process_report_choice(update: Update, context: ContextTypes.DEFAULT_TY
         return REPORT_ASK_START_DATE
 
     today = datetime.now(PHNOM_PENH_TZ).date()
+    end_of_last_month = today.replace(day=1) - timedelta(days=1)
+    start_of_last_month = end_of_last_month.replace(day=1)
     date_ranges = {
         "today": (today, today),
         "this_week": (today - timedelta(days=today.weekday()),
                       today - timedelta(days=today.weekday()) + timedelta(days=6)),
         "last_week": (today - timedelta(days=today.weekday() + 7), today - timedelta(days=today.weekday() + 1)),
         "this_month": (today.replace(day=1),
-                       (today.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1))
+                       (today.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)),
+        "last_month": (start_of_last_month, end_of_last_month)
     }
 
     date_pair = date_ranges.get(period)
@@ -154,13 +157,16 @@ async def process_habits_choice(update: Update, context: ContextTypes.DEFAULT_TY
         return CHOOSE_HABITS_PERIOD
 
     today = datetime.now(PHNOM_PENH_TZ).date()
+    end_of_last_month = today.replace(day=1) - timedelta(days=1)
+    start_of_last_month = end_of_last_month.replace(day=1)
     date_ranges = {
         "today": (today, today),
         "this_week": (today - timedelta(days=today.weekday()),
                       today - timedelta(days=today.weekday()) + timedelta(days=6)),
         "last_week": (today - timedelta(days=today.weekday() + 7), today - timedelta(days=today.weekday() + 1)),
         "this_month": (today.replace(day=1),
-                       (today.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1))
+                       (today.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)),
+        "last_month": (start_of_last_month, end_of_last_month)
     }
 
     date_pair = date_ranges.get(period)

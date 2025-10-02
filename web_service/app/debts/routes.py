@@ -27,7 +27,7 @@ def add_debt():
     """Adds a new debt and a corresponding transaction to reflect the balance change."""
     data = request.json
     if not all(k in data for k in ['type', 'person', 'amount', 'currency']):
-        return jsonify({'error': 'Missing required fields'}), 400
+         return jsonify({'error': 'Missing required fields'}), 400
 
     try:
         amount = float(data['amount'])
@@ -84,10 +84,11 @@ def get_open_debts():
         {
             '$group': {
                 '_id': {
-                    'person': '$person',
+                    'person_normalized': {'$toLower': '$person'},
                     'currency': '$currency',
                     'type': '$type'
                 },
+                'person_display': {'$first': '$person'},
                 'totalAmount': {'$sum': '$remainingAmount'},
                 'count': {'$sum': 1}
             }
@@ -95,7 +96,7 @@ def get_open_debts():
         {
             '$project': {
                 '_id': 0,
-                'person': '$_id.person',
+                'person': '$person_display',
                 'currency': '$_id.currency',
                 'type': '$_id.type',
                 'totalAmount': '$totalAmount',
@@ -209,13 +210,17 @@ def get_debt_analysis():
     concentration_pipeline = [
         {'$match': {'status': 'open'}},
         {'$group': {
-            '_id': {'person': '$person', 'type': '$type'},
+            '_id': {
+                'person_normalized': {'$toLower': '$person'},
+                'type': '$type'
+            },
+            'person_display': {'$first': '$person'},
             'totalAmount': {'$sum': '$remainingAmount'}
         }},
         {'$sort': {'totalAmount': -1}},
         {'$project': {
             '_id': 0,
-            'person': '$_id.person',
+            'person': '$person_display',
             'type': '$_id.type',
             'total': '$totalAmount'
         }}

@@ -38,7 +38,9 @@ def get_date_ranges_for_search():
         "today": create_utc_range(today, today),
         "this_week": create_utc_range(start_of_week, start_of_week + timedelta(days=6)),
         "last_week": create_utc_range(start_of_last_week, end_of_last_week),
-        "this_month": create_utc_range(start_of_month, (start_of_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1))
+        "this_month": create_utc_range(start_of_month,
+                                       (start_of_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(
+                                           days=1))
     }
 
 
@@ -86,7 +88,7 @@ def search_transactions():
 
         if keyword_logic == 'AND':
             match_stage['$and'] = [{'description': re.compile(k, re.IGNORECASE)} for k in keywords]
-        else: # OR
+        else:  # OR
             regex_str = '|'.join([re.escape(k) for k in keywords])
             match_stage['description'] = re.compile(regex_str, re.IGNORECASE)
 
@@ -292,27 +294,6 @@ def get_spending_habits():
         }
     }
 
-    time_of_day_pipeline = [
-        {'$match': {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc}, 'type': 'expense'}},
-        add_fields_stage,
-        {'$bucket': {
-            'groupBy': {'$hour': {'date': '$timestamp', 'timezone': 'Asia/Phnom_Penh'}},
-            'boundaries': [0, 6, 12, 18, 24],
-            'default': "Other",
-            'output': {'totalAmount': {'$sum': '$amount_in_usd'}}
-        }},
-        {'$project': {
-            '_id': 0,
-            'period': {'$switch': {'branches': [
-                {'case': {'$eq': ["$_id", 0]}, 'then': 'Late Night (12am-6am)'},
-                {'case': {'$eq': ["$_id", 6]}, 'then': 'Morning (6am-12pm)'},
-                {'case': {'$eq': ["$_id", 12]}, 'then': 'Afternoon (12pm-6pm)'},
-                {'case': {'$eq': ["$_id", 18]}, 'then': 'Evening (6pm-12am)'}
-            ]}},
-            'total': '$totalAmount'
-        }}
-    ]
-
     day_of_week_pipeline = [
         {'$match': {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc}, 'type': 'expense'}},
         add_fields_stage,
@@ -358,7 +339,6 @@ def get_spending_habits():
     ]
 
     habits = {
-        'byTimeOfDay': list(current_app.db.transactions.aggregate(time_of_day_pipeline)),
         'byDayOfWeek': list(current_app.db.transactions.aggregate(day_of_week_pipeline)),
         'keywordsByCategory': list(current_app.db.transactions.aggregate(keywords_pipeline))
     }

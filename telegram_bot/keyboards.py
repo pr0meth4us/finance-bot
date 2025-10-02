@@ -85,10 +85,13 @@ def report_period_keyboard(is_search=False):
             InlineKeyboardButton("🗓️ This Week", callback_data='report_period_this_week'),
         ],
         [
-            InlineKeyboardButton("🗓️ This Month", callback_data='report_period_this_month'),
             InlineKeyboardButton("🗓️ Last Week", callback_data='report_period_last_week'),
+            InlineKeyboardButton("🗓️ This Month", callback_data='report_period_this_month'),
         ],
-        [InlineKeyboardButton("🗓️ Custom Range", callback_data='report_period_custom')],
+        [
+            InlineKeyboardButton("🗓️ Last Month", callback_data='report_period_last_month'),
+            InlineKeyboardButton("🗓️ Custom Range", callback_data='report_period_custom'),
+        ],
     ]
     if is_search:
         keyboard.append([InlineKeyboardButton("♾️ All Time", callback_data='report_period_all_time')])

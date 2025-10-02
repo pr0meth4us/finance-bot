@@ -4,6 +4,8 @@ from dotenv import load_dotenv
 from handlers import (
     # Common handlers
     start, quick_check,
+    # Quick Commands
+    quick_command_handler,
     # Conversation handlers
     tx_conversation_handler,
     rate_conversation_handler,
@@ -15,7 +17,7 @@ from handlers import (
     report_conversation_handler,
     edit_tx_conversation_handler,
     habits_conversation_handler,
-    search_conversation_handler, # New
+    search_conversation_handler,
     # Standalone callback handlers
     history_menu, manage_transaction, delete_transaction_prompt, delete_transaction_confirm,
     iou_menu, iou_view, iou_person_detail, iou_detail, debt_analysis,
@@ -42,10 +44,12 @@ def main():
     app.add_handler(report_conversation_handler)
     app.add_handler(edit_tx_conversation_handler)
     app.add_handler(habits_conversation_handler)
-    app.add_handler(search_conversation_handler) # New
+    app.add_handler(search_conversation_handler)
 
     # --- Register Standalone Command Handlers ---
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler(["coffee", "lunch", "dinner", "gas"], quick_command_handler))
+
 
     # --- Register Standalone Callback Query Handlers ---
     app.add_handler(CallbackQueryHandler(start, pattern='^start$'))

@@ -31,7 +31,6 @@ from .utility import (
     NEW_RATE, SETBALANCE_ACCOUNT, SETBALANCE_AMOUNT,
     REMINDER_PURPOSE, REMINDER_ASK_DATE, REMINDER_CUSTOM_DATE, REMINDER_ASK_TIME
 )
-# --- NEW ---
 from .search import (
     search_start, received_period_choice, received_custom_start, received_custom_end,
     received_type_choice, received_categories, received_keywords, received_keyword_logic,
@@ -39,7 +38,8 @@ from .search import (
     GET_CATEGORIES, GET_KEYWORDS, GET_KEYWORD_LOGIC
 )
 from .helpers import format_search_results
-# -----------
+from .quick_commands import quick_command_handler
+
 
 # --- Build Conversation Handlers ---
 
@@ -158,7 +158,6 @@ habits_conversation_handler = ConversationHandler(
     per_message=False
 )
 
-# --- NEW ---
 search_conversation_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(search_start, pattern='^advanced_search$')],
     states={
@@ -179,4 +178,3 @@ search_conversation_handler = ConversationHandler(
     fallbacks=[CommandHandler('cancel', cancel), CallbackQueryHandler(start, pattern='^start$')],
     per_message=False
 )
-# -----------

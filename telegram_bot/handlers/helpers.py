@@ -114,7 +114,6 @@ def _format_report_summary_message(data):
     start_date = datetime.fromisoformat(data['startDate']).strftime('%b %d, %Y')
     end_date = datetime.fromisoformat(data['endDate']).strftime('%b %d, %Y')
 
-    # --- START OF MODIFICATION: New Balance Overview Section ---
     start_balance = summary.get('balanceAtStartUSD', 0)
     end_balance = summary.get('balanceAtEndUSD', 0)
 
@@ -124,7 +123,6 @@ def _format_report_summary_message(data):
         f"▫️ Starting Balance: ${start_balance:,.2f}\n"
         f"▫️ Ending Balance: ${end_balance:,.2f}\n\n"
     )
-    # --- END OF MODIFICATION ---
 
     income = summary.get('totalIncomeUSD', 0)
     expense = summary.get('totalExpenseUSD', 0)
@@ -136,13 +134,33 @@ def _format_report_summary_message(data):
         f"<b>Net Savings: ${net:,.2f}</b> {'✅' if net >= 0 else '🔻'}\n\n"
     )
 
+    # --- MODIFICATION START: Separate major and minor expenses ---
     expense_breakdown = data.get('expenseBreakdown', [])
-    expense_text = "<b>Top Expenses:</b>\n"
-    if expense_breakdown:
-        for item in expense_breakdown[:5]:
+    major_expenses = []
+    minor_expenses = []
+    other_text = ""
+    threshold = 4.0
+
+    if expense > 0:
+        for item in expense_breakdown:
+            percentage = (item['totalUSD'] / expense) * 100
+            if percentage < threshold:
+                minor_expenses.append(item)
+            else:
+                major_expenses.append(item)
+
+    expense_text = "<b>Major Expenses:</b>\n"
+    if major_expenses:
+        for item in major_expenses:
             expense_text += f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
     else:
-        expense_text += "    - No expenses recorded.\n"
+        expense_text += "    - No major expenses recorded.\n"
+
+    if minor_expenses:
+        other_text = "\n<b>Other Expenses (grouped in chart):</b>\n"
+        for item in minor_expenses:
+            other_text += f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
+    # --- MODIFICATION END ---
 
     income_breakdown = data.get('incomeBreakdown', [])
     income_text = "\n<b>Income Sources:</b>\n"
@@ -167,7 +185,7 @@ def _format_report_summary_message(data):
     active_lines = [line for line in financial_lines if line]
     financial_text += "\n".join(active_lines) if active_lines else "    - No loan or debt activity."
 
-    return header + balance_overview_text + summary_text + expense_text + income_text + financial_text
+    return header + balance_overview_text + summary_text + expense_text + other_text + income_text + financial_text
 
 
 def _create_income_expense_chart(data, start_date, end_date):
@@ -185,9 +203,8 @@ def _create_income_expense_chart(data, start_date, end_date):
     colors = ['#4CAF50', '#F44336']
     fig, ax = plt.subplots(figsize=(6, 5))
 
-    # --- MODIFICATION ---
-    ax.set_title('Operational Income vs. Expense', pad=20)  # Add padding for subtitle
-    plt.suptitle(date_range_str, y=0.93, fontsize=10)  # Add subtitle with date range
+    ax.set_title('Operational Income vs. Expense', pad=20)
+    plt.suptitle(date_range_str, y=0.93, fontsize=10)
 
     bars = ax.bar(labels, values, color=colors)
     ax.set_ylabel('Amount (USD)')
@@ -207,22 +224,43 @@ def _create_income_expense_chart(data, start_date, end_date):
 def _create_expense_pie_chart(data, start_date, end_date):
     """Creates a pie chart for the expense breakdown."""
     expense_breakdown = data.get('expenseBreakdown', [])
-    if not expense_breakdown or data.get('summary', {}).get('totalExpenseUSD', 0) == 0:
+    total_expense = data.get('summary', {}).get('totalExpenseUSD', 0)
+    if not expense_breakdown or total_expense == 0:
         return None
+
+    # --- MODIFICATION START: Group small slices into 'Other' ---
+    threshold = 4.0
+    new_labels = []
+    new_sizes = []
+    other_total = 0
+
+    if total_expense > 0:
+        for item in expense_breakdown:
+            percentage = (item['totalUSD'] / total_expense) * 100
+            if percentage < threshold:
+                other_total += item['totalUSD']
+            else:
+                new_labels.append(item['category'])
+                new_sizes.append(item['totalUSD'])
+
+    if other_total > 0:
+        new_labels.append('Other')
+        new_sizes.append(other_total)
+
+    labels = new_labels
+    sizes = new_sizes
+    # --- MODIFICATION END ---
 
     date_range_str = f"{start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')}"
 
-    labels = [item['category'] for item in expense_breakdown]
-    sizes = [item['totalUSD'] for item in expense_breakdown]
     explode = [0] * len(labels)
     if sizes:
         explode[sizes.index(max(sizes))] = 0.05
 
     fig, ax = plt.subplots(figsize=(7, 6))
 
-    # --- MODIFICATION ---
-    ax.set_title('Expense Breakdown', pad=20)  # Add padding for subtitle
-    plt.suptitle(date_range_str, y=0.93, fontsize=10)  # Add subtitle with date range
+    ax.set_title('Expense Breakdown', pad=20)
+    plt.suptitle(date_range_str, y=0.93, fontsize=10)
 
     ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90, pctdistance=0.85, explode=explode)
     ax.axis('equal')
@@ -239,10 +277,6 @@ def _format_habits_message(data):
     """Formats the spending habits data into a readable string."""
     if not data:
         return "Could not analyze spending habits."
-    time_text = "<b>🕒 Spending by Time of Day:</b>\n"
-    by_time = sorted(data.get('byTimeOfDay', []), key=lambda x: x.get('total', 0), reverse=True)
-    time_text += "\n".join(
-        [f"    - {item['period']}: ${item['total']:,.2f}" for item in by_time]) or "    - Not enough data.\n"
 
     day_text = "\n<b>📅 Spending by Day of Week:</b>\n"
     by_day = sorted(data.get('byDayOfWeek', []), key=lambda x: x.get('total', 0), reverse=True)
@@ -259,4 +293,4 @@ def _format_habits_message(data):
     else:
         keyword_text += "    - No descriptions found to analyze.\n"
 
-    return time_text + day_text + keyword_text
+    return day_text + keyword_text

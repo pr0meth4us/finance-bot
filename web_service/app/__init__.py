@@ -49,7 +49,8 @@ def send_telegram_photo(chat_id, photo_bytes, token, caption=""):
 
 
 def get_report_data(start_date_local_obj, end_date_local_obj, db):
-    """Internal logic to fetch detailed report data. Replicates analytics endpoint logic."""
+    """Internal logic to fetch detailed report data.
+    Replicates analytics endpoint logic."""
     aware_start_local = datetime.combine(start_date_local_obj, time.min, tzinfo=PHNOM_PENH_TZ)
     aware_end_local = datetime.combine(end_date_local_obj, time.max, tzinfo=PHNOM_PENH_TZ)
     start_date_utc = aware_start_local.astimezone(UTC_TZ)
@@ -141,11 +142,35 @@ def format_scheduled_report_message(data):
 def create_pie_chart_from_data(data, start_date, end_date):
     """Creates a pie chart image from report data."""
     expense_breakdown = data.get('expenseBreakdown', [])
-    if not expense_breakdown or data.get('summary', {}).get('totalExpenseUSD', 0) == 0:
+    total_expense = data.get('summary', {}).get('totalExpenseUSD', 0)
+    if not expense_breakdown or total_expense == 0:
         return None
+
+    # --- MODIFICATION START: Group small slices into 'Other' ---
+    threshold = 4.0  # Percentage threshold
+    new_labels = []
+    new_sizes = []
+    other_total = 0
+
+    if total_expense > 0:
+        for item in expense_breakdown:
+            percentage = (item['totalUSD'] / total_expense) * 100
+            if percentage < threshold:
+                other_total += item['totalUSD']
+            else:
+                new_labels.append(item['category'])
+                new_sizes.append(item['totalUSD'])
+
+    if other_total > 0:
+        new_labels.append('Other')
+        new_sizes.append(other_total)
+
+    labels = new_labels
+    sizes = new_sizes
+    # --- MODIFICATION END ---
+
     date_range_str = f"{start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')}"
-    labels = [item['category'] for item in expense_breakdown]
-    sizes = [item['totalUSD'] for item in expense_breakdown]
+
     fig, ax = plt.subplots(figsize=(7, 6))
     ax.set_title('Expense Breakdown', pad=20)
     plt.suptitle(date_range_str, y=0.93, fontsize=10)
