@@ -151,6 +151,7 @@ def get_detailed_report():
             start_date_utc = aware_start_local.astimezone(UTC_TZ)
             end_date_utc = aware_end_local.astimezone(UTC_TZ)
         else:
+            # Default case if no dates are provided (not used by bot but good for API)
             end_date_utc = datetime.now(UTC_TZ)
             start_date_utc = end_date_utc - timedelta(days=30)
             start_date_local_obj = (end_date_utc - timedelta(days=30)).astimezone(PHNOM_PENH_TZ).date()
@@ -177,58 +178,61 @@ def get_detailed_report():
         }
     }
 
-    # --- START OF MODIFICATION: Calculate Starting Balance ---
+    # --- Balance at Start Calculation ---
     start_balance_pipeline = [
         {'$match': {'timestamp': {'$lt': start_date_utc}}},
         add_fields_stage,
-        {'$group': {
-            '_id': '$type',
-            'totalUSD': {'$sum': '$amount_in_usd'}
-        }}
+        {'$group': {'_id': '$type', 'totalUSD': {'$sum': '$amount_in_usd'}}}
     ]
     start_balance_data = list(current_app.db.transactions.aggregate(start_balance_pipeline))
     start_income = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'income'), 0)
     start_expense = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'expense'), 0)
     balance_at_start_usd = start_income - start_expense
-    # --- END OF MODIFICATION ---
 
+    # --- Pipelines for the selected period ---
+    date_range_match = {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc}}
+
+    # Operational data (for operational summary)
     operational_pipeline = [
-        {'$match': {
-            'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc},
-            'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}
-        }},
+        {'$match': {**date_range_match, 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}}},
         add_fields_stage,
         {'$group': {'_id': {'type': '$type', 'category': '$categoryId'}, 'total': {'$sum': '$amount_in_usd'}}},
         {'$sort': {'total': -1}}
     ]
 
+    # Financial data (for loan/debt summary)
     financial_pipeline = [
-        {'$match': {
-            'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc},
-            'categoryId': {'$in': FINANCIAL_TRANSACTION_CATEGORIES}
-        }},
+        {'$match': {**date_range_match, 'categoryId': {'$in': FINANCIAL_TRANSACTION_CATEGORIES}}},
         add_fields_stage,
         {'$group': {'_id': '$categoryId', 'total': {'$sum': '$amount_in_usd'}}}
     ]
 
+    # --- MODIFICATION START: Calculate total cash flow for the period ---
+    total_flow_pipeline = [
+        {'$match': date_range_match},
+        add_fields_stage,
+        {'$group': {'_id': '$type', 'totalUSD': {'$sum': '$amount_in_usd'}}}
+    ]
+    # --- MODIFICATION END ---
+
     operational_data = list(current_app.db.transactions.aggregate(operational_pipeline))
     financial_data = list(current_app.db.transactions.aggregate(financial_pipeline))
+    total_flow_data = list(current_app.db.transactions.aggregate(total_flow_pipeline))
 
-    if not operational_data and not financial_data and not start_balance_data:
-        return jsonify({"error": "No data found for the selected period."}), 404
-
+    # --- Assemble Report ---
     report = {
         "startDate": start_date_local_obj.isoformat(),
         "endDate": end_date_local_obj.isoformat(),
         "summary": {
             "totalIncomeUSD": 0, "totalExpenseUSD": 0, "netSavingsUSD": 0,
-            "balanceAtStartUSD": balance_at_start_usd, "balanceAtEndUSD": 0  # Initialize new fields
+            "balanceAtStartUSD": balance_at_start_usd, "balanceAtEndUSD": 0
         },
         "financialSummary": {"totalLentUSD": 0, "totalBorrowedUSD": 0, "totalRepaidToYouUSD": 0,
                              "totalYouRepaidUSD": 0},
         "incomeBreakdown": [], "expenseBreakdown": []
     }
 
+    # Populate Operational Summary
     for item in operational_data:
         if item['_id']['type'] == 'income':
             report['summary']['totalIncomeUSD'] += item['total']
@@ -236,13 +240,9 @@ def get_detailed_report():
         elif item['_id']['type'] == 'expense':
             report['summary']['totalExpenseUSD'] += item['total']
             report['expenseBreakdown'].append({'category': item['_id']['category'], 'totalUSD': item['total']})
-
     report['summary']['netSavingsUSD'] = report['summary']['totalIncomeUSD'] - report['summary']['totalExpenseUSD']
 
-    # --- START OF MODIFICATION: Calculate Ending Balance ---
-    report['summary']['balanceAtEndUSD'] = balance_at_start_usd + report['summary']['netSavingsUSD']
-    # --- END OF MODIFICATION ---
-
+    # Populate Financial Summary
     for item in financial_data:
         category_map = {
             'Loan Lent': 'totalLentUSD', 'Loan Received': 'totalBorrowedUSD',
@@ -250,6 +250,12 @@ def get_detailed_report():
         }
         if item['_id'] in category_map:
             report['financialSummary'][category_map[item['_id']]] += item['total']
+
+    # --- MODIFICATION START: Calculate correct Ending Balance ---
+    total_income_in_period = next((item['totalUSD'] for item in total_flow_data if item['_id'] == 'income'), 0)
+    total_expense_in_period = next((item['totalUSD'] for item in total_flow_data if item['_id'] == 'expense'), 0)
+    report['summary']['balanceAtEndUSD'] = balance_at_start_usd + total_income_in_period - total_expense_in_period
+    # --- MODIFICATION END ---
 
     return jsonify(report)
 

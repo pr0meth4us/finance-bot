@@ -236,9 +236,15 @@ def get_debt_analysis():
             }
         }},
         {'$group': {
-            '_id': '$person',
+            '_id': {'$toLower': '$person'},
+            'person_display': {'$first': '$person'},
             'averageAgeDays': {'$avg': '$age_in_days'},
             'count': {'$sum': 1}
+        }},
+        {'$project': {
+            '_id': '$person_display',
+            'averageAgeDays': '$averageAgeDays',
+            'count': '$count'
         }},
         {'$sort': {'averageAgeDays': -1}}
     ]
