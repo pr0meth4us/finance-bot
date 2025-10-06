@@ -37,6 +37,17 @@ COMMAND_MAP = {
     'gift': {'categoryId': 'Gift', 'description': 'Gift', 'type': 'income'},
 }
 
+def parse_amount_and_currency(amount_str: str):
+    """Parses a string like '5000khr' or '2.5' into amount and currency."""
+    amount_str = amount_str.lower()
+    if 'khr' in amount_str:
+        currency = 'KHR'
+        amount = float(amount_str.replace('khr', '').strip())
+    else:
+        currency = 'USD'
+        amount = float(amount_str)
+    return amount, currency
+
 @restricted
 async def command_entry_point(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -64,7 +75,7 @@ async def command_entry_point(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await update.message.reply_text(f"⚠️ Invalid date format. Please use `MM-DD`.", parse_mode='Markdown')
                 return ConversationHandler.END
         
-        amount = float(amount_str)
+        amount, currency = parse_amount_and_currency(amount_str)
 
         # --- Logic for KNOWN vs UNKNOWN commands ---
         if command in COMMAND_MAP:
@@ -73,8 +84,8 @@ async def command_entry_point(update: Update, context: ContextTypes.DEFAULT_TYPE
             tx_data = {
                 "type": details['type'],
                 "amount": amount,
-                "currency": "USD",
-                "accountName": "USD Account",
+                "currency": currency,
+                "accountName": f"{currency} Account",
                 "categoryId": details['categoryId'],
                 "description": details['description'],
                 "timestamp": tx_date
@@ -89,20 +100,21 @@ async def command_entry_point(update: Update, context: ContextTypes.DEFAULT_TYPE
             context.user_data['new_tx'] = {
                 "type": "expense",
                 "amount": amount,
-                "currency": "USD",
-                "accountName": "USD Account",
+                "currency": currency,
+                "accountName": f"{currency} Account",
                 "description": command.replace('_', ' ').title(),
                 "timestamp": tx_date
             }
+            amount_display = f"{amount:,.0f} {currency}" if currency == 'KHR' else f"${amount:,.2f} {currency}"
             await update.message.reply_text(
-                f"New expense '{command.title()}' for ${amount:,.2f}. Which category does this belong to?",
+                f"New expense '{command.title()}' for {amount_display}. Which category does this belong to?",
                 reply_markup=keyboards.expense_categories_keyboard()
             )
             return SELECT_CATEGORY
 
     except (IndexError, ValueError):
         command_name = update.message.text.split()[0][1:].lower()
-        await update.message.reply_text(f"⚠️ Invalid format. Use `/{command_name} <amount> [MM-DD]`", parse_mode='Markdown')
+        await update.message.reply_text(f"⚠️ Invalid amount or format. Use `/{command_name} <amount> [MM-DD]`", parse_mode='Markdown')
         return ConversationHandler.END
     except Exception as e:
         await update.message.reply_text(f"An error occurred: {e}")
