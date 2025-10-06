@@ -4,8 +4,8 @@ from dotenv import load_dotenv
 from handlers import (
     # Common handlers
     start, quick_check,
-    # Quick Commands
-    quick_command_handler,
+    # Generic Commands
+    generic_transaction_handler, generic_debt_handler,
     # Conversation handlers
     tx_conversation_handler,
     rate_conversation_handler,
@@ -17,7 +17,8 @@ from handlers import (
     report_conversation_handler,
     edit_tx_conversation_handler,
     habits_conversation_handler,
-    search_conversation_handler,
+    search_conversation_handler, 
+    unified_command_conversation_handler,
     # Standalone callback handlers
     history_menu, manage_transaction, delete_transaction_prompt, delete_transaction_confirm,
     iou_menu, iou_view, iou_person_detail, iou_detail, debt_analysis,
@@ -32,8 +33,17 @@ def main():
         return
 
     app = Application.builder().token(TOKEN).build()
+    
+    # --- Register Command Handlers ---
+    # Specific, multi-argument commands are registered first to be checked first.
+    app.add_handler(CommandHandler(["expense", "income"], generic_transaction_handler))
+    app.add_handler(CommandHandler(["lent", "borrowed"], generic_debt_handler))
 
-    # --- Register Conversation Handlers ---
+    # The unified handler for quick/smart commands is a ConversationHandler
+    # and will catch any command NOT handled by the ones above.
+    app.add_handler(unified_command_conversation_handler)
+    
+    # --- Register Other Conversation Handlers ---
     app.add_handler(tx_conversation_handler)
     app.add_handler(rate_conversation_handler)
     app.add_handler(iou_conversation_handler)
@@ -48,8 +58,6 @@ def main():
 
     # --- Register Standalone Command Handlers ---
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler(["coffee", "lunch", "dinner", "gas"], quick_command_handler))
-
 
     # --- Register Standalone Callback Query Handlers ---
     app.add_handler(CallbackQueryHandler(start, pattern='^start$'))
