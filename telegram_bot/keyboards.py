@@ -95,7 +95,7 @@ def report_period_keyboard(is_search=False):
     ]
     if is_search:
         keyboard.append([InlineKeyboardButton("♾️ All Time", callback_data='report_period_all_time')])
-
+    
     keyboard.append([InlineKeyboardButton("‹ Back", callback_data='start')])
     return InlineKeyboardMarkup(keyboard)
 
@@ -272,7 +272,9 @@ def ask_remark_keyboard():
 
 
 def history_keyboard(transactions):
-    keyboard = []
+    keyboard = [
+        [InlineKeyboardButton("🔎 Search History", callback_data='advanced_search')]
+    ]
     for tx in transactions:
         amount = tx.get('amount', 0)
         currency = tx.get('currency', 'N/A')
