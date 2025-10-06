@@ -2,6 +2,9 @@
 
 from telegram.ext import ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from .common import start, quick_check, cancel, search_menu
+# --- THIS IS THE FIX ---
+from .generic_commands import generic_transaction_handler, generic_debt_handler
+# ----------------------
 from .analytics import (
     report_menu, process_report_choice, received_report_start_date, received_report_end_date,
     habits_menu, process_habits_choice,
