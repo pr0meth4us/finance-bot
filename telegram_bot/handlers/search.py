@@ -127,14 +127,11 @@ async def received_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives keywords and either asks for logic or executes the search."""
     if update.callback_query:  # User pressed skip
         await update.callback_query.answer()
-        # No keywords, so execute search directly
         return await execute_search(update, context)
 
-    # User sent text
     keywords = [k.strip() for k in update.message.text.split(',')]
     context.user_data['search_params']['keywords'] = keywords
 
-    # If there's more than one keyword, ask for the logic (AND/OR)
     if len(keywords) > 1:
         await update.message.reply_text(
             "Should the description contain ALL of these keywords (AND) or ANY of them (OR)?",
@@ -142,7 +139,6 @@ async def received_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return GET_KEYWORD_LOGIC
 
-    # Only one keyword, default to OR logic and execute search
     context.user_data['search_params']['keyword_logic'] = 'OR'
     return await execute_search(update, context)
 
@@ -158,23 +154,24 @@ async def received_keyword_logic(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def execute_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Executes the correct search type based on the user's initial choice."""
+    """Executes the correct search type and displays results by editing the message."""
     params = context.user_data.get('search_params', {})
     search_type = context.user_data.get('search_type')
-    message = update.message or update.callback_query.message
 
-    await message.reply_text("🔎 searching...")
+    # Determine which message to edit (the original command or the last button press)
     if update.callback_query:
-        try:
-            await update.callback_query.edit_message_reply_markup(reply_markup=None)
-        except:
-            pass
+        message_to_edit = update.callback_query.message
+    else:
+        message_to_edit = await update.message.reply_text("🔎 searching...")
+
+    # Edit the message to show we're searching, removing any old keyboard
+    await message_to_edit.edit_text("🔎 searching...", reply_markup=None)
 
     if search_type == 'manage':
         results = api_client.search_transactions_for_management(params)
         if not results:
-            await message.reply_text("No transactions found matching your criteria.",
-                                     reply_markup=keyboards.main_menu_keyboard())
+            await message_to_edit.edit_text("No transactions found matching your criteria.",
+                                            reply_markup=keyboards.main_menu_keyboard())
         elif len(results) == 1:
             tx = results[0]
             emoji = "⬇️ Expense" if tx['type'] == 'expense' else "⬆️ Income"
@@ -189,15 +186,17 @@ async def execute_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"<b>Description:</b> {tx.get('description') or 'N/A'}\n"
                 f"<b>Date:</b> {date_str}"
             )
-            await message.reply_text(text=text, parse_mode='HTML', reply_markup=keyboards.manage_tx_keyboard(tx['_id']))
+            await message_to_edit.edit_text(text=text, parse_mode='HTML',
+                                            reply_markup=keyboards.manage_tx_keyboard(tx['_id']))
         else:
             text = f"Found {len(results)} matching transactions. Select one to manage:"
-            await message.reply_text(text=text, reply_markup=keyboards.history_keyboard(results, is_search_result=True))
+            await message_to_edit.edit_text(text=text,
+                                            reply_markup=keyboards.history_keyboard(results, is_search_result=True))
 
     elif search_type == 'sum':
         results = api_client.sum_transactions_for_analytics(params)
         response_text = format_summation_results(params, results)
-        await message.reply_text(response_text, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
+        await message_to_edit.edit_text(response_text, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
 
     context.user_data.clear()
     return ConversationHandler.END
