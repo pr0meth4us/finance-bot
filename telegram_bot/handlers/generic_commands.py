@@ -11,6 +11,17 @@ from zoneinfo import ZoneInfo
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
+def parse_amount_and_currency(amount_str: str):
+    """Parses a string like '5000khr' or '2.5' into amount and currency."""
+    amount_str = amount_str.lower()
+    if 'khr' in amount_str:
+        currency = 'KHR'
+        amount = float(amount_str.replace('khr', '').strip())
+    else:
+        currency = 'USD'
+        amount = float(amount_str)
+    return amount, currency
+
 def parse_date_from_args(args):
     """Checks the last argument for a date (MM-DD) and returns it, or None."""
     if not args:
@@ -43,15 +54,17 @@ async def generic_transaction_handler(update: Update, context: ContextTypes.DEFA
 
         tx_date, remaining_args = parse_date_from_args(args)
         
-        amount = float(remaining_args[-1])
+        amount_str = remaining_args[-1]
+        amount, currency = parse_amount_and_currency(amount_str)
+        
         category = remaining_args[0]
         description = " ".join(remaining_args[1:-1])
 
         tx_data = {
             "type": command,
             "amount": amount,
-            "currency": "USD", # Assume USD for generic commands
-            "accountName": "USD Account",
+            "currency": currency,
+            "accountName": f"{currency} Account",
             "categoryId": category,
             "description": description,
             "timestamp": tx_date
@@ -83,14 +96,15 @@ async def generic_debt_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         tx_date, remaining_args = parse_date_from_args(args)
 
         person = remaining_args[0]
-        amount = float(remaining_args[1])
+        amount_str = remaining_args[1]
+        amount, currency = parse_amount_and_currency(amount_str)
         purpose = " ".join(remaining_args[2:])
 
         debt_data = {
             "type": command,
             "person": person,
             "amount": amount,
-            "currency": "USD", # Assume USD for generic commands
+            "currency": currency,
             "purpose": purpose,
             "timestamp": tx_date
         }
