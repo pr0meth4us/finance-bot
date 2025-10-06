@@ -1,7 +1,7 @@
 # --- Start of file: telegram_bot/handlers/__init__.py ---
 
 from telegram.ext import ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler, filters
-from .common import start, quick_check, cancel
+from .common import start, quick_check, cancel, search_menu
 from .analytics import (
     report_menu, process_report_choice, received_report_start_date, received_report_end_date,
     habits_menu, process_habits_choice,
@@ -37,7 +37,6 @@ from .search import (
     CHOOSE_PERIOD, GET_CUSTOM_START, GET_CUSTOM_END, CHOOSE_TYPE,
     GET_CATEGORIES, GET_KEYWORDS, GET_KEYWORD_LOGIC
 )
-from .helpers import format_search_results
 from .command_handler import unified_command_conversation_handler
 from .generic_commands import generic_transaction_handler, generic_debt_handler
 
@@ -160,7 +159,7 @@ habits_conversation_handler = ConversationHandler(
 )
 
 search_conversation_handler = ConversationHandler(
-    entry_points=[CallbackQueryHandler(search_start, pattern='^advanced_search$')],
+    entry_points=[CallbackQueryHandler(search_start, pattern='^start_search_')],
     states={
         CHOOSE_PERIOD: [CallbackQueryHandler(received_period_choice, pattern='^report_period_')],
         GET_CUSTOM_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_custom_start)],

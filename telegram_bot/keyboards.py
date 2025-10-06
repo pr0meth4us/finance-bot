@@ -19,7 +19,7 @@ def main_menu_keyboard():
         ],
         [
             InlineKeyboardButton("📖 History", callback_data='history'),
-            InlineKeyboardButton("🔎 Advanced Search", callback_data='advanced_search')
+            InlineKeyboardButton("🔎 Search & Analyze", callback_data='search_menu')
         ],
         [
             InlineKeyboardButton("📈 Report", callback_data='report_menu'),
@@ -27,6 +27,15 @@ def main_menu_keyboard():
         ],
         [InlineKeyboardButton("⚙️ Update Rate", callback_data='update_rate')],
         [InlineKeyboardButton("🤝 IOU / Debts", callback_data='iou_menu')],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def search_menu_keyboard():
+    keyboard = [
+        [InlineKeyboardButton("✍️ Find & Manage Transactions", callback_data='start_search_manage')],
+        [InlineKeyboardButton("📈 Calculate Totals", callback_data='start_search_sum')],
+        [InlineKeyboardButton("‹ Back to Main Menu", callback_data='start')],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -95,7 +104,7 @@ def report_period_keyboard(is_search=False):
     ]
     if is_search:
         keyboard.append([InlineKeyboardButton("♾️ All Time", callback_data='report_period_all_time')])
-    
+
     keyboard.append([InlineKeyboardButton("‹ Back", callback_data='start')])
     return InlineKeyboardMarkup(keyboard)
 
@@ -271,10 +280,12 @@ def ask_remark_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-def history_keyboard(transactions):
-    keyboard = [
-        [InlineKeyboardButton("🔎 Search History", callback_data='advanced_search')]
-    ]
+def history_keyboard(transactions, is_search_result=False):
+    # Add a search button only if it's the main history view
+    keyboard = []
+    if not is_search_result:
+        keyboard.append([InlineKeyboardButton("🔎 Search History", callback_data='search_menu')])
+
     for tx in transactions:
         amount = tx.get('amount', 0)
         currency = tx.get('currency', 'N/A')

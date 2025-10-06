@@ -58,6 +58,17 @@ async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @restricted
+async def search_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Displays the search sub-menu."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        text="What type of search do you want to perform?",
+        reply_markup=keyboards.search_menu_keyboard()
+    )
+
+
+@restricted
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancels any active conversation."""
     message = "Operation cancelled."

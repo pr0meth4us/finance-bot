@@ -62,12 +62,12 @@ def format_summary_message(summary_data):
     return f"\n\n--- Your Current Status ---\n{balance_text}\n\n{debt_text}\n\n{activity_text}"
 
 
-def format_search_results(params, results):
-    """Formats the results from the advanced search API into a readable string."""
+def format_summation_results(params, results):
+    """Formats the results from the summation analytics API into a readable string."""
     if not results or results.get('count', 0) == 0:
         return "No transactions found matching your criteria."
 
-    header = "<b>🔎 Search Results</b>\n\n"
+    header = "<b>📈 Search Totals</b>\n\n"
 
     # Build a summary of the query
     query_summary = []
@@ -134,7 +134,6 @@ def _format_report_summary_message(data):
         f"<b>Net Savings: ${net:,.2f}</b> {'✅' if net >= 0 else '🔻'}\n\n"
     )
 
-    # --- MODIFICATION START: Separate major and minor expenses ---
     expense_breakdown = data.get('expenseBreakdown', [])
     major_expenses = []
     minor_expenses = []
@@ -160,7 +159,6 @@ def _format_report_summary_message(data):
         other_text = "\n<b>Other Expenses (grouped in chart):</b>\n"
         for item in minor_expenses:
             other_text += f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
-    # --- MODIFICATION END ---
 
     income_breakdown = data.get('incomeBreakdown', [])
     income_text = "\n<b>Income Sources:</b>\n"
@@ -228,7 +226,6 @@ def _create_expense_pie_chart(data, start_date, end_date):
     if not expense_breakdown or total_expense == 0:
         return None
 
-    # --- MODIFICATION START: Group small slices into 'Other' ---
     threshold = 4.0
     new_labels = []
     new_sizes = []
@@ -249,7 +246,6 @@ def _create_expense_pie_chart(data, start_date, end_date):
 
     labels = new_labels
     sizes = new_sizes
-    # --- MODIFICATION END ---
 
     date_range_str = f"{start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')}"
 

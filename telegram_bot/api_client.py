@@ -189,12 +189,23 @@ def get_debt_analysis():
         return None
 
 
-def search_transactions(params):
-    """Sends a POST request to the advanced search endpoint."""
+def search_transactions_for_management(params):
+    """Sends a POST request to get a list of transactions for editing."""
+    try:
+        res = requests.post(f"{BASE_URL}/transactions/search", json=params, timeout=20)
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error searching transactions for management: {e}")
+        return []
+
+
+def sum_transactions_for_analytics(params):
+    """Sends a POST request to get a sum of transactions for analytics."""
     try:
         res = requests.post(f"{BASE_URL}/analytics/search", json=params, timeout=20)
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error searching transactions: {e}")
+        print(f"API Error summing transactions: {e}")
         return None

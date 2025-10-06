@@ -3,7 +3,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from dotenv import load_dotenv
 from handlers import (
     # Common handlers
-    start, quick_check,
+    start, quick_check, search_menu,
     # Generic Commands
     generic_transaction_handler, generic_debt_handler,
     # Conversation handlers
@@ -17,7 +17,7 @@ from handlers import (
     report_conversation_handler,
     edit_tx_conversation_handler,
     habits_conversation_handler,
-    search_conversation_handler, 
+    search_conversation_handler,
     unified_command_conversation_handler,
     # Standalone callback handlers
     history_menu, manage_transaction, delete_transaction_prompt, delete_transaction_confirm,
@@ -26,6 +26,7 @@ from handlers import (
 
 load_dotenv()
 
+
 def main():
     TOKEN = os.getenv("TELEGRAM_TOKEN")
     if not TOKEN:
@@ -33,17 +34,16 @@ def main():
         return
 
     app = Application.builder().token(TOKEN).build()
-    
-    # --- Register Command Handlers ---
-    # Specific, multi-argument commands are registered first to be checked first.
+
+    # --- Register Command Handlers (Specific ones first) ---
+    app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler(["expense", "income"], generic_transaction_handler))
     app.add_handler(CommandHandler(["lent", "borrowed"], generic_debt_handler))
 
-    # The unified handler for quick/smart commands is a ConversationHandler
-    # and will catch any command NOT handled by the ones above.
+    # --- Register Conversation Handlers ---
+    # The unified handler for quick/smart commands will catch any command NOT handled above.
     app.add_handler(unified_command_conversation_handler)
-    
-    # --- Register Other Conversation Handlers ---
+
     app.add_handler(tx_conversation_handler)
     app.add_handler(rate_conversation_handler)
     app.add_handler(iou_conversation_handler)
@@ -56,17 +56,15 @@ def main():
     app.add_handler(habits_conversation_handler)
     app.add_handler(search_conversation_handler)
 
-    # --- Register Standalone Command Handlers ---
-    app.add_handler(CommandHandler("start", start))
-
     # --- Register Standalone Callback Query Handlers ---
     app.add_handler(CallbackQueryHandler(start, pattern='^start$'))
     app.add_handler(CallbackQueryHandler(quick_check, pattern='^quick_check$'))
+    app.add_handler(CallbackQueryHandler(search_menu, pattern='^search_menu$'))
 
     # Transaction History & Management
     app.add_handler(CallbackQueryHandler(history_menu, pattern='^history$'))
     app.add_handler(CallbackQueryHandler(manage_transaction, pattern='^manage_tx_'))
-    app.add_handler(CallbackQueryHandler(delete_transaction_prompt, pattern='^delete_tx_'))
+    app.add_ahandler(CallbackQueryHandler(delete_transaction_prompt, pattern='^delete_tx_'))
     app.add_handler(CallbackQueryHandler(delete_transaction_confirm, pattern='^confirm_delete_'))
 
     # IOU / Debt Management
@@ -78,6 +76,7 @@ def main():
 
     print("🚀 Bot is running...")
     app.run_polling()
+
 
 if __name__ == '__main__':
     main()

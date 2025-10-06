@@ -5,9 +5,10 @@ import keyboards
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 from .common import cancel
-from .helpers import format_search_results
+from .helpers import format_summation_results
 from decorators import restricted
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 # Conversation states
 (
@@ -15,13 +16,19 @@ from datetime import datetime
     GET_CATEGORIES, GET_KEYWORDS, GET_KEYWORD_LOGIC
 ) = range(7)
 
+PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
+
 
 @restricted
 async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Starts the advanced search conversation."""
+    """Starts the advanced search conversation, noting which type of search is requested."""
     query = update.callback_query
     await query.answer()
+
+    search_type = query.data.replace('start_search_', '')  # 'manage' or 'sum'
+    context.user_data['search_type'] = search_type
     context.user_data['search_params'] = {}
+
     await query.edit_message_text(
         "🔎 Advanced Search\n\nFirst, select a time period for the search.",
         reply_markup=keyboards.report_period_keyboard(is_search=True)
@@ -103,10 +110,11 @@ async def received_type_choice(update: Update, context: ContextTypes.DEFAULT_TYP
 async def received_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives categories and asks for keywords."""
     message_text = "Enter keywords to search for in the description, separated by a comma (e.g., coffee, lunch).\n\nOr press Skip to not filter by keywords."
-    if update.callback_query: # User pressed skip
+    if update.callback_query:  # User pressed skip
         await update.callback_query.answer()
-        await update.callback_query.edit_message_text(message_text, reply_markup=keyboards.skip_keyboard('search_skip_keywords'))
-    else: # User sent text
+        await update.callback_query.edit_message_text(message_text,
+                                                      reply_markup=keyboards.skip_keyboard('search_skip_keywords'))
+    else:  # User sent text
         categories = [c.strip() for c in update.message.text.split(',')]
         context.user_data['search_params']['categories'] = categories
         await update.message.reply_text(message_text, reply_markup=keyboards.skip_keyboard('search_skip_keywords'))
@@ -117,7 +125,7 @@ async def received_categories(update: Update, context: ContextTypes.DEFAULT_TYPE
 @restricted
 async def received_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives keywords and either asks for logic or executes the search."""
-    if update.callback_query: # User pressed skip
+    if update.callback_query:  # User pressed skip
         await update.callback_query.answer()
         # No keywords, so execute search directly
         return await execute_search(update, context)
@@ -150,21 +158,46 @@ async def received_keyword_logic(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def execute_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Executes the search via API and displays the result."""
+    """Executes the correct search type based on the user's initial choice."""
     params = context.user_data.get('search_params', {})
+    search_type = context.user_data.get('search_type')
     message = update.message or update.callback_query.message
-    await message.reply_text(" searching...")
 
-    # Call API
-    results = api_client.search_transactions(params)
+    await message.reply_text("🔎 searching...")
+    if update.callback_query:
+        try:
+            await update.callback_query.edit_message_reply_markup(reply_markup=None)
+        except:
+            pass
 
-    # Format and send results
-    response_text = format_search_results(params, results)
-    await message.reply_text(
-        response_text,
-        parse_mode='HTML',
-        reply_markup=keyboards.main_menu_keyboard()
-    )
+    if search_type == 'manage':
+        results = api_client.search_transactions_for_management(params)
+        if not results:
+            await message.reply_text("No transactions found matching your criteria.",
+                                     reply_markup=keyboards.main_menu_keyboard())
+        elif len(results) == 1:
+            tx = results[0]
+            emoji = "⬇️ Expense" if tx['type'] == 'expense' else "⬆️ Income"
+            date_str = datetime.fromisoformat(tx['timestamp'].replace('Z', '+00:00')).astimezone(
+                PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
+            amount_format = ",.0f" if tx['currency'] == 'KHR' else ",.2f"
+            text = (
+                f"Found 1 matching transaction:\n\n<b>Transaction Details:</b>\n"
+                f"<b>Type:</b> {emoji}\n"
+                f"<b>Amount:</b> {tx['amount']:{amount_format}} {tx['currency']}\n"
+                f"<b>Category:</b> {tx['categoryId']}\n"
+                f"<b>Description:</b> {tx.get('description') or 'N/A'}\n"
+                f"<b>Date:</b> {date_str}"
+            )
+            await message.reply_text(text=text, parse_mode='HTML', reply_markup=keyboards.manage_tx_keyboard(tx['_id']))
+        else:
+            text = f"Found {len(results)} matching transactions. Select one to manage:"
+            await message.reply_text(text=text, reply_markup=keyboards.history_keyboard(results, is_search_result=True))
+
+    elif search_type == 'sum':
+        results = api_client.sum_transactions_for_analytics(params)
+        response_text = format_summation_results(params, results)
+        await message.reply_text(response_text, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
 
     context.user_data.clear()
     return ConversationHandler.END
