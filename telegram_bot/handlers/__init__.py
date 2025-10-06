@@ -38,7 +38,6 @@ from .search import (
     GET_CATEGORIES, GET_KEYWORDS, GET_KEYWORD_LOGIC
 )
 from .command_handler import unified_command_conversation_handler
-from .generic_commands import generic_transaction_handler, generic_debt_handler
 
 
 # --- Build Conversation Handlers ---

@@ -3,9 +3,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from dotenv import load_dotenv
 from handlers import (
     # Common handlers
-    start, quick_check, search_menu,
-    # Generic Commands
-    generic_transaction_handler, generic_debt_handler,
+    start, quick_check, search_menu, cancel,
     # Conversation handlers
     tx_conversation_handler,
     rate_conversation_handler,
@@ -35,15 +33,11 @@ def main():
 
     app = Application.builder().token(TOKEN).build()
 
-    # --- Register Command Handlers (Specific ones first) ---
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler(["expense", "income"], generic_transaction_handler))
-    app.add_handler(CommandHandler(["lent", "borrowed"], generic_debt_handler))
-
-    # --- Register Conversation Handlers ---
-    # The unified handler for quick/smart commands will catch any command NOT handled above.
+    # --- Register the Unified Command Handler ---
+    # This handles all commands like /coffee, /salary, /wifi, /expense, /lent, etc.
     app.add_handler(unified_command_conversation_handler)
 
+    # --- Register Other Conversation Handlers ---
     app.add_handler(tx_conversation_handler)
     app.add_handler(rate_conversation_handler)
     app.add_handler(iou_conversation_handler)
@@ -55,6 +49,11 @@ def main():
     app.add_handler(edit_tx_conversation_handler)
     app.add_handler(habits_conversation_handler)
     app.add_handler(search_conversation_handler)
+
+    # --- Register Standalone Command Handlers ---
+    # /start is a special case that should always work to reset the bot.
+    # It's also a fallback in the command conversation handler.
+    app.add_handler(CommandHandler("start", start))
 
     # --- Register Standalone Callback Query Handlers ---
     app.add_handler(CallbackQueryHandler(start, pattern='^start$'))
