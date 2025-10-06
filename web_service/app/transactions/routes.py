@@ -1,9 +1,38 @@
 from flask import Blueprint, request, jsonify, current_app
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from bson import ObjectId
 from app.utils.currency import get_live_usd_to_khr_rate
+import re
+from zoneinfo import ZoneInfo
 
 transactions_bp = Blueprint('transactions', __name__, url_prefix='/transactions')
+
+# Define Timezones for date range searching
+PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
+UTC_TZ = ZoneInfo("UTC")
+
+
+def get_date_ranges_for_search():
+    """Helper to get UTC date ranges for search queries."""
+    today = datetime.now(PHNOM_PENH_TZ).date()
+    start_of_week = today - timedelta(days=today.weekday())
+    start_of_month = today.replace(day=1)
+    end_of_last_week = start_of_week - timedelta(days=1)
+    start_of_last_week = end_of_last_week - timedelta(days=6)
+
+    def create_utc_range(start_local, end_local):
+        aware_start = datetime.combine(start_local, time.min, tzinfo=PHNOM_PENH_TZ)
+        aware_end = datetime.combine(end_local, time.max, tzinfo=PHNOM_PENH_TZ)
+        return aware_start.astimezone(UTC_TZ), aware_end.astimezone(UTC_TZ)
+
+    return {
+        "today": create_utc_range(today, today),
+        "this_week": create_utc_range(start_of_week, start_of_week + timedelta(days=6)),
+        "last_week": create_utc_range(start_of_last_week, end_of_last_week),
+        "this_month": create_utc_range(start_of_month,
+                                       (start_of_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(
+                                           days=1))
+    }
 
 
 def serialize_tx(tx):
@@ -13,10 +42,8 @@ def serialize_tx(tx):
     """
     if '_id' in tx:
         tx['_id'] = str(tx['_id'])
-
     if 'timestamp' in tx and isinstance(tx['timestamp'], datetime):
         tx['timestamp'] = tx['timestamp'].isoformat()
-
     return tx
 
 
@@ -27,10 +54,7 @@ def add_transaction():
         return jsonify({'error': 'Missing required fields'}), 400
 
     timestamp_str = data.get('timestamp')
-    if timestamp_str:
-        timestamp = datetime.fromisoformat(timestamp_str)
-    else:
-        timestamp = datetime.utcnow()
+    timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.utcnow()
 
     tx = {
         "type": data['type'],
@@ -51,9 +75,60 @@ def add_transaction():
 
 @transactions_bp.route('/recent', methods=['GET'])
 def get_recent_transactions():
-    limit = int(request.args.get('limit', 20))
+    limit = int(request.args.get('limit', 20))  # Increased limit to 20
     txs = list(current_app.db.transactions.find().sort('timestamp', -1).limit(limit))
     return jsonify([serialize_tx(tx) for tx in txs])
+
+
+@transactions_bp.route('/search', methods=['POST'])
+def search_transactions():
+    """Performs an advanced search and returns a list of matching transactions."""
+    params = request.json
+    db = current_app.db
+    match_stage = {}
+
+    # Date filtering
+    date_filter = {}
+    if params.get('period'):
+        ranges = get_date_ranges_for_search()
+        if params['period'] in ranges:
+            start_utc, end_utc = ranges[params['period']]
+            date_filter['$gte'] = start_utc
+            date_filter['$lte'] = end_utc
+    elif params.get('start_date') and params.get('end_date'):
+        start_local = datetime.fromisoformat(params['start_date']).date()
+        end_local = datetime.fromisoformat(params['end_date']).date()
+        aware_start = datetime.combine(start_local, time.min, tzinfo=PHNOM_PENH_TZ)
+        aware_end = datetime.combine(end_local, time.max, tzinfo=PHNOM_PENH_TZ)
+        date_filter['$gte'] = aware_start.astimezone(UTC_TZ)
+        date_filter['$lte'] = aware_end.astimezone(UTC_TZ)
+
+    if date_filter:
+        match_stage['timestamp'] = date_filter
+
+    # Type filtering
+    if params.get('transaction_type'):
+        match_stage['type'] = params['transaction_type']
+
+    # Category filtering (case-insensitive)
+    if params.get('categories'):
+        categories_regex = [re.compile(f'^{re.escape(c.strip())}$', re.IGNORECASE) for c in params['categories']]
+        match_stage['categoryId'] = {'$in': categories_regex}
+
+    # Keyword filtering (case-insensitive)
+    if params.get('keywords'):
+        keywords = params['keywords']
+        keyword_logic = params.get('keyword_logic', 'OR').upper()
+
+        if keyword_logic == 'AND':
+            match_stage['$and'] = [{'description': re.compile(k, re.IGNORECASE)} for k in keywords]
+        else:  # OR
+            regex_str = '|'.join([re.escape(k) for k in keywords])
+            match_stage['description'] = re.compile(regex_str, re.IGNORECASE)
+
+    # Execute find query and return a list of transactions
+    results = list(db.transactions.find(match_stage).sort('timestamp', -1).limit(50))
+    return jsonify([serialize_tx(tx) for tx in results])
 
 
 @transactions_bp.route('/<tx_id>', methods=['GET'])
@@ -68,8 +143,6 @@ def get_transaction(tx_id):
         return jsonify({'error': str(e)}), 400
 
 
-# --- START OF MODIFICATION ---
-# New route to update an existing transaction
 @transactions_bp.route('/<tx_id>', methods=['PUT'])
 def update_transaction(tx_id):
     """Updates one or more fields of a specific transaction."""
@@ -77,7 +150,6 @@ def update_transaction(tx_id):
     if not data:
         return jsonify({'error': 'No update data provided'}), 400
 
-    # Build the update payload dynamically
     update_fields = {}
     allowed_fields = ['amount', 'categoryId', 'description']
     for field in allowed_fields:
@@ -106,9 +178,6 @@ def update_transaction(tx_id):
             return jsonify({'error': 'Transaction not found'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-
-# --- END OF MODIFICATION ---
 
 
 @transactions_bp.route('/<tx_id>', methods=['DELETE'])
