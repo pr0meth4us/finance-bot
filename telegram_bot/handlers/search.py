@@ -158,14 +158,12 @@ async def execute_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     params = context.user_data.get('search_params', {})
     search_type = context.user_data.get('search_type')
 
-    # Determine which message to edit (the original command or the last button press)
+    message_to_edit = None
     if update.callback_query:
+        await update.callback_query.edit_message_text("🔎 searching...")
         message_to_edit = update.callback_query.message
     else:
         message_to_edit = await update.message.reply_text("🔎 searching...")
-
-    # Edit the message to show we're searching, removing any old keyboard
-    await message_to_edit.edit_text("🔎 searching...", reply_markup=None)
 
     if search_type == 'manage':
         results = api_client.search_transactions_for_management(params)
