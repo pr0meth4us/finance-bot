@@ -73,26 +73,19 @@ def parse_date_from_args(args):
 @restricted
 async def command_entry_point(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Handles all commands.
-    1. Generic commands (/expense, /income, /lent, /borrowed)
-    2. Known quick commands (/coffee, /salary)
-    3. Unknown commands as new expenses (/wifi)
+    Handles all commands that are NOT /expense, /income, /lent, or /borrowed.
+    1. Known quick commands (/coffee, /salary)
+    2. Unknown commands as new expenses (/wifi)
     """
     try:
         command = update.message.text.split()[0][1:].lower()
         args = context.args
 
-        # This unified handler has been deprecated in favor of separate handlers
-        # for clarity and to fix an issue with handler precedence.
-        # This function is now part of a larger conversation handler.
-
-        # --- Smart Quick Commands (Known and Unknown) ---
         if not args:
             await update.message.reply_text(f"⚠️ Please provide an amount.\nExample: `/{command} 5.50`",
                                             parse_mode='Markdown')
             return ConversationHandler.END
 
-        # Date is the LAST argument now
         tx_date, args_without_date = parse_date_from_args(args)
 
         if not args_without_date:
