@@ -281,7 +281,6 @@ def ask_remark_keyboard():
 
 
 def history_keyboard(transactions, is_search_result=False):
-    # Add a search button only if it's the main history view
     keyboard = []
     if not is_search_result:
         keyboard.append([InlineKeyboardButton("🔎 Search History", callback_data='search_menu')])

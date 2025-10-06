@@ -64,7 +64,7 @@ def main():
     # Transaction History & Management
     app.add_handler(CallbackQueryHandler(history_menu, pattern='^history$'))
     app.add_handler(CallbackQueryHandler(manage_transaction, pattern='^manage_tx_'))
-    app.add_ahandler(CallbackQueryHandler(delete_transaction_prompt, pattern='^delete_tx_'))
+    app.add_handler(CallbackQueryHandler(delete_transaction_prompt, pattern='^delete_tx_'))
     app.add_handler(CallbackQueryHandler(delete_transaction_confirm, pattern='^confirm_delete_'))
 
     # IOU / Debt Management
