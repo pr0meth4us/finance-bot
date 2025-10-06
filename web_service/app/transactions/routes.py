@@ -36,7 +36,7 @@ def add_transaction():
         "type": data['type'],
         "amount": float(data['amount']),
         "currency": data['currency'],
-        "categoryId": data['categoryId'],
+        "categoryId": data['categoryId'].strip().title(),
         "accountName": data['accountName'],
         "description": data.get('description', ''),
         "timestamp": timestamp
@@ -51,7 +51,7 @@ def add_transaction():
 
 @transactions_bp.route('/recent', methods=['GET'])
 def get_recent_transactions():
-    limit = int(request.args.get('limit', 10))
+    limit = int(request.args.get('limit', 20))
     txs = list(current_app.db.transactions.find().sort('timestamp', -1).limit(limit))
     return jsonify([serialize_tx(tx) for tx in txs])
 
@@ -87,6 +87,8 @@ def update_transaction(tx_id):
                     update_fields[field] = float(data[field])
                 except (ValueError, TypeError):
                     return jsonify({'error': 'Invalid amount format'}), 400
+            elif field == 'categoryId':
+                update_fields[field] = data[field].strip().title()
             else:
                 update_fields[field] = data[field]
 
@@ -119,4 +121,3 @@ def delete_transaction(tx_id):
             return jsonify({'error': 'Transaction not found'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 400
-
