@@ -37,6 +37,7 @@ def main():
 
     # --- Register Command Handlers (Specific ones first) ---
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(CommandHandler(["expense", "income"], generic_transaction_handler))
     app.add_handler(CommandHandler(["lent", "borrowed"], generic_debt_handler))
 

@@ -83,7 +83,7 @@ async def command_entry_point(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         if not args:
             await update.message.reply_text(f"⚠️ Please provide an amount.\nExample: `/{command} 5.50`",
-                                            parse_mode='Markdown')
+                                         parse_mode='Markdown')
             return ConversationHandler.END
 
         tx_date, args_without_date = parse_date_from_args(args)
@@ -106,7 +106,7 @@ async def command_entry_point(update: Update, context: ContextTypes.DEFAULT_TYPE
             base_text = "✅ Quick transaction recorded!" if response else "❌ Failed to record."
             summary_text = format_summary_message(api_client.get_detailed_summary())
             await update.message.reply_text(base_text + summary_text, parse_mode='HTML',
-                                            reply_markup=keyboards.main_menu_keyboard())
+                                         reply_markup=keyboards.main_menu_keyboard())
             return ConversationHandler.END
         else:
             context.user_data['new_tx'] = {
@@ -163,7 +163,10 @@ async def received_category_for_unknown_command(update: Update, context: Context
 
 
 unified_command_conversation_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.COMMAND, command_entry_point)],
+    entry_points=[MessageHandler(
+        filters.COMMAND & ~filters.Regex(r'^(start|cancel|expense|income|lent|borrowed)$'),
+        command_entry_point
+    )],
     states={
         SELECT_CATEGORY: [CallbackQueryHandler(received_category_for_unknown_command, pattern='^cat_')]
     },
