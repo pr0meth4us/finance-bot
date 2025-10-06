@@ -1,8 +1,10 @@
 # --- Start of corrected file: telegram_bot/handlers/command_handler.py ---
 
 from telegram import Update
-from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, filters, \
-    CommandHandler
+from telegram.ext import (
+    ContextTypes, ConversationHandler, CallbackQueryHandler,
+    MessageHandler, filters, CommandHandler
+)
 import api_client
 import keyboards
 from decorators import restricted
@@ -80,53 +82,9 @@ async def command_entry_point(update: Update, context: ContextTypes.DEFAULT_TYPE
         command = update.message.text.split()[0][1:].lower()
         args = context.args
 
-        # --- Generic Commands ---
-        if command in ["expense", "income"]:
-            if len(args) < 3:
-                await update.message.reply_text(
-                    f"⚠️ Invalid format. Use:\n`/{command} <Category> <Description> <Amount> [MM-DD]`",
-                    parse_mode='Markdown')
-                return ConversationHandler.END
-
-            tx_date, remaining_args = parse_date_from_args(args)
-            amount_str = remaining_args[-1]
-            amount, currency = parse_amount_and_currency(amount_str)
-            category = remaining_args[0]
-            description = " ".join(remaining_args[1:-1])
-
-            tx_data = {
-                "type": command, "amount": amount, "currency": currency,
-                "accountName": f"{currency} Account", "categoryId": category,
-                "description": description, "timestamp": tx_date
-            }
-            response = api_client.add_transaction(tx_data)
-            base_text = f"✅ Generic {command} recorded!" if response else f"❌ Failed to record {command}."
-            summary_text = format_summary_message(api_client.get_detailed_summary())
-            await update.message.reply_text(base_text + summary_text, parse_mode='HTML',
-                                            reply_markup=keyboards.main_menu_keyboard())
-            return ConversationHandler.END
-
-        if command in ["lent", "borrowed"]:
-            if len(args) < 3:
-                await update.message.reply_text(
-                    f"⚠️ Invalid format. Use:\n`/{command} <Person> <Amount> <Purpose> [MM-DD]`", parse_mode='Markdown')
-                return ConversationHandler.END
-
-            tx_date, remaining_args = parse_date_from_args(args)
-            person = remaining_args[0]
-            amount_str = remaining_args[1]
-            amount, currency = parse_amount_and_currency(amount_str)
-            purpose = " ".join(remaining_args[2:])
-            debt_data = {
-                "type": command, "person": person, "amount": amount,
-                "currency": currency, "purpose": purpose, "timestamp": tx_date
-            }
-            response = api_client.add_debt(debt_data)
-            base_text = f"✅ {command.title()} record saved!" if response else f"❌ Failed to save {command} record."
-            summary_text = format_summary_message(api_client.get_detailed_summary())
-            await update.message.reply_text(base_text + summary_text, parse_mode='HTML',
-                                            reply_markup=keyboards.main_menu_keyboard())
-            return ConversationHandler.END
+        # This unified handler has been deprecated in favor of separate handlers
+        # for clarity and to fix an issue with handler precedence.
+        # This function is now part of a larger conversation handler.
 
         # --- Smart Quick Commands (Known and Unknown) ---
         if not args:
@@ -134,12 +92,14 @@ async def command_entry_point(update: Update, context: ContextTypes.DEFAULT_TYPE
                                             parse_mode='Markdown')
             return ConversationHandler.END
 
-        tx_date, remaining_args = parse_date_from_args(args)
-        if not remaining_args:
+        # Date is the LAST argument now
+        tx_date, args_without_date = parse_date_from_args(args)
+
+        if not args_without_date:
             await update.message.reply_text(f"⚠️ Invalid format. Amount is missing.", parse_mode='Markdown')
             return ConversationHandler.END
 
-        amount_str = remaining_args[0]
+        amount_str = args_without_date[0]
         amount, currency = parse_amount_and_currency(amount_str)
 
         if command in COMMAND_MAP:
@@ -167,7 +127,13 @@ async def command_entry_point(update: Update, context: ContextTypes.DEFAULT_TYPE
             return SELECT_CATEGORY
 
     except (IndexError, ValueError):
-        await update.message.reply_text(f"⚠️ Invalid format for that command.", parse_mode='Markdown')
+        command_name = "command"
+        try:
+            command_name = update.message.text.split()[0][1:].lower()
+        except:
+            pass
+        await update.message.reply_text(f"⚠️ Invalid format. Use `/{command_name} <amount> [MM-DD]`",
+                                        parse_mode='Markdown')
         return ConversationHandler.END
     except Exception as e:
         await update.message.reply_text(f"An error occurred: {e}")
