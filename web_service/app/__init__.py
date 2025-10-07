@@ -13,7 +13,6 @@ from datetime import datetime, time, timedelta, date
 from zoneinfo import ZoneInfo
 from bson import ObjectId
 
-# --- NEW: Define constants here for reuse ---
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 UTC_TZ = ZoneInfo("UTC")
 FINANCIAL_TRANSACTION_CATEGORIES = [
@@ -49,8 +48,7 @@ def send_telegram_photo(chat_id, photo_bytes, token, caption=""):
 
 
 def get_report_data(start_date_local_obj, end_date_local_obj, db):
-    """Internal logic to fetch detailed report data.
-    Replicates analytics endpoint logic."""
+    """Internal logic to fetch detailed report data."""
     aware_start_local = datetime.combine(start_date_local_obj, time.min, tzinfo=PHNOM_PENH_TZ)
     aware_end_local = datetime.combine(end_date_local_obj, time.max, tzinfo=PHNOM_PENH_TZ)
     start_date_utc = aware_start_local.astimezone(UTC_TZ)
@@ -112,7 +110,6 @@ def get_report_data(start_date_local_obj, end_date_local_obj, db):
 
 
 def format_scheduled_report_message(data):
-    """Formats a simplified report message for scheduled delivery."""
     summary = data.get('summary', {})
     start_date = datetime.fromisoformat(data['startDate']).strftime('%b %d, %Y')
     end_date = datetime.fromisoformat(data['endDate']).strftime('%b %d, %Y')
@@ -127,31 +124,24 @@ def format_scheduled_report_message(data):
         f"⬇️ Expense: ${expense:,.2f}\n"
         f"<b>Net: ${net:,.2f}</b> {'✅' if net >= 0 else '🔻'}\n\n"
     )
-
     expense_breakdown = data.get('expenseBreakdown', [])
     expense_text = "<b>Top Expenses:</b>\n"
     if expense_breakdown:
-        for item in expense_breakdown[:3]:  # Top 3 for brevity
+        for item in expense_breakdown[:3]:
             expense_text += f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
     else:
         expense_text += "    - No expenses recorded.\n"
-
     return header + summary_text + expense_text
 
 
 def create_pie_chart_from_data(data, start_date, end_date):
-    """Creates a pie chart image from report data."""
     expense_breakdown = data.get('expenseBreakdown', [])
     total_expense = data.get('summary', {}).get('totalExpenseUSD', 0)
     if not expense_breakdown or total_expense == 0:
         return None
 
-    # --- MODIFICATION START: Group small slices into 'Other' ---
-    threshold = 4.0  # Percentage threshold
-    new_labels = []
-    new_sizes = []
-    other_total = 0
-
+    threshold = 4.0
+    new_labels, new_sizes, other_total = [], [], 0
     if total_expense > 0:
         for item in expense_breakdown:
             percentage = (item['totalUSD'] / total_expense) * 100
@@ -160,15 +150,11 @@ def create_pie_chart_from_data(data, start_date, end_date):
             else:
                 new_labels.append(item['category'])
                 new_sizes.append(item['totalUSD'])
-
     if other_total > 0:
         new_labels.append('Other')
         new_sizes.append(other_total)
 
-    labels = new_labels
-    sizes = new_sizes
-    # --- MODIFICATION END ---
-
+    labels, sizes = new_labels, new_sizes
     date_range_str = f"{start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')}"
 
     fig, ax = plt.subplots(figsize=(7, 6))
@@ -184,93 +170,76 @@ def create_pie_chart_from_data(data, start_date, end_date):
 
 
 # --- SCHEDULED JOB DEFINITIONS ---
+def _send_report_job(period_name, start_date, end_date, db, token, chat_id):
+    """Generic helper to generate and send a report."""
+    report_data = get_report_data(start_date, end_date, db)
+    if report_data and report_data.get('summary', {}).get('totalExpenseUSD', 0) > 0:
+        message = format_scheduled_report_message(report_data)
+        send_telegram_message(chat_id, message, token)
+        pie_chart_bytes = create_pie_chart_from_data(report_data, start_date, end_date)
+        if pie_chart_bytes:
+            send_telegram_photo(chat_id, pie_chart_bytes, token)
+    else:
+        message = f"📊 No significant activity recorded for the {period_name} ({start_date.strftime('%b %d')} - {end_date.strftime('%b %d')})."
+        send_telegram_message(chat_id, message, token)
 
-def send_daily_reminder_job():
-    """Checks if a transaction was logged today and sends a reminder if not."""
+
+def run_scheduled_report(period):
+    """Main function called by scheduler to run a report for a given period."""
+    print(f"Running {period} scheduled report job...")
     client = MongoClient(Config.MONGODB_URI, tls=True, tlsCAFile=certifi.where())
     db = client[Config.DB_NAME]
+    token = Config.TELEGRAM_TOKEN
+    chat_id = Config.TELEGRAM_CHAT_ID
 
+    if not token or not chat_id:
+        print(f"Skipping {period} report: Telegram token or chat ID not configured.")
+        client.close()
+        return
+
+    today = datetime.now(PHNOM_PENH_TZ).date()
+    if period == 'weekly':
+        end_date = today - timedelta(days=today.weekday() + 1)
+        start_date = end_date - timedelta(days=6)
+        _send_report_job('previous week', start_date, end_date, db, token, chat_id)
+    elif period == 'monthly':
+        end_date = today.replace(day=1) - timedelta(days=1)
+        start_date = end_date.replace(day=1)
+        _send_report_job('previous month', start_date, end_date, db, token, chat_id)
+    elif period == 'semesterly':
+        if today.month == 1:  # January, report on Jul-Dec
+            end_date = today.replace(year=today.year - 1, month=12, day=31)
+            start_date = today.replace(year=today.year - 1, month=7, day=1)
+            _send_report_job('last semester', start_date, end_date, db, token, chat_id)
+        elif today.month == 7:  # July, report on Jan-Jun
+            end_date = today.replace(month=6, day=30)
+            start_date = today.replace(month=1, day=1)
+            _send_report_job('first semester', start_date, end_date, db, token, chat_id)
+    elif period == 'yearly':
+        end_date = today.replace(year=today.year - 1, month=12, day=31)
+        start_date = today.replace(year=today.year - 1, month=1, day=1)
+        _send_report_job('previous year', start_date, end_date, db, token, chat_id)
+
+    client.close()
+    print(f"{period.capitalize()} report job finished.")
+
+
+def send_daily_reminder_job():
+    # This job is different, so it keeps its own logic
+    client = MongoClient(Config.MONGODB_URI, tls=True, tlsCAFile=certifi.where())
+    db = client[Config.DB_NAME]
     now_in_phnom_penh = datetime.now(PHNOM_PENH_TZ)
     today_start_local_aware = datetime.combine(now_in_phnom_penh.date(), time.min, tzinfo=PHNOM_PENH_TZ)
     today_start_utc = today_start_local_aware.astimezone(ZoneInfo("UTC"))
-
     count = db.transactions.count_documents({'timestamp': {'$gte': today_start_utc}})
-
     if count == 0 and Config.TELEGRAM_TOKEN and Config.TELEGRAM_CHAT_ID:
-        token = Config.TELEGRAM_TOKEN
-        chat_id = Config.TELEGRAM_CHAT_ID
+        token, chat_id = Config.TELEGRAM_TOKEN, Config.TELEGRAM_CHAT_ID
         message = "Hey! 잊지마! (Don't forget!)\n\nLooks like you haven't logged any transactions today. Take a moment to log your activity! ✍️"
-        send_telegram_message(chat_id, message, token, parse_mode='Markdown')  # Simple text, no HTML needed
+        send_telegram_message(chat_id, message, token, parse_mode='Markdown')
         print("Sent daily transaction reminder.")
     else:
         print("Skipped daily transaction reminder, transactions found or config missing.")
     client.close()
-
-
-def send_weekly_report_job():
-    """Generates and sends a report for the previous week."""
-    print("Running weekly scheduled report job...")
-    client = MongoClient(Config.MONGODB_URI, tls=True, tlsCAFile=certifi.where())
-    db = client[Config.DB_NAME]
-    token = Config.TELEGRAM_TOKEN
-    chat_id = Config.TELEGRAM_CHAT_ID
-
-    if not token or not chat_id:
-        print("Skipping weekly report: Telegram token or chat ID not configured.")
-        client.close()
-        return
-
-    today = datetime.now(PHNOM_PENH_TZ).date()
-    end_of_last_week = today - timedelta(days=today.weekday() + 1)
-    start_of_last_week = end_of_last_week - timedelta(days=6)
-
-    report_data = get_report_data(start_of_last_week, end_of_last_week, db)
-    if report_data and report_data.get('summary', {}).get('totalExpenseUSD', 0) > 0:
-        message = format_scheduled_report_message(report_data)
-        send_telegram_message(chat_id, message, token)
-
-        pie_chart_bytes = create_pie_chart_from_data(report_data, start_of_last_week, end_of_last_week)
-        if pie_chart_bytes:
-            send_telegram_photo(chat_id, pie_chart_bytes, token)
-    else:
-        message = f"📊 No significant activity recorded for last week ({start_of_last_week.strftime('%b %d')} - {end_of_last_week.strftime('%b %d')})."
-        send_telegram_message(chat_id, message, token)
-
-    client.close()
-    print("Weekly report job finished.")
-
-
-def send_monthly_report_job():
-    """Generates and sends a report for the previous month."""
-    print("Running monthly scheduled report job...")
-    client = MongoClient(Config.MONGODB_URI, tls=True, tlsCAFile=certifi.where())
-    db = client[Config.DB_NAME]
-    token = Config.TELEGRAM_TOKEN
-    chat_id = Config.TELEGRAM_CHAT_ID
-
-    if not token or not chat_id:
-        print("Skipping monthly report: Telegram token or chat ID not configured.")
-        client.close()
-        return
-
-    today = datetime.now(PHNOM_PENH_TZ).date()
-    end_of_last_month = today.replace(day=1) - timedelta(days=1)
-    start_of_last_month = end_of_last_month.replace(day=1)
-
-    report_data = get_report_data(start_of_last_month, end_of_last_month, db)
-    if report_data and report_data.get('summary', {}).get('totalExpenseUSD', 0) > 0:
-        message = format_scheduled_report_message(report_data)
-        send_telegram_message(chat_id, message, token)
-
-        pie_chart_bytes = create_pie_chart_from_data(report_data, start_of_last_month, end_of_last_month)
-        if pie_chart_bytes:
-            send_telegram_photo(chat_id, pie_chart_bytes, token)
-    else:
-        message = f"📊 No significant activity recorded for last month ({start_of_last_month.strftime('%B %Y')})."
-        send_telegram_message(chat_id, message, token)
-
-    client.close()
-    print("Monthly report job finished.")
 
 
 # --- APP CREATION ---
@@ -283,28 +252,24 @@ def create_app():
     app.db = client[Config.DB_NAME]
     print("✅ MongoDB connection successful.")
 
-    # Initialize and start the scheduler
     scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Phnom_Penh')
 
-    # Existing job for daily reminder
+    # Schedule all jobs
     scheduler.add_job(send_daily_reminder_job, trigger=CronTrigger(hour=21, minute=0), id='daily_reminder',
                       replace_existing=True)
-    print("⏰ Daily transaction reminder scheduled for 21:00 Phnom Penh time.")
-
-    # --- NEW: Add scheduled reports ---
-    # Weekly report every Monday at 8:00 AM for the previous week
-    scheduler.add_job(send_weekly_report_job, trigger=CronTrigger(day_of_week='mon', hour=8, minute=0),
+    scheduler.add_job(run_scheduled_report, args=['weekly'], trigger=CronTrigger(day_of_week='mon', hour=8, minute=0),
                       id='weekly_report', replace_existing=True)
-    print("⏰ Weekly report scheduled for Mondays at 08:00 Phnom Penh time.")
-
-    # Monthly report on the 1st of every month at 8:30 AM for the previous month
-    scheduler.add_job(send_monthly_report_job, trigger=CronTrigger(day=1, hour=8, minute=30), id='monthly_report',
+    scheduler.add_job(run_scheduled_report, args=['monthly'], trigger=CronTrigger(day=1, hour=8, minute=30),
+                      id='monthly_report', replace_existing=True)
+    scheduler.add_job(run_scheduled_report, args=['semesterly'],
+                      trigger=CronTrigger(month='1,7', day=1, hour=9, minute=0), id='semesterly_report',
                       replace_existing=True)
-    print("⏰ Monthly report scheduled for the 1st of each month at 08:30 Phnom Penh time.")
+    scheduler.add_job(run_scheduled_report, args=['yearly'], trigger=CronTrigger(month=1, day=1, hour=9, minute=30),
+                      id='yearly_report', replace_existing=True)
 
     scheduler.start()
     app.scheduler = scheduler
-    print("⏰ Scheduler started for dynamic and fixed job scheduling.")
+    print("⏰ Scheduler started with daily, weekly, monthly, semesterly, and yearly jobs.")
 
     # Register Blueprints
     from .settings.routes import settings_bp
@@ -326,4 +291,3 @@ def create_app():
         return jsonify({"status": "ok"})
 
     return app
-# --- End of modified file: web_service/app/__init__.py ---

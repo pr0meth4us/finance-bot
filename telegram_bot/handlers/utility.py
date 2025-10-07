@@ -8,6 +8,7 @@ from decorators import restricted
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 from .helpers import format_summary_message
+import os
 
 # Conversation states
 (
@@ -131,11 +132,16 @@ async def received_reminder_time(update: Update, context: ContextTypes.DEFAULT_T
         aware_dt = datetime.combine(reminder_date, reminder_time, tzinfo=PHNOM_PENH_TZ)
         context.user_data['reminder_datetime'] = aware_dt.isoformat()
 
+        # --- THIS IS THE FIX ---
+        # Get the target chat ID from .env, or fall back to the current chat if not set.
+        target_chat_id = os.getenv("REMINDER_TARGET_CHAT_ID") or update.effective_chat.id
+
         reminder_data = {
             "purpose": context.user_data['reminder_purpose'],
             "reminder_datetime": context.user_data['reminder_datetime'],
-            "chat_id": update.effective_chat.id
+            "chat_id": target_chat_id
         }
+
         api_client.add_reminder(reminder_data)
         await update.message.reply_text(f"✅ Got it! I will remind you on {aware_dt.strftime('%d %b %Y at %H:%M')}.",
                                         reply_markup=keyboards.main_menu_keyboard())

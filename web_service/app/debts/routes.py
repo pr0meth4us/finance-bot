@@ -3,9 +3,10 @@ from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime
 from bson import ObjectId
 import re
+from zoneinfo import ZoneInfo
 
 debts_bp = Blueprint('debts', __name__, url_prefix='/debts')
-
+UTC_TZ = ZoneInfo("UTC") # Add UTC timezone
 
 def serialize_debt(doc):
     """
@@ -14,11 +15,8 @@ def serialize_debt(doc):
     """
     if '_id' in doc:
         doc['_id'] = str(doc['_id'])
-
-    # Explicitly convert datetime to ISO 8601 format string to ensure frontend compatibility
     if 'created_at' in doc and isinstance(doc['created_at'], datetime):
         doc['created_at'] = doc['created_at'].isoformat()
-
     return doc
 
 
@@ -36,9 +34,10 @@ def add_debt():
 
     timestamp_str = data.get('timestamp')
     try:
-        created_at = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.utcnow()
+        # --- THIS IS THE FIX ---
+        created_at = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now(UTC_TZ)
     except (ValueError, TypeError):
-        created_at = datetime.utcnow()
+        created_at = datetime.now(UTC_TZ)
 
     debt = {
         "type": data['type'],
@@ -75,10 +74,6 @@ def add_debt():
 
 @debts_bp.route('/', methods=['GET'])
 def get_open_debts():
-    """
-    Fetches open debts and groups them by person and currency to provide a summary.
-    This aggregation provides the `totalAmount` and `count` fields expected by the bot's keyboard.
-    """
     pipeline = [
         {'$match': {'status': 'open'}},
         {
@@ -111,7 +106,6 @@ def get_open_debts():
 
 @debts_bp.route('/<debt_id>', methods=['GET'])
 def get_debt_details(debt_id):
-    """Fetches the details of a single debt document by its ID."""
     debt = current_app.db.debts.find_one({'_id': ObjectId(debt_id)})
     if not debt:
         return jsonify({'error': 'Debt not found'}), 404
@@ -120,7 +114,6 @@ def get_debt_details(debt_id):
 
 @debts_bp.route('/person/<person_name>/<currency>', methods=['GET'])
 def get_debts_by_person_and_currency(person_name, currency):
-    """Fetches all individual open debts for a specific person and currency."""
     query_filter = {
         'person': re.compile(f'^{re.escape(person_name)}$', re.IGNORECASE),
         'currency': currency,
@@ -132,7 +125,6 @@ def get_debts_by_person_and_currency(person_name, currency):
 
 @debts_bp.route('/person/<person_name>/<currency>/repay', methods=['POST'])
 def record_lump_sum_repayment(person_name, currency):
-    """Handles a lump-sum repayment, applying it to the oldest debts first."""
     data = request.json
     if 'amount' not in data:
         return jsonify({'error': 'Repayment amount is required'}), 400
@@ -155,19 +147,19 @@ def record_lump_sum_repayment(person_name, currency):
         return jsonify({'error': 'No open debts found for this person and currency'}), 404
 
     total_remaining = sum(d['remainingAmount'] for d in debts_to_repay)
-    if repayment_amount > total_remaining + 0.001:  # Allow for float inaccuracies
+    if repayment_amount > total_remaining + 0.001:
         return jsonify(
             {'error': f'Repayment amount {repayment_amount} is greater than total owed {total_remaining:.2f}'}), 400
 
     amount_to_apply = repayment_amount
     debt_type = debts_to_repay[0]['type']
+    now_utc = datetime.now(UTC_TZ) # Use one consistent timestamp for all transactions
 
     for debt in debts_to_repay:
         if amount_to_apply <= 0:
             break
 
         repayment_for_this_debt = min(amount_to_apply, debt['remainingAmount'])
-
         new_remaining = debt['remainingAmount'] - repayment_for_this_debt
         new_status = 'settled' if new_remaining <= 0.001 else 'open'
 
@@ -175,7 +167,7 @@ def record_lump_sum_repayment(person_name, currency):
             {'_id': debt['_id']},
             {
                 '$inc': {'remainingAmount': -repayment_for_this_debt},
-                '$push': {'repayments': {'amount': repayment_for_this_debt, 'date': datetime.utcnow()}},
+                '$push': {'repayments': {'amount': repayment_for_this_debt, 'date': now_utc}},
                 '$set': {'status': new_status}
             }
         )
@@ -188,10 +180,9 @@ def record_lump_sum_repayment(person_name, currency):
         tx = {
             "type": tx_type, "amount": repayment_for_this_debt, "currency": currency,
             "categoryId": tx_category, "accountName": account_name,
-            "description": tx_desc, "timestamp": datetime.utcnow()
+            "description": tx_desc, "timestamp": now_utc
         }
         current_app.db.transactions.insert_one(tx)
-
         amount_to_apply -= repayment_for_this_debt
 
     return jsonify(
@@ -200,13 +191,8 @@ def record_lump_sum_repayment(person_name, currency):
 
 @debts_bp.route('/analysis', methods=['GET'])
 def get_debt_analysis():
-    """
-    Analyzes open debts to find concentration by person and the average
-    age of outstanding debts.
-    """
-    now = datetime.utcnow()
+    now = datetime.now(UTC_TZ)
 
-    # --- 1. Debt Concentration ---
     concentration_pipeline = [
         {'$match': {'status': 'open'}},
         {'$group': {
@@ -226,7 +212,6 @@ def get_debt_analysis():
         }}
     ]
 
-    # --- 2. Debt Aging ---
     aging_pipeline = [
         {'$match': {'status': 'open'}},
         {'$project': {
@@ -253,5 +238,4 @@ def get_debt_analysis():
         'concentration': list(current_app.db.debts.aggregate(concentration_pipeline)),
         'aging': list(current_app.db.debts.aggregate(aging_pipeline))
     }
-
     return jsonify(analysis)

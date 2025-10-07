@@ -1,10 +1,7 @@
-# --- Start of file: telegram_bot/handlers/__init__.py ---
+# --- Start of corrected file: telegram_bot/handlers/__init__.py ---
 
 from telegram.ext import ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler, filters
-from .common import start, quick_check, cancel, search_menu
-# --- THIS IS THE FIX ---
-from .generic_commands import generic_transaction_handler, generic_debt_handler
-# ----------------------
+from .common import start, quick_check, cancel, search_menu, get_chat_id
 from .analytics import (
     report_menu, process_report_choice, received_report_start_date, received_report_end_date,
     habits_menu, process_habits_choice,
@@ -40,7 +37,13 @@ from .search import (
     CHOOSE_PERIOD, GET_CUSTOM_START, GET_CUSTOM_END, CHOOSE_TYPE,
     GET_CATEGORIES, GET_KEYWORDS, GET_KEYWORD_LOGIC
 )
-from .command_handler import unified_command_conversation_handler
+from .command_handler import (
+    generic_transaction_handler,
+    generic_debt_handler,
+    quick_command_handler,
+    unknown_command_conversation_handler,
+    COMMAND_MAP
+)
 
 
 # --- Build Conversation Handlers ---
@@ -65,7 +68,6 @@ forgot_conversation_handler = ConversationHandler(
         FORGOT_DATE: [CallbackQueryHandler(received_forgot_day, pattern='^forgot_day_')],
         FORGOT_CUSTOM_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_forgot_custom_date)],
         FORGOT_TYPE: [CallbackQueryHandler(received_forgot_type, pattern='^forgot_type_')],
-        # Reuse states from transaction handler
         AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_amount)],
         CURRENCY: [CallbackQueryHandler(received_currency, pattern='^curr_')],
         CATEGORY: [CallbackQueryHandler(received_category, pattern='^cat_')],

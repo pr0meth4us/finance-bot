@@ -26,7 +26,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=keyboard
             )
         except Exception:
-            pass  # Ignore if message hasn't changed or other minor issues
+            pass
     else:
         summary_data = api_client.get_detailed_summary()
         summary_text = format_summary_message(summary_data)
@@ -66,6 +66,13 @@ async def search_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text="What type of search do you want to perform?",
         reply_markup=keyboards.search_menu_keyboard()
     )
+
+# --- NEW FUNCTION ---
+@restricted
+async def get_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A simple helper command to get the current chat's ID."""
+    chat_id = update.effective_chat.id
+    await update.message.reply_text(f"This chat's ID is: `{chat_id}`", parse_mode='Markdown')
 
 
 @restricted
