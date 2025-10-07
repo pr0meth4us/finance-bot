@@ -67,13 +67,6 @@ async def search_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=keyboards.search_menu_keyboard()
     )
 
-# --- NEW FUNCTION ---
-@restricted
-async def get_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """A simple helper command to get the current chat's ID."""
-    chat_id = update.effective_chat.id
-    await update.message.reply_text(f"This chat's ID is: `{chat_id}`", parse_mode='Markdown')
-
 
 @restricted
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):

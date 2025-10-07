@@ -3,7 +3,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from dotenv import load_dotenv
 from handlers import (
     # Common handlers
-    start, quick_check, search_menu, cancel, get_chat_id,
+    start, quick_check, search_menu, cancel,
     # Specific command handlers
     generic_transaction_handler,
     generic_debt_handler,
@@ -43,7 +43,6 @@ def main():
     # 1. Standalone handlers for critical commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cancel", cancel))
-    app.add_handler(CommandHandler("getid", get_chat_id))
 
     # 2. Specific, multi-argument commands
     app.add_handler(CommandHandler(["expense", "income"], generic_transaction_handler))

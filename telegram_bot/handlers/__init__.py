@@ -1,7 +1,7 @@
-# --- Start of corrected file: telegram_bot/handlers/__init__.py ---
+# --- Start of file: telegram_bot/handlers/__init__.py ---
 
 from telegram.ext import ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler, filters
-from .common import start, quick_check, cancel, search_menu, get_chat_id
+from .common import start, quick_check, cancel, search_menu
 from .analytics import (
     report_menu, process_report_choice, received_report_start_date, received_report_end_date,
     habits_menu, process_habits_choice,
