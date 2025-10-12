@@ -278,6 +278,7 @@ def create_app():
     from .debts.routes import debts_bp
     from .summary.routes import summary_bp
     from .reminders.routes import reminders_bp
+    from .auth.routes import auth_bp # <-- IMPORT NEW AUTH BLUEPRINT
 
     app.register_blueprint(settings_bp)
     app.register_blueprint(analytics_bp)
@@ -285,6 +286,7 @@ def create_app():
     app.register_blueprint(debts_bp)
     app.register_blueprint(summary_bp)
     app.register_blueprint(reminders_bp)
+    app.register_blueprint(auth_bp) # <-- REGISTER NEW AUTH BLUEPRINT
 
     @app.route("/health")
     def health_check():
