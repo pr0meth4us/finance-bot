@@ -1,4 +1,4 @@
-# --- Start of file: telegram_bot/handlers/transaction.py ---
+# --- Start of corrected file: telegram_bot/handlers/transaction.py ---
 
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
@@ -13,8 +13,9 @@ from .helpers import format_summary_message
 (
     AMOUNT, CURRENCY, CATEGORY, CUSTOM_CATEGORY, ASK_REMARK, REMARK,
     FORGOT_DATE, FORGOT_CUSTOM_DATE, FORGOT_TYPE,
-    EDIT_CHOOSE_FIELD, EDIT_GET_NEW_VALUE, EDIT_GET_NEW_CATEGORY
-) = range(12)
+    EDIT_CHOOSE_FIELD, EDIT_GET_NEW_VALUE, EDIT_GET_NEW_CATEGORY,
+    EDIT_GET_CUSTOM_CATEGORY  # <-- THIS STATE IS NOW USED CORRECTLY
+) = range(13)
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
@@ -74,7 +75,6 @@ async def received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['amount'] = amount
 
         if amount < 100:
-            # Auto-select USD and skip to category selection
             currency = "USD"
             context.user_data['currency'] = currency
             context.user_data['accountName'] = "USD Account"
@@ -82,7 +82,6 @@ async def received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"Amount: <b>{amount:,.2f} USD</b> (auto-selected)\n\nWhich category?", parse_mode='HTML', reply_markup=keyboard)
             return CATEGORY
         else:
-            # Ask for currency as usual
             await update.message.reply_text("Which currency?", reply_markup=keyboards.currency_keyboard())
             return CURRENCY
     except ValueError:
@@ -143,7 +142,7 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     transactions = api_client.get_recent_transactions()
-    text = "Select a transaction to manage:"
+    text = "Recent transactions:"
     keyboard = keyboards.history_keyboard(transactions)
     if not transactions:
         text = "No recent transactions found."
@@ -163,15 +162,7 @@ async def manage_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE)
     emoji = "⬇️ Expense" if tx['type'] == 'expense' else "⬆️ Income"
     date_str = datetime.fromisoformat(tx['timestamp'].replace('Z', '+00:00')).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
     amount_format = ",.0f" if tx['currency'] == 'KHR' else ",.2f"
-    text = (
-        f"<b>Transaction Details:</b>\n\n"
-        f"<b>Type:</b> {emoji}\n"
-        f"<b>Amount:</b> {tx['amount']:{amount_format}} {tx['currency']}\n"
-        f"<b>Category:</b> {tx['categoryId']}\n"
-        f"<b>Description:</b> {tx.get('description') or 'N/A'}\n"
-        f"<b>Date:</b> {date_str}\n\n"
-        "What would you like to do?"
-    )
+    text = (f"<b>Transaction Details:</b>\n\n" f"<b>Type:</b> {emoji}\n" f"<b>Amount:</b> {tx['amount']:{amount_format}} {tx['currency']}\n" f"<b>Category:</b> {tx['categoryId']}\n" f"<b>Description:</b> {tx.get('description') or 'N/A'}\n" f"<b>Date:</b> {date_str}\n\n" "What would you like to do?")
     await query.edit_message_text(text=text, parse_mode='HTML', reply_markup=keyboards.manage_tx_keyboard(tx_id))
 
 @restricted
@@ -226,8 +217,7 @@ async def edit_received_new_value(update: Update, context: ContextTypes.DEFAULT_
     field = context.user_data.get('edit_tx_field')
     value = update.message.text
     if field == 'amount':
-        try:
-            value = float(value)
+        try: value = float(value)
         except ValueError:
             await update.message.reply_text("Invalid amount. Please enter a valid number.")
             return EDIT_GET_NEW_VALUE
@@ -239,13 +229,19 @@ async def edit_received_new_category(update: Update, context: ContextTypes.DEFAU
     await query.answer()
     category = query.data.split('_')[1]
     if category == 'other':
-        await query.edit_message_text("Editing to a custom category is not supported here. Please choose a standard one.")
-        return EDIT_GET_NEW_CATEGORY
+        await query.edit_message_text("Please type your new custom category name:")
+        return EDIT_GET_CUSTOM_CATEGORY
+
     context.user_data['edit_tx_new_value'] = category
     return await _update_transaction_and_confirm(update, context)
 
+async def edit_received_custom_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles receiving the text for a new custom category during an edit."""
+    new_category_name = update.message.text.strip().title()
+    context.user_data['edit_tx_new_value'] = new_category_name
+    return await _update_transaction_and_confirm(update, context)
+
 async def _update_transaction_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Helper to perform the API call and confirm to user."""
     tx_id = context.user_data.get('edit_tx_id')
     field = context.user_data.get('edit_tx_field')
     value = context.user_data.get('edit_tx_new_value')

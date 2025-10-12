@@ -1,15 +1,9 @@
 import os
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from dotenv import load_dotenv
+# --- MODIFICATION START ---
 from handlers import (
-    # Common handlers
     start, quick_check, search_menu, cancel,
-    # Specific command handlers
-    generic_transaction_handler,
-    generic_debt_handler,
-    quick_command_handler,
-    COMMAND_MAP,
-    # Conversation handlers
     tx_conversation_handler,
     rate_conversation_handler,
     iou_conversation_handler,
@@ -21,11 +15,11 @@ from handlers import (
     edit_tx_conversation_handler,
     habits_conversation_handler,
     search_conversation_handler,
-    unknown_command_conversation_handler,
-    # Standalone callback handlers
     history_menu, manage_transaction, delete_transaction_prompt, delete_transaction_confirm,
     iou_menu, iou_view, iou_person_detail, iou_detail, debt_analysis,
 )
+from handlers.command_handler import unified_message_conversation_handler, repay_command_handler
+# --- MODIFICATION END ---
 
 load_dotenv()
 
@@ -38,20 +32,20 @@ def main():
 
     app = Application.builder().token(TOKEN).build()
 
-    # --- Register Handlers in Order of Precedence ---
+    # --- Register ALL Handlers ---
 
-    # 1. Standalone handlers for critical commands
+    # 1. System command handlers for start/cancel and specific commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cancel", cancel))
+    # --- MODIFICATION START: Add new repay command handlers ---
+    app.add_handler(CommandHandler("repaid", repay_command_handler))
+    app.add_handler(CommandHandler("paid", repay_command_handler))
+    # --- MODIFICATION END ---
 
-    # 2. Specific, multi-argument commands
-    app.add_handler(CommandHandler(["expense", "income"], generic_transaction_handler))
-    app.add_handler(CommandHandler(["lent", "borrowed"], generic_debt_handler))
-
-    # 3. Known quick commands (from the COMMAND_MAP)
-    app.add_handler(CommandHandler(list(COMMAND_MAP.keys()), quick_command_handler))
-
-    # 4. Conversation handlers for button-based flows
+    # --- MODIFICATION START: Reorder handlers ---
+    # 2. Add button-based conversation handlers FIRST.
+    # These handlers need to check for text messages while in an active state,
+    # so they must come before the general-purpose text handler.
     app.add_handler(tx_conversation_handler)
     app.add_handler(rate_conversation_handler)
     app.add_handler(iou_conversation_handler)
@@ -64,10 +58,12 @@ def main():
     app.add_handler(habits_conversation_handler)
     app.add_handler(search_conversation_handler)
 
-    # 5. The "catch-all" for any other command (must be LAST among command handlers)
-    app.add_handler(unknown_command_conversation_handler)
+    # 3. The unified message handler should be one of the LAST handlers.
+    # It acts as a fallback for any text that isn't part of an active conversation.
+    app.add_handler(unified_message_conversation_handler)
+    # --- MODIFICATION END ---
 
-    # 6. Standalone callback handlers for specific button presses.
+    # 4. Standalone callback handlers for specific button presses.
     app.add_handler(CallbackQueryHandler(start, pattern='^start$'))
     app.add_handler(CallbackQueryHandler(quick_check, pattern='^quick_check$'))
     app.add_handler(CallbackQueryHandler(search_menu, pattern='^search_menu$'))
