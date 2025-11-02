@@ -21,17 +21,17 @@ def get_date_ranges_for_search():
 
     def create_utc_range(start_local, end_local):
         aware_start = datetime.combine(start_local, time.min, tzinfo=PHNOM_PENH_TZ)
-        aware_end = datetime.combine(end_local, time.max, tzinfo=PHNOM_PENH_TZ)
-        return aware_start.astimezone(UTC_TZ), aware_end.astimezone(UTC_TZ)
+    aware_end = datetime.combine(end_local, time.max, tzinfo=PHNOM_PENH_TZ)
+    return aware_start.astimezone(UTC_TZ), aware_end.astimezone(UTC_TZ)
 
-    return {
-        "today": create_utc_range(today, today),
-        "this_week": create_utc_range(start_of_week, start_of_week + timedelta(days=6)),
-        "last_week": create_utc_range(start_of_last_week, end_of_last_week),
-        "this_month": create_utc_range(start_of_month,
-                                       (start_of_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(
-                                           days=1))
-    }
+return {
+    "today": create_utc_range(today, today),
+    "this_week": create_utc_range(start_of_week, start_of_week + timedelta(days=6)),
+    "last_week": create_utc_range(start_of_last_week, end_of_last_week),
+    "this_month": create_utc_range(start_of_month,
+                                   (start_of_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(
+                                       days=1))
+}
 
 
 def serialize_tx(tx):
@@ -95,36 +95,36 @@ def search_transactions():
             start_utc, end_utc = ranges[params['period']]
             date_filter['$gte'] = start_utc
             date_filter['$lte'] = end_utc
-    elif params.get('start_date') and params.get('end_date'):
-        start_local = datetime.fromisoformat(params['start_date']).date()
-        end_local = datetime.fromisoformat(params['end_date']).date()
-        aware_start = datetime.combine(start_local, time.min, tzinfo=PHNOM_PENH_TZ)
-        aware_end = datetime.combine(end_local, time.max, tzinfo=PHNOM_PENH_TZ)
-        date_filter['$gte'] = aware_start.astimezone(UTC_TZ)
-        date_filter['$lte'] = aware_end.astimezone(UTC_TZ)
+elif params.get('start_date') and params.get('end_date'):
+start_local = datetime.fromisoformat(params['start_date']).date()
+end_local = datetime.fromisoformat(params['end_date']).date()
+aware_start = datetime.combine(start_local, time.min, tzinfo=PHNOM_PENH_TZ)
+aware_end = datetime.combine(end_local, time.max, tzinfo=PHNOM_PENH_TZ)
+date_filter['$gte'] = aware_start.astimezone(UTC_TZ)
+date_filter['$lte'] = aware_end.astimezone(UTC_TZ)
 
-    if date_filter:
-        match_stage['timestamp'] = date_filter
+if date_filter:
+    match_stage['timestamp'] = date_filter
 
-    if params.get('transaction_type'):
-        match_stage['type'] = params['transaction_type']
+if params.get('transaction_type'):
+    match_stage['type'] = params['transaction_type']
 
-    if params.get('categories'):
-        categories_regex = [re.compile(f'^{re.escape(c.strip())}$', re.IGNORECASE) for c in params['categories']]
-        match_stage['categoryId'] = {'$in': categories_regex}
+if params.get('categories'):
+    categories_regex = [re.compile(f'^{re.escape(c.strip())}$', re.IGNORECASE) for c in params['categories']]
+    match_stage['categoryId'] = {'$in': categories_regex}
 
-    if params.get('keywords'):
-        keywords = params['keywords']
-        keyword_logic = params.get('keyword_logic', 'OR').upper()
+if params.get('keywords'):
+    keywords = params['keywords']
+    keyword_logic = params.get('keyword_logic', 'OR').upper()
 
-        if keyword_logic == 'AND':
-            match_stage['$and'] = [{'description': re.compile(k, re.IGNORECASE)} for k in keywords]
-        else:
-            regex_str = '|'.join([re.escape(k) for k in keywords])
-            match_stage['description'] = re.compile(regex_str, re.IGNORECASE)
+    if keyword_logic == 'AND':
+        match_stage['$and'] = [{'description': re.compile(k, re.IGNORECASE)} for k in keywords]
+    else:
+        regex_str = '|'.join([re.escape(k) for k in keywords])
+        match_stage['description'] = re.compile(regex_str, re.IGNORECASE)
 
-    results = list(db.transactions.find(match_stage).sort('timestamp', -1).limit(50))
-    return jsonify([serialize_tx(tx) for tx in results])
+results = list(db.transactions.find(match_stage).sort('timestamp', -1).limit(50))
+return jsonify([serialize_tx(tx) for tx in results])
 
 
 @transactions_bp.route('/<tx_id>', methods=['GET'])
@@ -141,12 +141,15 @@ def get_transaction(tx_id):
 
 @transactions_bp.route('/<tx_id>', methods=['PUT'])
 def update_transaction(tx_id):
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     data = request.json
     if not data:
         return jsonify({'error': 'No update data provided'}), 400
 
     update_fields = {}
-    allowed_fields = ['amount', 'categoryId', 'description']
+    # --- FIX: Add 'timestamp' to allowed fields ---
+    allowed_fields = ['amount', 'categoryId', 'description', 'timestamp']
+
     for field in allowed_fields:
         if field in data:
             if field == 'amount':
@@ -156,6 +159,14 @@ def update_transaction(tx_id):
                     return jsonify({'error': 'Invalid amount format'}), 400
             elif field == 'categoryId':
                 update_fields[field] = data[field].strip().title()
+            # --- FIX: Handle 'timestamp' field ---
+            elif field == 'timestamp':
+                try:
+                    # Convert ISO string back to datetime object
+                    update_fields[field] = datetime.fromisoformat(data[field])
+                except (ValueError, TypeError):
+                    return jsonify({'error': 'Invalid timestamp format'}), 400
+            # --- End Fix ---
             else:
                 update_fields[field] = data[field]
 

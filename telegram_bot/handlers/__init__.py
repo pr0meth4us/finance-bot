@@ -20,10 +20,13 @@ from .transaction import (
     received_custom_category, ask_remark, received_remark, save_transaction_and_end,
     history_menu, manage_transaction, delete_transaction_prompt, delete_transaction_confirm,
     edit_transaction_start, edit_choose_field, edit_received_new_value, edit_received_new_category,
-    edit_received_custom_category, edit_received_new_date,
+    edit_received_custom_category,
+    # --- FIX: Import new date handler and state ---
+    edit_received_new_date, EDIT_GET_NEW_DATE,
+    # --- End Fix ---
     AMOUNT, CURRENCY, CATEGORY, CUSTOM_CATEGORY, ASK_REMARK, REMARK,
     FORGOT_DATE, FORGOT_CUSTOM_DATE, FORGOT_TYPE,
-    EDIT_CHOOSE_FIELD, EDIT_GET_NEW_VALUE, EDIT_GET_NEW_CATEGORY, EDIT_GET_CUSTOM_CATEGORY, EDIT_GET_NEW_DATE
+    EDIT_CHOOSE_FIELD, EDIT_GET_NEW_VALUE, EDIT_GET_NEW_CATEGORY, EDIT_GET_CUSTOM_CATEGORY
 )
 from .utility import (
     update_rate_start, received_new_rate, set_balance_start, received_balance_account,
@@ -38,8 +41,6 @@ from .search import (
     CHOOSE_PERIOD, GET_CUSTOM_START, GET_CUSTOM_END, CHOOSE_TYPE,
     GET_CATEGORIES, GET_KEYWORDS, GET_KEYWORD_LOGIC
 )
-from .command_handler import unified_message_conversation_handler
-
 
 # --- Build Conversation Handlers ---
 
@@ -81,7 +82,9 @@ edit_tx_conversation_handler = ConversationHandler(
         EDIT_GET_NEW_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_received_new_value)],
         EDIT_GET_NEW_CATEGORY: [CallbackQueryHandler(edit_received_new_category, pattern='^cat_')],
         EDIT_GET_CUSTOM_CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_received_custom_category)],
-        EDIT_GET_NEW_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_received_new_date)]
+        # --- FIX: Add new state for date editing ---
+        EDIT_GET_NEW_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_received_new_date)],
+        # --- End Fix ---
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     per_message=False
@@ -146,7 +149,7 @@ report_conversation_handler = ConversationHandler(
         REPORT_ASK_START_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_report_start_date)],
         REPORT_ASK_END_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_report_end_date)],
     },
-    fallabacks=[CommandHandler('cancel', cancel)],
+    fallbacks=[CommandHandler('cancel', cancel)],
     per_message=False
 )
 

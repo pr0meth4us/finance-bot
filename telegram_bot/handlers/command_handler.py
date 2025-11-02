@@ -1,336 +1,350 @@
-# --- Start of modified file: telegram_bot/keyboards.py ---
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+# --- Start of corrected file: telegram_bot/handlers/command_handler.py ---
+
+from telegram import Update
+from telegram.ext import (
+    ContextTypes, ConversationHandler, CallbackQueryHandler,
+    MessageHandler, filters, CommandHandler
+)
+import api_client
+import keyboards
+from decorators import restricted
+from .helpers import format_summary_message
+from .common import cancel, start
 from datetime import datetime
+from zoneinfo import ZoneInfo
+import logging
+import shlex
+# --- MODIFICATION START: Add safe evaluator for calculator ---
+# NOTE: You must add 'asteval' to your requirements.txt
+from asteval import Interpreter
+# --- MODIFICATION END ---
+
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
+SELECT_CATEGORY, GET_CUSTOM_CATEGORY = range(2)
+# --- MODIFICATION START: Initialize the safe calculator ---
+aeval = Interpreter()
+# --- MODIFICATION END ---
+
+COMMAND_MAP = {
+    'coffee': {'categoryId': 'Drink', 'description': 'Coffee', 'type': 'expense'}, 'lunch': {'categoryId': 'Food', 'description': 'Lunch', 'type': 'expense'}, 'dinner': {'categoryId': 'Food', 'description': 'Dinner', 'type': 'expense'}, 'gas': {'categoryId': 'Transport', 'description': 'Gas', 'type': 'expense'}, 'parking': {'categoryId': 'Transport', 'description': 'Parking', 'type': 'expense'}, 'taxi': {'categoryId': 'Transport', 'description': 'Taxi/Tuktuk', 'type': 'expense'}, 'movie': {'categoryId': 'Entertainment', 'description': 'Movie', 'type': 'expense'}, 'groceries': {'categoryId': 'Shopping', 'description': 'Groceries', 'type': 'expense'}, 'shopping': {'categoryId': 'Shopping', 'description': 'Shopping', 'type': 'expense'}, 'bills': {'categoryId': 'Bills', 'description': 'Bills', 'type': 'expense'}, 'pizza': {'categoryId': 'Food', 'description': 'Pizza', 'type': 'expense'}, 'others': {'categoryId': 'For Others', 'description': 'For Others', 'type': 'expense'},
+    'alcohol': {'categoryId': 'Alcohol', 'description': 'Alcohol', 'type': 'expense'}, # <-- FIX: Added alcohol
+    'salary': {'categoryId': 'Salary', 'description': 'Salary', 'type': 'income'}, 'bonus': {'categoryId': 'Bonus', 'description': 'Bonus', 'type': 'income'}, 'commission': {'categoryId': 'Commission', 'description': 'Commission', 'type': 'income'}, 'allowance': {'categoryId': 'Allowance', 'description': 'Allowance', 'type': 'income'}, 'gift': {'categoryId': 'Gift', 'description': 'Gift', 'type': 'income'},
+}
+
+def parse_amount_and_currency(amount_str: str):
+    amount_str = amount_str.lower()
+    if 'khr' in amount_str:
+        return float(amount_str.replace('khr', '').strip()), 'KHR'
+    else:
+        return float(amount_str), 'USD'
+
+def parse_date_from_args(args):
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
+    if not args: return None, args
+
+    date_str = args[-1]
+    parsed_date = None
+    today = datetime.now(PHNOM_PENH_TZ)
+
+    try:
+        # Try MM-DD format first
+        parsed_date = datetime.strptime(date_str, '%m-%d')
+    except (ValueError, TypeError):
+        try:
+            # Try DD-MM format next
+            parsed_date = datetime.strptime(date_str, '%d-%m')
+        except (ValueError, TypeError):
+            # Not a valid date, return original args
+            return None, args
+
+    # If parsing succeeded
+    tx_datetime = today.replace(month=parsed_date.month, day=parsed_date.day, hour=12, minute=0, second=0, microsecond=0)
+    return tx_datetime.isoformat(), args[:-1]
+
+# --- NEW HELPER FUNCTION ---
+def _format_success_message(data):
+    """Formats a detailed success message for logged transactions or debts."""
+    lines = ["<b>✅ Recorded:</b>"]
+
+    # Common fields
+    lines.append(f"  - <b>Type:</b> {data['type'].title()}")
+    amount = data.get('amount') or data.get('iou_amount')
+    currency = data.get('currency') or data.get('iou_currency')
+    amount_format = ",.0f" if currency == 'KHR' else ",.2f"
+    lines.append(f"  - <b>Amount:</b> {amount:{amount_format}} {currency}")
+
+    # Transaction-specific vs Debt-specific
+    if 'categoryId' in data:
+        lines.append(f"  - <b>Category:</b> {data['categoryId']}")
+        if data.get('description'):
+            lines.append(f"  - <b>Description:</b> {data['description']}")
+    elif 'person' in data:
+        lines.append(f"  - <b>Person:</b> {data['person']}")
+        if data.get('purpose'):
+            lines.append(f"  - <b>Purpose:</b> {data['purpose']}")
+
+    # Date
+    if data.get('timestamp'):
+        date_obj = datetime.fromisoformat(data['timestamp'])
+        date_str = date_obj.strftime('%Y-%m-%d')
+        lines.append(f"  - <b>Date:</b> {date_str}")
+    else:
+        lines.append(f"  - <b>Date:</b> {datetime.now(PHNOM_PENH_TZ).strftime('%Y-%m-%d')}")
+
+    return "\n".join(lines)
 
 
-def main_menu_keyboard():
-    keyboard = [
-        [
-            InlineKeyboardButton("💸 Add Expense", callback_data='add_expense'),
-            InlineKeyboardButton("💰 Add Income", callback_data='add_income')
-        ],
-        [
-            InlineKeyboardButton("🤔 Forgot to Log?", callback_data='forgot_log_start'),
-            InlineKeyboardButton("🔍 Quick Check", callback_data='quick_check'),
-        ],
-        [
-            InlineKeyboardButton("📊 Set Balance", callback_data='set_balance_start'),
-            InlineKeyboardButton("🔔 Set Reminder", callback_data='set_reminder_start')
-        ],
-        [
-            InlineKeyboardButton("📖 History", callback_data='history'),
-            InlineKeyboardButton("🔎 Search & Analyze", callback_data='search_menu')
-        ],
-        [
-            InlineKeyboardButton("📈 Report", callback_data='report_menu'),
-            InlineKeyboardButton("🧠 Habits", callback_data='habits_menu')
-        ],
-        [InlineKeyboardButton("⚙️ Update Rate", callback_data='update_rate')],
-        [InlineKeyboardButton("🤝 IOU / Debts", callback_data='iou_menu')],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+# --- Individual Command Logic Functions ---
+
+async def handle_generic_transaction(update: Update, command, args):
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
+    error_message = f"⚠️ Invalid format. Use:\n`{command} <Category> [\"Description\"] <Amount>[khr] [MM-DD]`\n\n(Tip: Use quotes for multi-word descriptions)"
+    try:
+        if len(args) < 2:
+            await update.message.reply_text(error_message, parse_mode='Markdown')
+            return None, None
+        args_str_fixed = " ".join(args).replace('“', '"').replace('”', '"')
+        parsed_args = shlex.split(args_str_fixed)
+        tx_date, remaining_args = parse_date_from_args(parsed_args)
+        amount_str = remaining_args[-1]
+        amount, currency = parse_amount_and_currency(amount_str)
+        category = remaining_args[0]
+        description = " ".join(remaining_args[1:-1])
+        tx_data = { "type": command, "amount": amount, "currency": currency, "accountName": f"{currency} Account", "categoryId": category, "description": description, "timestamp": tx_date }
+        return tx_data, _format_success_message(tx_data)
+    except Exception as e:
+        logger.error(f"Error parsing generic transaction: {e}", exc_info=True)
+        await update.message.reply_text(error_message, parse_mode='Markdown')
+        return None, None
+
+async def handle_generic_debt(update: Update, command, args):
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
+    error_message = f"⚠️ Invalid format. Use:\n`{command} <Person> <Amount>[khr] [\"Purpose\"] [MM-DD]`\n\n(Tip: Use quotes for multi-word names or purposes)"
+    try:
+        if len(args) < 2:
+            await update.message.reply_text(error_message, parse_mode='Markdown')
+            return None, None
+        args_str_fixed = " ".join(args).replace('“', '"').replace('”', '"')
+        parsed_args = shlex.split(args_str_fixed)
+        tx_date, remaining_args = parse_date_from_args(parsed_args)
+        person = remaining_args[0]
+        amount_str = remaining_args[1]
+        amount, currency = parse_amount_and_currency(amount_str)
+        purpose = " ".join(remaining_args[2:])
+        debt_data = { "type": command, "person": person, "amount": amount, "currency": currency, "purpose": purpose, "timestamp": tx_date }
+        return debt_data, _format_success_message(debt_data)
+    except Exception as e:
+        logger.error(f"Error parsing generic debt: {e}", exc_info=True)
+        await update.message.reply_text(error_message, parse_mode='Markdown')
+        return None, None
+
+async def handle_quick_command(update: Update, command, args):
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
+    try:
+        args_str_fixed = " ".join(args).replace('“', '"').replace('”', '"')
+        parsed_args = shlex.split(args_str_fixed)
+
+        tx_date, remaining_args = parse_date_from_args(parsed_args)
+
+        if not remaining_args:
+            await update.message.reply_text(f"⚠️ Invalid format. Amount is missing.", parse_mode='Markdown')
+            return None, None
+
+        amount_str = remaining_args[-1]
+        amount, currency = parse_amount_and_currency(amount_str)
+
+        description_parts = remaining_args[:-1]
+        details = COMMAND_MAP[command]
+
+        description = " ".join(description_parts) if description_parts else details['description']
+
+        tx_data = {
+            "type": details['type'], "amount": amount, "currency": currency,
+            "accountName": f"{currency} Account", "categoryId": details['categoryId'],
+            "description": description, "timestamp": tx_date
+        }
+        return tx_data, _format_success_message(tx_data)
+    except Exception as e:
+        logger.error(f"Error in quick_command_handler: {e}", exc_info=True)
+        await update.message.reply_text("An error occurred during quick command processing.")
+        return None, None
 
 
-def search_menu_keyboard():
-    keyboard = [
-        [InlineKeyboardButton("✍️ Find & Manage Transactions", callback_data='start_search_manage')],
-        [InlineKeyboardButton("📈 Calculate Totals", callback_data='start_search_sum')],
-        [InlineKeyboardButton("‹ Back to Main Menu", callback_data='start')],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+async def handle_repayment(update: Update, args):
+    try:
+        if len(args) < 2:
+            await update.message.reply_text(f"⚠️ Format: `paid <Person> <Amount> [MM-DD]`", parse_mode='Markdown')
+            return
+
+        args_str_fixed = " ".join(args).replace('“', '"').replace('”', '"')
+        parsed_args = shlex.split(args_str_fixed)
+
+        tx_date, remaining_args = parse_date_from_args(parsed_args)
+        person = remaining_args[0]
+        amount_str = remaining_args[1]
+        amount, currency = parse_amount_and_currency(amount_str)
+
+        response = api_client.record_lump_sum_repayment(person, currency, amount)
+        base_text = response.get('message', '❌ An error occurred.')
+
+    except Exception as e:
+        logger.error(f"Error in handle_repayment: {e}", exc_info=True)
+        base_text = "⚠️ Invalid format for repayment command."
+
+    summary_text = format_summary_message(api_client.get_detailed_summary())
+    await update.message.reply_text(base_text + summary_text, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
 
 
-def reminder_date_keyboard():
-    keyboard = [
-        [
-            InlineKeyboardButton("Tomorrow", callback_data='remind_date_1'),
-            InlineKeyboardButton("In 3 Days", callback_data='remind_date_3'),
-            InlineKeyboardButton("In 1 Week", callback_data='remind_date_7')
-        ],
-        [InlineKeyboardButton("🗓️ Custom Date", callback_data='remind_date_custom')],
-        [InlineKeyboardButton("❌ Cancel", callback_data='cancel_conversation')]
-    ]
-    return InlineKeyboardMarkup(keyboard)
+@restricted
+async def repay_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if args and args[0].lower() == 'by':
+        await handle_repayment(update, args[1:])
+    else:
+        await handle_repayment(update, args)
+    return ConversationHandler.END
 
 
-def forgot_day_keyboard():
-    keyboard = [
-        [
-            InlineKeyboardButton("Yesterday", callback_data='forgot_day_1'),
-            InlineKeyboardButton("2 Days Ago", callback_data='forgot_day_2')
-        ],
-        [InlineKeyboardButton("🗓️ Custom Date", callback_data='forgot_day_custom')],
-        [InlineKeyboardButton("❌ Cancel", callback_data='cancel_conversation')]
-    ]
-    return InlineKeyboardMarkup(keyboard)
+# --- Main Message Router ---
+@restricted
+async def unified_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
+    full_text = update.message.text
+    logger.info(f"--- Message router received text: '{full_text}' ---")
 
+    # --- MODIFICATION START: Add calculator logic ---
+    if '=' in full_text:
+        expression = full_text.split('=')[0].strip()
+        try:
+            result = aeval.eval(expression)
+            await update.message.reply_text(f"🧮 Result: `{result}`", parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Calculator error for expression '{expression}': {e}")
+            await update.message.reply_text("Couldn't calculate that. Please check the expression.")
+        return ConversationHandler.END
+    # --- MODIFICATION END ---
 
-def iou_date_keyboard():
-    keyboard = [
-        [
-            InlineKeyboardButton("Today", callback_data='iou_date_today'),
-            InlineKeyboardButton("Yesterday", callback_data='iou_date_yesterday'),
-        ],
-        [InlineKeyboardButton("🗓️ Custom Date", callback_data='iou_date_custom')],
-        [InlineKeyboardButton("❌ Cancel", callback_data='cancel_conversation')]
-    ]
-    return InlineKeyboardMarkup(keyboard)
+    parts = full_text.split()
+    command = parts[0].lower()
+    args = parts[1:]
 
+    try:
+        if full_text.lower().startswith("repaid by"):
+            args = parts[2:]
+            await handle_repayment(update, args)
+            return ConversationHandler.END
 
-def forgot_type_keyboard():
-    keyboard = [
-        [
-            InlineKeyboardButton("💸 Expense", callback_data='forgot_type_expense'),
-            InlineKeyboardButton("💰 Income", callback_data='forgot_type_income')
-        ],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+        if command in ["paid", "repaid"]:
+            await handle_repayment(update, args)
+            return ConversationHandler.END
 
+        tx_data, debt_data, base_text = None, None, None
 
-def report_period_keyboard(is_search=False):
-    keyboard = [
-        [
-            InlineKeyboardButton("🗓️ Today", callback_data='report_period_today'),
-            InlineKeyboardButton("🗓️ This Week", callback_data='report_period_this_week'),
-        ],
-        [
-            InlineKeyboardButton("🗓️ Last Week", callback_data='report_period_last_week'),
-            InlineKeyboardButton("🗓️ This Month", callback_data='report_period_this_month'),
-        ],
-        [
-            InlineKeyboardButton("🗓️ Last Month", callback_data='report_period_last_month'),
-            InlineKeyboardButton("🗓️ Custom Range", callback_data='report_period_custom'),
-        ],
-    ]
-    if is_search:
-        keyboard.append([InlineKeyboardButton("♾️ All Time", callback_data='report_period_all_time')])
+        if command in ["expense", "income"]:
+            tx_data, base_text = await handle_generic_transaction(update, command, args)
+        elif command in ["lent", "borrowed"]:
+            debt_data, base_text = await handle_generic_debt(update, command, args)
+        elif command in COMMAND_MAP:
+            tx_data, base_text = await handle_quick_command(update, command, args)
+        else:
+            context.user_data['unknown_command_data'] = {'command': command, 'args': args}
+            return await unknown_command_entry_point(update, context)
 
-    keyboard.append([InlineKeyboardButton("‹ Back", callback_data='start')])
-    return InlineKeyboardMarkup(keyboard)
+        if tx_data:
+            response = api_client.add_transaction(tx_data)
+            if not response: base_text = "❌ Failed to record transaction."
+        elif debt_data:
+            response = api_client.add_debt(debt_data)
+            if not response: base_text = "❌ Failed to save record."
 
+        if (tx_data or debt_data) and base_text:
+            summary_text = format_summary_message(api_client.get_detailed_summary())
+            await update.message.reply_text(base_text + summary_text, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
 
-def search_type_keyboard():
-    keyboard = [
-        [
-            InlineKeyboardButton("💸 Expense", callback_data='search_type_expense'),
-            InlineKeyboardButton("💰 Income", callback_data='search_type_income')
-        ],
-        [InlineKeyboardButton("🌐 All Types", callback_data='search_type_all')],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+        return ConversationHandler.END
 
+    except Exception as e:
+        logger.error(f"Error in unified_message_router: {e}", exc_info=True)
+        await update.message.reply_text("An error occurred. Please check the format.")
+        return ConversationHandler.END
 
-def skip_keyboard(callback_data):
-    keyboard = [
-        [InlineKeyboardButton("⏩ Skip", callback_data=callback_data)],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+# --- UNKNOWN ITEM CONVERSATION ---
+async def unknown_command_entry_point(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
+    try:
+        data = context.user_data['unknown_command_data']
+        command, args = data['command'], data['args']
+        tx_date, args_without_date = parse_date_from_args(args)
 
+        if not args_without_date:
+            await update.message.reply_text(
+                "I'm not sure what you mean. If you're trying to log an expense, please provide an amount (e.g., 'coffee 2.50').")
+            return ConversationHandler.END
 
-def search_keyword_logic_keyboard():
-    keyboard = [
-        [
-            InlineKeyboardButton("Must contain ALL (AND)", callback_data='search_logic_and'),
-            InlineKeyboardButton("Contains ANY (OR)", callback_data='search_logic_or')
-        ]
-    ]
-    return InlineKeyboardMarkup(keyboard)
+        # --- FIX: Amount is the LAST arg, description is everything before it ---
+        amount_str = args_without_date[-1]
+        description_parts = args_without_date[:-1]
+        amount, currency = parse_amount_and_currency(amount_str)
 
+        # Combine command and description parts
+        description = command.replace('_', ' ').title()
+        if description_parts:
+            description += f" {' '.join(description_parts)}"
 
-def set_balance_account_keyboard():
-    keyboard = [
-        [
-            InlineKeyboardButton("💵 USD Account", callback_data='set_balance_USD'),
-            InlineKeyboardButton("៛ KHR Account", callback_data='set_balance_KHR')
-        ]
-    ]
-    return InlineKeyboardMarkup(keyboard)
+        context.user_data['new_tx'] = {
+            "type": "expense", "amount": amount, "currency": currency,
+            "accountName": f"{currency} Account", "description": description,
+            "timestamp": tx_date
+        }
 
+        amount_display = f"{amount:,.0f} {currency}" if currency == 'KHR' else f"${amount:,.2f}"
+        await update.message.reply_text(f"New expense '{command.title()}' for {amount_display}. Which category?", reply_markup=keyboards.expense_categories_keyboard())
+        return SELECT_CATEGORY
+    except Exception as e:
+        logger.error(f"Error starting unknown command flow: {e}", exc_info=True)
+        return ConversationHandler.END
 
-def iou_menu_keyboard():
-    keyboard = [
-        [InlineKeyboardButton("➡️ I Lent Money", callback_data='iou_lent')],
-        [InlineKeyboardButton("⬅️ I Borrowed Money", callback_data='iou_borrowed')],
-        [InlineKeyboardButton("📖 View Open Debts", callback_data='iou_view')],
-        [InlineKeyboardButton("🔬 Debt Analysis", callback_data='debt_analysis')],
-        [InlineKeyboardButton("‹ Back to Main Menu", callback_data='start')],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+async def received_category_for_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    category = query.data.split('_')[1]
 
+    if category == 'other':
+        await query.edit_message_text("Please type your new custom category name:")
+        return GET_CUSTOM_CATEGORY
 
-def iou_list_keyboard(grouped_debts):
-    keyboard = []
-    lent = [d for d in grouped_debts if d['type'] == 'lent']
-    borrowed = [d for d in grouped_debts if d['type'] == 'borrowed']
+    tx_data = context.user_data.get('new_tx')
+    if not tx_data: return ConversationHandler.END
 
-    if lent:
-        for debt in lent:
-            amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
-            label = f"Owed by {debt['person']}: {debt['totalAmount']:{amount_format}} {debt['currency']} ({debt['count']})"
-            keyboard.append(
-                [InlineKeyboardButton(label, callback_data=f"iou:person:{debt['person']}:{debt['currency']}")])
-    if borrowed:
-        for debt in borrowed:
-            amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
-            label = f"You owe {debt['person']}: {debt['totalAmount']:{amount_format}} {debt['currency']} ({debt['count']})"
-            keyboard.append(
-                [InlineKeyboardButton(label, callback_data=f"iou:person:{debt['person']}:{debt['currency']}")])
+    tx_data['categoryId'] = category
+    return await save_and_end_unknown(query.message, tx_data)
 
-    keyboard.append([InlineKeyboardButton("‹ Back", callback_data='iou_menu')])
-    return InlineKeyboardMarkup(keyboard)
+async def received_text_for_custom_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tx_data = context.user_data.get('new_tx')
+    if not tx_data: return ConversationHandler.END
 
+    tx_data['categoryId'] = update.message.text.strip().title()
+    return await save_and_end_unknown(update.message, tx_data)
 
-def iou_person_detail_keyboard(person_debts, person_name, currency):
-    keyboard = [
-        [InlineKeyboardButton(f"💰 Record Repayment ({currency})", callback_data=f"iou:repay:{person_name}:{currency}")]
-    ]
-    for debt in person_debts:
-        created_date = datetime.fromisoformat(debt['created_at']).strftime('%d %b')
-        purpose = debt.get('purpose') or 'No purpose'
-        amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
-        label = f"{debt['remainingAmount']:{amount_format}} {debt['currency']} ({created_date}) - {purpose}"
-        callback = f"iou:detail:{debt['_id']}:{person_name}:{currency}"
-        keyboard.append([InlineKeyboardButton(label, callback_data=callback)])
+async def save_and_end_unknown(message, tx_data):
+    response = api_client.add_transaction(tx_data)
+    # --- MODIFICATION START: Use detailed success message ---
+    base_text = _format_success_message(tx_data) if response else "❌ Failed to record."
+    # --- MODIFICATION END ---
+    summary_text = format_summary_message(api_client.get_detailed_summary())
+    await message.reply_text(base_text + summary_text, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
+    return ConversationHandler.END
 
-    keyboard.append([InlineKeyboardButton("‹ Back to Summary", callback_data='iou_view')])
-    return InlineKeyboardMarkup(keyboard)
-
-
-def iou_detail_keyboard(debt_id, person_name, currency):
-    keyboard = [
-        [InlineKeyboardButton("‹ Back to List", callback_data=f"iou:person:{person_name}:{currency}")],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def currency_keyboard():
-    keyboard = [
-        [
-            InlineKeyboardButton("💵 USD", callback_data='curr_USD'),
-            InlineKeyboardButton("៛ KHR", callback_data='curr_KHR')
-        ]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def expense_categories_keyboard():
-    keyboard = [
-        [
-            InlineKeyboardButton("🍔 Food", callback_data='cat_Food'),
-            InlineKeyboardButton("🍹 Drink", callback_data='cat_Drink')
-        ],
-        [
-            InlineKeyboardButton("🚗 Transport", callback_data='cat_Transport'),
-            InlineKeyboardButton("🛍️ Shopping", callback_data='cat_Shopping')
-        ],
-        [
-            InlineKeyboardButton("🧾 Bills", callback_data='cat_Bills'),
-            InlineKeyboardButton("💡 Utilities", callback_data='cat_Utilities')
-        ],
-        [
-            InlineKeyboardButton("🎬 Entertainment", callback_data='cat_Entertainment'),
-            InlineKeyboardButton("🧴 Personal Care", callback_data='cat_Personal Care')
-        ],
-        [
-            InlineKeyboardButton("💼 Work", callback_data='cat_Work'),
-            InlineKeyboardButton("🍺 Alcohol", callback_data='cat_Alcohol')
-        ],
-        [
-            InlineKeyboardButton("🤝 For Others", callback_data='cat_For Others'),
-            InlineKeyboardButton("💊 Health", callback_data='cat_Health')
-        ],
-        [
-            InlineKeyboardButton("❓ Forgot", callback_data='cat_Forgot'),
-            InlineKeyboardButton("📝 Other", callback_data='cat_other')
-        ],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def income_categories_keyboard():
-    keyboard = [
-        [
-            InlineKeyboardButton("💼 Salary", callback_data='cat_Salary'),
-            InlineKeyboardButton("📈 Bonus", callback_data='cat_Bonus')
-        ],
-        [
-            InlineKeyboardButton("💻 Freelance", callback_data='cat_Freelance'),
-            InlineKeyboardButton("📊 Commission", callback_data='cat_Commission')
-        ],
-        [
-            InlineKeyboardButton("💸 Allowance", callback_data='cat_Allowance'),
-            InlineKeyboardButton("🎁 Gift", callback_data='cat_Gift')
-        ],
-        [
-            InlineKeyboardButton("📈 Investment", callback_data='cat_Investment'),
-            InlineKeyboardButton("📝 Other", callback_data='cat_other')
-        ],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def ask_remark_keyboard():
-    keyboard = [
-        [
-            InlineKeyboardButton("✅ Add Remark", callback_data='remark_yes'),
-            InlineKeyboardButton("⏩ Skip", callback_data='remark_no')
-        ]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def history_keyboard(transactions, is_search_result=False):
-    keyboard = []
-    if not is_search_result:
-        keyboard.append([InlineKeyboardButton("🔎 Search History", callback_data='search_menu')])
-
-    for tx in transactions:
-        amount = tx.get('amount', 0)
-        currency = tx.get('currency', 'N/A')
-        category = tx.get('categoryId', 'Unknown')
-        tx_type_emoji = "⬇️" if tx.get('type') == 'expense' else "⬆️"
-
-        amount_format = ",.0f" if currency == 'KHR' else ",.2f"
-        label = f"{tx_type_emoji} {amount:{amount_format}} {currency} - {category}"
-        callback = f"manage_tx_{tx['_id']}"
-        keyboard.append([InlineKeyboardButton(label, callback_data=callback)])
-
-    keyboard.append([InlineKeyboardButton("‹ Back to Main Menu", callback_data='start')])
-    return InlineKeyboardMarkup(keyboard)
-
-
-def manage_tx_keyboard(tx_id):
-    keyboard = [
-        [
-            InlineKeyboardButton("✏️ Edit", callback_data=f'edit_tx_{tx_id}'),
-            InlineKeyboardButton("🗑️ Delete", callback_data=f'delete_tx_{tx_id}')
-        ],
-        [InlineKeyboardButton("‹ Back to History", callback_data='history')],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def edit_tx_options_keyboard(tx_id):
-    """Keyboard with options for which field to edit."""
-    keyboard = [
-        [
-            InlineKeyboardButton("💰 Amount", callback_data=f'edit_field_amount_{tx_id}'),
-            InlineKeyboardButton("🏷️ Category", callback_data=f'edit_field_categoryId_{tx_id}'),
-        ],
-        [
-            InlineKeyboardButton("📝 Description", callback_data=f'edit_field_description_{tx_id}'),
-            InlineKeyboardButton("🗓️ Date", callback_data=f'edit_field_timestamp_{tx_id}'),
-        ],
-        [InlineKeyboardButton("‹ Cancel Edit", callback_data=f'manage_tx_{tx_id}')],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def confirm_delete_keyboard(tx_id):
-    keyboard = [
-        [
-            InlineKeyboardButton("✅ Yes, Delete", callback_data=f'confirm_delete_{tx_id}'),
-            InlineKeyboardButton("❌ No, Cancel", callback_data=f'manage_tx_{tx_id}')
-        ]
-    ]
-    return InlineKeyboardMarkup(keyboard)
+unified_message_conversation_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, unified_message_router)],
+    states={
+        SELECT_CATEGORY: [CallbackQueryHandler(received_category_for_unknown, pattern='^cat_')],
+        GET_CUSTOM_CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_text_for_custom_category)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+    per_message=False,
+    conversation_timeout=60
+)
