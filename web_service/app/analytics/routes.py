@@ -46,14 +46,13 @@ def get_date_ranges_for_search():
 
 @analytics_bp.route('/search', methods=['POST'])
 def search_transactions():
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     """Performs an advanced search and sums up matching transactions."""
     params = request.json
     db = current_app.db
 
-    # 1. Build Match Stage
+    # 1. Build Match Stage (Same as before)
     match_stage = {}
-
-    # Date filtering
     date_filter = {}
     if params.get('period'):
         ranges = get_date_ranges_for_search()
@@ -71,24 +70,17 @@ def search_transactions():
 
     if date_filter:
         match_stage['timestamp'] = date_filter
-
-    # Type filtering
     if params.get('transaction_type'):
         match_stage['type'] = params['transaction_type']
-
-    # Category filtering
     if params.get('categories'):
         categories_regex = [re.compile(f'^{re.escape(c.strip())}$', re.IGNORECASE) for c in params['categories']]
         match_stage['categoryId'] = {'$in': categories_regex}
-
-    # Keyword filtering
     if params.get('keywords'):
         keywords = params['keywords']
         keyword_logic = params.get('keyword_logic', 'OR').upper()
-
         if keyword_logic == 'AND':
             match_stage['$and'] = [{'description': re.compile(k, re.IGNORECASE)} for k in keywords]
-        else:  # OR
+        else:
             regex_str = '|'.join([re.escape(k) for k in keywords])
             match_stage['description'] = re.compile(regex_str, re.IGNORECASE)
 
@@ -97,37 +89,57 @@ def search_transactions():
     if match_stage:
         pipeline.append({'$match': match_stage})
 
+    # --- NEW PIPELINE ---
+    # Group by currency to get detailed stats for each
     pipeline.append({
         '$group': {
             '_id': '$currency',
             'totalAmount': {'$sum': '$amount'},
-            'count': {'$sum': 1}
+            'count': {'$sum': 1},
+            'minAmount': {'$min': '$amount'},
+            'maxAmount': {'$max': '$amount'},
+            'minDate': {'$min': '$timestamp'},
+            'maxDate': {'$max': '$timestamp'}
         }
     })
 
     results = list(db.transactions.aggregate(pipeline))
 
     # 3. Format Response
+    if not results:
+        return jsonify({'total_count': 0, 'totals_by_currency': []})
+
+    overall_min_date = None
+    overall_max_date = None
+
     summary = {
-        'total_usd': 0,
-        'total_khr': 0,
-        'count': 0,
-        'usd_tx_count': 0,
-        'khr_tx_count': 0
+        'total_count': 0,
+        'totals_by_currency': []
     }
-    total_count = 0
-    seen_currencies = set()
 
     for res in results:
         currency = res['_id']
-        if currency == 'USD':
-            summary['total_usd'] = res['totalAmount']
-            summary['usd_tx_count'] = res['count']
-        elif currency == 'KHR':
-            summary['total_khr'] = res['totalAmount']
-            summary['khr_tx_count'] = res['count']
+        count = res['count']
+        total = res['totalAmount']
 
-    summary['count'] = summary['usd_tx_count'] + summary['khr_tx_count']
+        # Update overall min/max dates
+        if not overall_min_date or res['minDate'] < overall_min_date:
+            overall_min_date = res['minDate']
+        if not overall_max_date or res['maxDate'] > overall_max_date:
+            overall_max_date = res['maxDate']
+
+        summary['total_count'] += count
+        summary['totals_by_currency'].append({
+            'currency': currency,
+            'count': count,
+            'total': total,
+            'avg': total / count,
+            'min': res['minAmount'],
+            'max': res['maxAmount']
+        })
+
+    summary['earliest_log_utc'] = overall_min_date.isoformat() if overall_min_date else None
+    summary['latest_log_utc'] = overall_max_date.isoformat() if overall_max_date else None
 
     return jsonify(summary)
 
