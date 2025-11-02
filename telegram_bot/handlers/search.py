@@ -13,15 +13,28 @@ from zoneinfo import ZoneInfo
 # Conversation states
 (
     CHOOSE_PERIOD, GET_CUSTOM_START, GET_CUSTOM_END, CHOOSE_TYPE,
-    GET_CATEGORIES, GET_KEYWORDS, GET_KEYWORD_LOGIC
-) = range(7)
+    GET_CATEGORIES, GET_KEYWORDS, GET_KEYWORD_LOGIC,
+    CHOOSE_ACTION # <-- NEW STATE
+) = range(8) # <-- NEW RANGE
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
 
 @restricted
-async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Starts the advanced search conversation, noting which type of search is requested."""
+async def search_menu_entry(update: Update, context: ContextTypes.DEFAULT_TYPE): # <-- NEW ENTRY FUNCTION
+    """Displays the search sub-menu and enters the conversation."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        text="What type of search do you want to perform?",
+        reply_markup=keyboards.search_menu_keyboard()
+    )
+    return CHOOSE_ACTION # <-- NEW RETURN
+
+
+@restricted
+async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE): # <-- MODIFIED
+    """Handles the search type choice ('manage' or 'sum') and moves to period selection."""
     query = update.callback_query
     await query.answer()
 
@@ -33,7 +46,7 @@ async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔎 Advanced Search\n\nFirst, select a time period for the search.",
         reply_markup=keyboards.report_period_keyboard(is_search=True)
     )
-    return CHOOSE_PERIOD
+    return CHOOSE_PERIOD # <-- MOVED FROM search_start
 
 
 @restricted

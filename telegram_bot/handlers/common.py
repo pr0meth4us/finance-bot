@@ -58,29 +58,23 @@ async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @restricted
-async def search_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the search sub-menu."""
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text(
-        text="What type of search do you want to perform?",
-        reply_markup=keyboards.search_menu_keyboard()
-    )
-
-
-@restricted
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     """Cancels any active conversation."""
     message = "Operation cancelled."
     keyboard = keyboards.main_menu_keyboard()
     chat_id = update.effective_chat.id
+
     if update.callback_query:
+        # If cancelled from a button press, edit the message
         await update.callback_query.answer()
         try:
             await update.callback_query.edit_message_text(text=message, reply_markup=keyboard)
         except Exception:
+            # Failsafe if message is old, just send a new one
             await context.bot.send_message(chat_id=chat_id, text=message, reply_markup=keyboard)
     else:
+        # If cancelled from a /cancel command, send a new message
         await context.bot.send_message(chat_id=chat_id, text=message, reply_markup=keyboard)
 
     context.user_data.clear()
