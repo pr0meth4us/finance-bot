@@ -14,8 +14,8 @@ from .helpers import format_summary_message
     AMOUNT, CURRENCY, CATEGORY, CUSTOM_CATEGORY, ASK_REMARK, REMARK,
     FORGOT_DATE, FORGOT_CUSTOM_DATE, FORGOT_TYPE,
     EDIT_CHOOSE_FIELD, EDIT_GET_NEW_VALUE, EDIT_GET_NEW_CATEGORY,
-    EDIT_GET_CUSTOM_CATEGORY  # <-- THIS STATE IS NOW USED CORRECTLY
-) = range(13)
+    EDIT_GET_CUSTOM_CATEGORY, EDIT_GET_NEW_DATE # <-- NEW STATE
+) = range(14)
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
@@ -204,11 +204,17 @@ async def edit_choose_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     field = query.data.split('_')[2]
     context.user_data['edit_tx_field'] = field
+
     if field == 'categoryId':
         tx_type = context.user_data.get('edit_tx_type')
         keyboard = keyboards.income_categories_keyboard() if tx_type == 'income' else keyboards.expense_categories_keyboard()
         await query.edit_message_text("Please select the new category:", reply_markup=keyboard)
         return EDIT_GET_NEW_CATEGORY
+
+    if field == 'timestamp':
+        await query.edit_message_text("Please enter the new date (YYYY-MM-DD):")
+        return EDIT_GET_NEW_DATE
+
     prompts = {'amount': "Please enter the new amount:", 'description': "Please enter the new description:"}
     await query.edit_message_text(prompts[field])
     return EDIT_GET_NEW_VALUE
@@ -224,6 +230,17 @@ async def edit_received_new_value(update: Update, context: ContextTypes.DEFAULT_
     context.user_data['edit_tx_new_value'] = value
     return await _update_transaction_and_confirm(update, context)
 
+async def edit_received_new_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        custom_date = datetime.strptime(update.message.text, "%Y-%m-%d").date()
+        # Set to midday in local time, then convert to ISO string
+        new_timestamp = datetime.combine(custom_date, time(12, 0), tzinfo=PHNOM_PENH_TZ).isoformat()
+        context.user_data['edit_tx_new_value'] = new_timestamp
+        return await _update_transaction_and_confirm(update, context)
+    except ValueError:
+        await update.message.reply_text("Invalid format. Please use YYYY-MM-DD.")
+        return EDIT_GET_NEW_DATE
+
 async def edit_received_new_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -236,7 +253,6 @@ async def edit_received_new_category(update: Update, context: ContextTypes.DEFAU
     return await _update_transaction_and_confirm(update, context)
 
 async def edit_received_custom_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles receiving the text for a new custom category during an edit."""
     new_category_name = update.message.text.strip().title()
     context.user_data['edit_tx_new_value'] = new_category_name
     return await _update_transaction_and_confirm(update, context)

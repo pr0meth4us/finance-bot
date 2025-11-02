@@ -184,7 +184,6 @@ async def iou_received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data['iou_amount'] = amount
 
         if amount < 100:
-            # Auto-select USD and skip to purpose
             currency = "USD"
             context.user_data['iou_currency'] = currency
             await update.message.reply_text(
@@ -192,7 +191,6 @@ async def iou_received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
                 parse_mode='HTML')
             return IOU_PURPOSE
         else:
-            # Ask for currency as usual
             await update.message.reply_text("Which currency?", reply_markup=keyboards.currency_keyboard())
             return IOU_CURRENCY
     except ValueError:
@@ -248,11 +246,18 @@ async def received_lump_repayment_amount(update: Update, context: ContextTypes.D
         person = context.user_data['lump_repay_person']
         currency = context.user_data['lump_repay_currency']
         response = api_client.record_lump_sum_repayment(person, currency, amount)
-        base_text = f"✅ {response['message']}" if 'message' in response else f"❌ Error: {response['error']}"
+
+        base_text = response.get('message')
+        if not base_text:
+            base_text = f"❌ Error: {response.get('error', 'Could not process repayment.')}"
+
         summary_text = format_summary_message(api_client.get_detailed_summary())
         await update.message.reply_text(base_text + summary_text, parse_mode='HTML',
                                         reply_markup=keyboards.main_menu_keyboard())
+        # --- THIS IS THE FIX ---
+        # Always end the conversation, whether it's a success or an error.
         return ConversationHandler.END
+
     except (ValueError, TypeError):
         await update.message.reply_text("Please enter a valid number for the repayment amount.")
-        return REPAY_LUMP_AMOUNT
+        return REPAY_LUMP_AMOUNT # Stay in the conversation if the input was invalid

@@ -214,7 +214,6 @@ def currency_keyboard():
 
 
 def expense_categories_keyboard():
-    """ --- THIS FUNCTION HAS BEEN UPDATED --- """
     keyboard = [
         [
             InlineKeyboardButton("🍔 Food", callback_data='cat_Food'),
@@ -315,11 +314,12 @@ def edit_tx_options_keyboard(tx_id):
     """Keyboard with options for which field to edit."""
     keyboard = [
         [
-            InlineKeyboardButton("💰 Amount", callback_data='edit_field_amount_{tx_id}'),
-            InlineKeyboardButton("🏷️ Category", callback_data='edit_field_categoryId_{tx_id}'),
+            InlineKeyboardButton("💰 Amount", callback_data=f'edit_field_amount_{tx_id}'),
+            InlineKeyboardButton("🏷️ Category", callback_data=f'edit_field_categoryId_{tx_id}'),
         ],
         [
             InlineKeyboardButton("📝 Description", callback_data=f'edit_field_description_{tx_id}'),
+            InlineKeyboardButton("🗓️ Date", callback_data=f'edit_field_timestamp_{tx_id}'),
         ],
         [InlineKeyboardButton("‹ Cancel Edit", callback_data=f'manage_tx_{tx_id}')],
     ]
