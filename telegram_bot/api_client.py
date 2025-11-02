@@ -131,19 +131,21 @@ def update_debt(debt_id, data):
             return {'error': 'A network error occurred.'}
 
 
-def record_lump_sum_repayment(person_name, currency, amount, debt_type):
+def record_lump_sum_repayment(person_name, currency, amount, debt_type, timestamp=None):
     """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     try:
-        # --- FIX: URL uses payment currency, payload includes person and type ---
         encoded_currency = urllib.parse.quote(currency)
         url = f"{BASE_URL}/debts/person/{encoded_currency}/repay"
         payload = {
-            'amount': amount,
+            'amount': amount, 
             'type': debt_type,
             'person': person_name
         }
+        # --- FIX: Add timestamp to payload if it exists ---
+        if timestamp:
+            payload['timestamp'] = timestamp
+            
         res = requests.post(url, json=payload, timeout=15)
-        # --- End Fix ---
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:

@@ -40,11 +40,11 @@ def parse_amount_and_currency(amount_str: str):
 def parse_date_from_args(args):
     """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     if not args: return None, args
-
+    
     date_str = args[-1]
     parsed_date = None
     today = datetime.now(PHNOM_PENH_TZ)
-
+    
     try:
         # Try MM-DD format first
         parsed_date = datetime.strptime(date_str, '%m-%d')
@@ -171,24 +171,26 @@ async def handle_quick_command(update: Update, command, args):
 async def handle_repayment(update: Update, args, debt_type: str):
     """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     try:
-        command_example = "`repaid by <Person> <Amount>`" if debt_type == 'lent' else "`paid <Person> <Amount>`"
-        if len(args) < 2:
-            await update.message.reply_text(f"⚠️ Format: {command_example}", parse_mode='Markdown')
-            return
-
+        command_example = "`repaid by <Person> <Amount>[khr] [MM-DD]`" if debt_type == 'lent' else "`paid <Person> <Amount>[khr] [MM-DD]`"
+        
         args_str_fixed = " ".join(args).replace('“', '"').replace('”', '"')
         parsed_args = shlex.split(args_str_fixed)
 
         tx_date, remaining_args = parse_date_from_args(parsed_args)
+        
+        if len(remaining_args) < 2:
+            await update.message.reply_text(f"⚠️ Format: {command_example}", parse_mode='Markdown')
+            return
+            
         person = remaining_args[0]
         amount_str = remaining_args[1]
         amount, currency = parse_amount_and_currency(amount_str)
 
-        # --- FIX: Pass debt_type to the API client ---
-        response = api_client.record_lump_sum_repayment(person, currency, amount, debt_type)
+        # --- FIX: Pass tx_date (which can be None) to the API client ---
+        response = api_client.record_lump_sum_repayment(person, currency, amount, debt_type, tx_date)
         base_text = response.get('message', '❌ An error occurred.')
         if response.get('error'):
-            base_text = f"❌ Error: {response.get('error')}"
+             base_text = f"❌ Error: {response.get('error')}"
 
     except Exception as e:
         logger.error(f"Error in handle_repayment: {e}", exc_info=True)
@@ -222,7 +224,7 @@ async def unified_message_router(update: Update, context: ContextTypes.DEFAULT_T
     try:
         # --- FIX: Reroute repayment commands ---
         if full_text.lower().startswith("repaid by") or full_text.lower().startswith("paid by"):
-            args = parts[2:]
+            args = parts[2:] # Get args after "repaid by" or "paid by"
             await handle_repayment(update, args, debt_type='lent') # 'lent' = someone is paying me
             return ConversationHandler.END
 
@@ -277,19 +279,25 @@ async def unknown_command_entry_point(update: Update, context: ContextTypes.DEFA
         # --- FIX: Amount is the LAST arg, description is everything before it ---
         amount_str = args_without_date[-1]
         description_parts = args_without_date[:-1]
-        amount, currency = parse_amount_and_currency(amount_str)
-
+        
+        try:
+            amount, currency = parse_amount_and_currency(amount_str)
+        except ValueError:
+             await update.message.reply_text(
+                "I'm not sure what you mean. Please provide an amount (e.g., 'coffee 2.50').")
+             return ConversationHandler.END
+        
         # Combine command and description parts
         description = command.replace('_', ' ').title()
         if description_parts:
             description += f" {' '.join(description_parts)}"
-
+            
         context.user_data['new_tx'] = {
-            "type": "expense", "amount": amount, "currency": currency,
-            "accountName": f"{currency} Account", "description": description,
+            "type": "expense", "amount": amount, "currency": currency, 
+            "accountName": f"{currency} Account", "description": description, 
             "timestamp": tx_date
         }
-
+        
         amount_display = f"{amount:,.0f} {currency}" if currency == 'KHR' else f"${amount:,.2f}"
         await update.message.reply_text(f"New expense '{command.title()}' for {amount_display}. Which category?", reply_markup=keyboards.expense_categories_keyboard())
         return SELECT_CATEGORY
