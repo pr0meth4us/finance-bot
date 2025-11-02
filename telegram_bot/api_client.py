@@ -47,6 +47,7 @@ def get_open_debts():
         print(f"API Error fetching debts: {e}")
         return []
 
+
 # --- NEW FUNCTION ---
 def get_settled_debts_grouped():
     try:
@@ -68,6 +69,7 @@ def get_debts_by_person_and_currency(person_name, currency):
         print(f"API Error fetching debts for {person_name} ({currency}): {e}")
         return []
 
+
 # --- NEW FUNCTION ---
 def get_all_debts_by_person(person_name):
     """Fetches all open debts for a person, regardless of currency."""
@@ -79,6 +81,7 @@ def get_all_debts_by_person(person_name):
     except requests.exceptions.RequestException as e:
         print(f"API Error fetching all debts for {person_name}: {e}")
         return []
+
 
 # --- NEW FUNCTION ---
 def get_all_settled_debts_by_person(person_name):
@@ -102,6 +105,7 @@ def get_debt_details(debt_id):
         print(f"API Error fetching debt details: {e}")
         return None
 
+
 # --- NEW FUNCTION ---
 def cancel_debt(debt_id):
     """Sends a POST request to cancel a debt and reverse its transaction."""
@@ -115,6 +119,7 @@ def cancel_debt(debt_id):
             return e.response.json()
         except:
             return {'error': 'A network error occurred.'}
+
 
 # --- NEW FUNCTION ---
 def update_debt(debt_id, data):
@@ -134,17 +139,18 @@ def update_debt(debt_id, data):
 def record_lump_sum_repayment(person_name, currency, amount, debt_type, timestamp=None):
     """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     try:
+        # --- FIX: URL uses payment currency, payload includes person and type ---
         encoded_currency = urllib.parse.quote(currency)
         url = f"{BASE_URL}/debts/person/{encoded_currency}/repay"
         payload = {
-            'amount': amount, 
+            'amount': amount,
             'type': debt_type,
             'person': person_name
         }
         # --- FIX: Add timestamp to payload if it exists ---
         if timestamp:
             payload['timestamp'] = timestamp
-            
+
         res = requests.post(url, json=payload, timeout=15)
         res.raise_for_status()
         return res.json()
@@ -163,6 +169,18 @@ def update_exchange_rate(rate):
         return res.json()
     except requests.exceptions.RequestException as e:
         print(f"API Error updating rate: {e}")
+        return None
+
+
+# --- NEW FUNCTION ---
+def get_exchange_rate():
+    """Fetches the currently stored KHR to USD exchange rate."""
+    try:
+        res = requests.get(f"{BASE_URL}/settings/rate", timeout=10)
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error fetching rate: {e}")
         return None
 
 

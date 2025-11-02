@@ -43,6 +43,28 @@ async def received_new_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return NEW_RATE
 
 
+# --- NEW FUNCTION ---
+@restricted
+async def get_current_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fetches and displays the current exchange rate."""
+    query = update.callback_query
+    await query.answer("Fetching rate...")
+
+    data = api_client.get_exchange_rate()
+
+    if data and 'rate' in data:
+        rate = data['rate']
+        text = f"📈 The current stored exchange rate is:\n<b>1 USD = {rate:,.0f} KHR</b>"
+    else:
+        text = "❌ Could not fetch the current exchange rate."
+
+    await query.edit_message_text(
+        text=text,
+        parse_mode='HTML',
+        reply_markup=keyboards.main_menu_keyboard()
+    )
+
+
 # --- Set Initial Balance Conversation ---
 @restricted
 async def set_balance_start(update: Update, context: ContextTypes.DEFAULT_TYPE):

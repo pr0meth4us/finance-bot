@@ -21,3 +21,17 @@ def update_khr_rate():
     )
 
     return jsonify({'message': f'Exchange rate updated to {new_rate}'})
+
+
+# --- NEW FUNCTION ---
+@settings_bp.route('/rate', methods=['GET'])
+def get_khr_rate():
+    """Fetches the currently stored KHR to USD exchange rate."""
+    settings = current_app.db.settings.find_one({'_id': 'config'})
+
+    if settings and 'khr_to_usd_rate' in settings:
+        rate = float(settings['khr_to_usd_rate'])
+    else:
+        rate = 4100.0  # Default fallback
+
+    return jsonify({'rate': rate})

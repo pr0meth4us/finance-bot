@@ -3,7 +3,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from dotenv import load_dotenv
 # --- MODIFICATION START ---
 from handlers import (
-    start, quick_check, cancel, # <-- REMOVED search_menu
+    start, quick_check, cancel,  # <-- REMOVED search_menu
     tx_conversation_handler,
     rate_conversation_handler,
     iou_conversation_handler,
@@ -19,9 +19,11 @@ from handlers import (
     iou_menu, iou_view, iou_person_detail, iou_detail, debt_analysis,
     iou_view_settled, iou_person_detail_settled, iou_manage_list,
     iou_manage_menu, iou_cancel_prompt, iou_cancel_confirm,
-    iou_edit_conversation_handler
+    iou_edit_conversation_handler,
+    get_current_rate  # <-- NEW IMPORT
 )
 from handlers.command_handler import unified_message_conversation_handler
+
 # --- MODIFICATION END ---
 
 load_dotenv()
@@ -63,11 +65,11 @@ def main():
     # 4. Standalone callback handlers for specific button presses.
     app.add_handler(CallbackQueryHandler(start, pattern='^start$'))
     app.add_handler(CallbackQueryHandler(quick_check, pattern='^quick_check$'))
-    # app.add_handler(CallbackQueryHandler(search_menu, pattern='^search_menu$')) # <-- REMOVED
     app.add_handler(CallbackQueryHandler(history_menu, pattern='^history$'))
     app.add_handler(CallbackQueryHandler(manage_transaction, pattern='^manage_tx_'))
     app.add_handler(CallbackQueryHandler(delete_transaction_prompt, pattern='^delete_tx_'))
     app.add_handler(CallbackQueryHandler(delete_transaction_confirm, pattern='^confirm_delete_'))
+    app.add_handler(CallbackQueryHandler(get_current_rate, pattern='^get_rate$'))  # <-- NEW HANDLER
 
     app.add_handler(CallbackQueryHandler(iou_menu, pattern='^iou_menu$'))
     app.add_handler(CallbackQueryHandler(iou_view, pattern='^iou_view$'))

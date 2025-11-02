@@ -34,6 +34,7 @@ from .utility import (
     update_rate_start, received_new_rate, set_balance_start, received_balance_account,
     received_balance_amount, set_reminder_start, received_reminder_purpose,
     received_reminder_date_choice, received_reminder_custom_date, received_reminder_time,
+    get_current_rate, # <-- NEW IMPORT
     NEW_RATE, SETBALANCE_ACCOUNT, SETBALANCE_AMOUNT,
     REMINDER_PURPOSE, REMINDER_ASK_DATE, REMINDER_CUSTOM_DATE, REMINDER_ASK_TIME
 )
@@ -95,7 +96,7 @@ edit_tx_conversation_handler = ConversationHandler(
 iou_conversation_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(iou_start, pattern='^(iou_lent|iou_borrowed)$')],
     states={
-        IOU_ASK_DATE: [CallbackQueryHandler(iou_received_date_choice, pattern='^iou_date_')],
+         IOU_ASK_DATE: [CallbackQueryHandler(iou_received_date_choice, pattern='^iou_date_')],
         IOU_CUSTOM_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_received_custom_date)],
         IOU_PERSON: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_received_person)],
         IOU_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_received_amount)],
@@ -119,7 +120,7 @@ repay_lump_conversation_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(repay_lump_start, pattern='^iou:repay:')],
     states={
         REPAY_LUMP_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_lump_repayment_amount)]
-    },
+     },
     fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
     per_message=False
 )
@@ -174,15 +175,14 @@ habits_conversation_handler = ConversationHandler(
 )
 
 search_conversation_handler = ConversationHandler(
-    entry_points=[CallbackQueryHandler(search_menu_entry, pattern='^search_menu$')],
+    entry_points=[CallbackQueryHandler(search_menu_entry, pattern='^search_menu$')], # <-- MODIFIED
     states={
-        # --- FIX: Using more specific regex pattern ---
-        CHOOSE_ACTION: [CallbackQueryHandler(search_start, pattern='^start_search_(manage|sum)$')],
+        CHOOSE_ACTION: [CallbackQueryHandler(search_start, pattern='^start_search_(manage|sum)$')], # <-- MODIFIED
         CHOOSE_PERIOD: [CallbackQueryHandler(received_period_choice, pattern='^report_period_')],
         GET_CUSTOM_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_custom_start)],
         GET_CUSTOM_END: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_custom_end)],
         CHOOSE_TYPE: [CallbackQueryHandler(received_type_choice, pattern='^search_type_')],
-        GET_CATEGORIES: [
+              GET_CATEGORIES: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, received_categories),
             CallbackQueryHandler(received_categories, pattern='^search_skip_categories$')
         ],
@@ -191,7 +191,7 @@ search_conversation_handler = ConversationHandler(
             CallbackQueryHandler(received_keywords, pattern='^search_skip_keywords$')
         ],
         GET_KEYWORD_LOGIC: [CallbackQueryHandler(received_keyword_logic, pattern='^search_logic_')],
-    },
+     },
     fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
     per_message=False
 )

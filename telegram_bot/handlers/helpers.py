@@ -3,7 +3,9 @@
 from datetime import datetime
 import io
 import matplotlib.pyplot as plt
+from zoneinfo import ZoneInfo # <-- NEW IMPORT
 
+PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh") # <-- NEW
 
 def format_summary_message(summary_data):
     """Formats the detailed summary data into a readable string."""
@@ -63,13 +65,14 @@ def format_summary_message(summary_data):
 
 
 def format_summation_results(params, results):
+    """ --- THIS FUNCTION HAS BEEN REWRITTEN --- """
     """Formats the results from the summation analytics API into a readable string."""
-    if not results or results.get('count', 0) == 0:
+    if not results or results.get('total_count', 0) == 0:
         return "No transactions found matching your criteria."
 
     header = "<b>📈 Search Totals</b>\n\n"
 
-    # Build a summary of the query
+    # 1. Build a summary of the query
     query_summary = []
     if params.get('period'):
         query_summary.append(f"<b>Period:</b> {params['period'].replace('_', ' ').title()}")
@@ -90,22 +93,35 @@ def format_summation_results(params, results):
 
     header += "\n".join(query_summary) + "\n\n"
 
-    # Build the results summary
-    total_text = "<b>Total Sum:</b>\n"
-    total_parts = []
-    if results.get('total_usd', 0) > 0:
-        total_parts.append(f"💵 {results['total_usd']:,.2f} USD")
-    if results.get('total_khr', 0) > 0:
-        total_parts.append(f"៛ {results['total_khr']:,.0f} KHR")
+    # 2. Build Date Range
+    date_text = ""
+    if results.get('earliest_log_utc') and results.get('latest_log_utc'):
+        earliest = datetime.fromisoformat(results['earliest_log_utc']).astimezone(PHNOM_PENH_TZ).strftime('%b %d, %Y')
+        latest = datetime.fromisoformat(results['latest_log_utc']).astimezone(PHNOM_PENH_TZ).strftime('%b %d, %Y')
+        if earliest == latest:
+            date_text = f"<b>Date:</b> {earliest}\n"
+        else:
+            date_text = f"<b>Date Range:</b> {earliest} to {latest}\n"
 
-    if not total_parts:
-        total_text += "    $0.00"
-    else:
-        total_text += " & ".join(total_parts)
+    # 3. Build Totals & Stats
+    total_count = results['total_count']
+    count_text = f"Found <b>{total_count}</b> matching transaction(s).\n"
 
-    count_text = f"\nFound <b>{results['count']}</b> matching transaction(s)."
+    stats_lines = []
 
-    return header + total_text + count_text
+    for item in results.get('totals_by_currency', []):
+        currency = item['currency']
+        amount_format = ",.0f" if currency == 'KHR' else ",.2f"
+        symbol = "៛" if currency == 'KHR' else "💵"
+
+        stats_lines.append(f"\n--- <b>Stats for {currency}</b> ---")
+        stats_lines.append(f"  {symbol} <b>Total Sum:</b> {item['total']:{amount_format}} {currency}")
+        stats_lines.append(f"  <b>Count:</b> {item['count']} transactions")
+        stats_lines.append(f"  <b>Average:</b> {item['avg']:{amount_format}} {currency}")
+        stats_lines.append(f"  <b>Highest:</b> {item['max']:{amount_format}} {currency}")
+        stats_lines.append(f"  <b>Lowest:</b> {item['min']:{amount_format}} {currency}")
+
+    return header + date_text + count_text + "\n".join(stats_lines)
 
 
 def _format_report_summary_message(data):
@@ -166,7 +182,7 @@ def _format_report_summary_message(data):
         for item in income_breakdown[:5]:
             income_text += f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
     else:
-        income_text += "    - No income recorded.\n"
+        "    - No income recorded.\n"
 
     fin_summary = data.get('financialSummary', {})
     financial_text = "\n<b>Loan & Debt Activity (in USD):</b>\n"
