@@ -76,7 +76,8 @@ def add_debt():
 
 @debts_bp.route('/', methods=['GET'])
 def get_open_debts():
-    """Fetches and groups open debts by person and currency, case-insensitively."""
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
+    """Fetches and groups open debts by person, consolidating currencies."""
     pipeline = [
         {'$match': {'status': 'open'}},
         {'$group': {
@@ -85,9 +86,16 @@ def get_open_debts():
             'totalAmount': {'$sum': '$remainingAmount'},
             'count': {'$sum': 1}
         }},
+        {'$group': {
+            '_id': {'person_normalized': '$_id.person_normalized', 'type': '$_id.type'},
+            'person_display': {'$first': '$person_display'},
+            'totals': {'$push': {'currency': '$_id.currency', 'total': '$totalAmount', 'count': '$count'}}
+        }},
         {'$project': {
-            '_id': 0, 'person': '$person_display', 'currency': '$_id.currency',
-            'type': '$_id.type', 'totalAmount': '$totalAmount', 'count': '$count'
+            '_id': 0,
+            'person': '$person_display',
+            'type': '$_id.type',
+            'totals': '$totals'
         }},
         {'$sort': {'person': 1}}
     ]
@@ -98,7 +106,8 @@ def get_open_debts():
 # --- NEW ROUTE: Get Settled Debts ---
 @debts_bp.route('/list/settled', methods=['GET'])
 def get_settled_debts_grouped():
-    """Fetches and groups settled OR canceled debts by person and currency."""
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
+    """Fetches and groups settled OR canceled debts by person, consolidating currencies."""
     pipeline = [
         {'$match': {'status': {'$in': ['settled', 'canceled']}}},
         {'$group': {
@@ -107,9 +116,16 @@ def get_settled_debts_grouped():
             'totalAmount': {'$sum': '$originalAmount'}, # Show original amount for settled
             'count': {'$sum': 1}
         }},
+        {'$group': {
+            '_id': {'person_normalized': '$_id.person_normalized', 'type': '$_id.type'},
+            'person_display': {'$first': '$person_display'},
+            'totals': {'$push': {'currency': '$_id.currency', 'total': '$totalAmount', 'count': '$count'}}
+        }},
         {'$project': {
-            '_id': 0, 'person': '$person_display', 'currency': '$_id.currency',
-            'type': '$_id.type', 'totalAmount': '$totalAmount', 'count': '$count'
+            '_id': 0,
+            'person': '$person_display',
+            'type': '$_id.type',
+            'totals': '$totals'
         }},
         {'$sort': {'person': 1}}
     ]
@@ -133,13 +149,21 @@ def get_debts_by_person_and_currency(person_name, currency):
     debts = list(current_app.db.debts.find(query_filter).sort('created_at', 1))
     return jsonify([serialize_debt(d) for d in debts])
 
-
-# --- NEW ROUTE: Get settled debts for a person ---
-@debts_bp.route('/person/<person_name>/<currency>/settled', methods=['GET'])
-def get_settled_debts_by_person(person_name, currency):
+# --- NEW: Get ALL open debts for a person (both currencies) ---
+@debts_bp.route('/person/<person_name>/all', methods=['GET'])
+def get_all_debts_by_person(person_name):
     query_filter = {
         'person': re.compile(f'^{re.escape(person_name)}$', re.IGNORECASE),
-        'currency': currency,
+        'status': 'open'
+    }
+    debts = list(current_app.db.debts.find(query_filter).sort('created_at', 1))
+    return jsonify([serialize_debt(d) for d in debts])
+
+# --- NEW: Get ALL settled debts for a person (both currencies) ---
+@debts_bp.route('/person/<person_name>/all/settled', methods=['GET'])
+def get_all_settled_debts_by_person(person_name):
+    query_filter = {
+        'person': re.compile(f'^{re.escape(person_name)}$', re.IGNORECASE),
         'status': {'$in': ['settled', 'canceled']}
     }
     debts = list(current_app.db.debts.find(query_filter).sort('created_at', 1))

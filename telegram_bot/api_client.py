@@ -69,14 +69,27 @@ def get_debts_by_person_and_currency(person_name, currency):
         return []
 
 # --- NEW FUNCTION ---
-def get_settled_debts_by_person(person_name, currency):
+def get_all_debts_by_person(person_name):
+    """Fetches all open debts for a person, regardless of currency."""
     try:
         encoded_name = urllib.parse.quote(person_name)
-        res = requests.get(f"{BASE_URL}/debts/person/{encoded_name}/{currency}/settled", timeout=10)
+        res = requests.get(f"{BASE_URL}/debts/person/{encoded_name}/all", timeout=10)
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error fetching settled debts for {person_name} ({currency}): {e}")
+        print(f"API Error fetching all debts for {person_name}: {e}")
+        return []
+
+# --- NEW FUNCTION ---
+def get_all_settled_debts_by_person(person_name):
+    """Fetches all settled debts for a person, regardless of currency."""
+    try:
+        encoded_name = urllib.parse.quote(person_name)
+        res = requests.get(f"{BASE_URL}/debts/person/{encoded_name}/all/settled", timeout=10)
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error fetching all settled debts for {person_name}: {e}")
         return []
 
 

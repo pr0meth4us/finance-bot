@@ -13,7 +13,7 @@ from .iou import (
     iou_received_amount, iou_received_currency, iou_received_purpose,
     repay_lump_start, received_lump_repayment_amount,
     # --- NEW: Import new handlers ---
-    iou_view_settled, iou_person_detail_settled,
+    iou_view_settled, iou_person_detail_settled, iou_manage_list,
     iou_manage_menu, iou_cancel_prompt, iou_cancel_confirm,
     iou_edit_start, iou_edit_received_value,
     IOU_ASK_DATE, IOU_CUSTOM_DATE, IOU_PERSON, IOU_AMOUNT, IOU_CURRENCY, IOU_PURPOSE, REPAY_LUMP_AMOUNT,

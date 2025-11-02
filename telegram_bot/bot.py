@@ -18,7 +18,7 @@ from handlers import (
     history_menu, manage_transaction, delete_transaction_prompt, delete_transaction_confirm,
     iou_menu, iou_view, iou_person_detail, iou_detail, debt_analysis,
     # --- NEW: Import new handlers ---
-    iou_view_settled, iou_person_detail_settled,
+    iou_view_settled, iou_person_detail_settled, iou_manage_list,
     iou_manage_menu, iou_cancel_prompt, iou_cancel_confirm,
     iou_edit_conversation_handler
     # --- End New ---
@@ -78,7 +78,8 @@ def main():
     app.add_handler(CallbackQueryHandler(iou_person_detail, pattern='^iou:person:open:'))
     app.add_handler(CallbackQueryHandler(iou_person_detail_settled, pattern='^iou:person:settled:'))
     app.add_handler(CallbackQueryHandler(iou_detail, pattern='^iou:detail:'))
-    app.add_handler(CallbackQueryHandler(iou_manage_menu, pattern='^iou:manage:'))
+    app.add_handler(CallbackQueryHandler(iou_manage_list, pattern='^iou:manage:list:'))
+    app.add_handler(CallbackQueryHandler(iou_manage_menu, pattern='^iou:manage:detail:'))
     app.add_handler(CallbackQueryHandler(iou_cancel_prompt, pattern='^iou:cancel:prompt:'))
     app.add_handler(CallbackQueryHandler(iou_cancel_confirm, pattern='^iou:cancel:confirm:'))
     app.add_handler(CallbackQueryHandler(debt_analysis, pattern='^debt_analysis$'))
