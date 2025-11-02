@@ -14,11 +14,11 @@ def serialize_debt(doc):
         doc['_id'] = str(doc['_id'])
     if 'created_at' in doc and isinstance(doc['created_at'], datetime):
         doc['created_at'] = doc['created_at'].isoformat()
-
+        
     # --- FIX: Serialize associated_transaction_id to prevent TypeError ---
     if 'associated_transaction_id' in doc and isinstance(doc['associated_transaction_id'], ObjectId):
         doc['associated_transaction_id'] = str(doc['associated_transaction_id'])
-
+        
     # --- NEW: Serialize repayment dates ---
     if 'repayments' in doc:
         for rep in doc['repayments']:
@@ -51,7 +51,7 @@ def add_debt():
     timestamp_str = data.get('timestamp')
     created_at = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now(UTC_TZ)
     account_name = f"{data['currency']} Account"
-
+    
     # --- FIX: Create transaction first to get its ID ---
     tx_data = {
         "amount": amount, "currency": data['currency'], "accountName": account_name,
@@ -97,9 +97,9 @@ def get_open_debts():
             'totals': {'$push': {'currency': '$_id.currency', 'total': '$totalAmount', 'count': '$count'}}
         }},
         {'$project': {
-            '_id': 0,
-            'person': '$person_display',
-            'type': '$_id.type',
+            '_id': 0, 
+            'person': '$person_display', 
+            'type': '$_id.type', 
             'totals': '$totals'
         }},
         {'$sort': {'person': 1}}
@@ -127,9 +127,9 @@ def get_settled_debts_grouped():
             'totals': {'$push': {'currency': '$_id.currency', 'total': '$totalAmount', 'count': '$count'}}
         }},
         {'$project': {
-            '_id': 0,
-            'person': '$person_display',
-            'type': '$_id.type',
+            '_id': 0, 
+            'person': '$person_display', 
+            'type': '$_id.type', 
             'totals': '$totals'
         }},
         {'$sort': {'person': 1}}
@@ -184,10 +184,10 @@ def record_lump_sum_repayment(payment_currency):
     db = current_app.db
     if 'amount' not in data or 'type' not in data:
         return jsonify({'error': 'Repayment amount and type are required'}), 400
-
+    
     debt_type = data['type'] # 'lent' (someone pays me) or 'borrowed' (I pay someone)
     person_name = data['person'] # Person is now in the payload
-
+    
     if debt_type not in ['lent', 'borrowed']:
         return jsonify({'error': "Invalid debt type, must be 'lent' or 'borrowed'"}), 400
 
@@ -196,18 +196,23 @@ def record_lump_sum_repayment(payment_currency):
         if payment_amount <= 0: return jsonify({'error': 'Amount must be a positive number'}), 400
     except (ValueError, TypeError):
         return jsonify({'error': 'Amount must be a number'}), 400
+        
+    # --- FIX: Check for optional timestamp, otherwise use now() ---
+    timestamp_str = data.get('timestamp')
+    payment_time_utc = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now(UTC_TZ)
+    # --- End Fix ---
 
     # --- CROSS-CURRENCY LOGIC ---
-
+    
     # 1. Try to find debt matching the payment currency
     query_filter = {
         'person': re.compile(f'^{re.escape(person_name)}$', re.IGNORECASE),
-        'currency': payment_currency,
+        'currency': payment_currency, 
         'status': 'open',
-        'type': debt_type
+        'type': debt_type 
     }
     debts_to_process = list(db.debts.find(query_filter).sort('created_at', 1))
-
+    
     debt_currency = payment_currency
     converted_payment_amount = payment_amount
 
@@ -233,12 +238,11 @@ def record_lump_sum_repayment(payment_currency):
             converted_payment_amount = payment_amount * rate
         else:
             return jsonify({'error': 'Currency conversion error'}), 500
-
+    
     # --- REPAYMENT AND INTEREST LOGIC ---
-
+    
     total_remaining_debt = sum(d['remainingAmount'] for d in debts_to_process) # In debt_currency
-    now_utc = datetime.now(UTC_TZ)
-
+    
     interest_amount = 0 # In debt_currency
     amount_to_apply_to_principal = converted_payment_amount # In debt_currency
 
@@ -266,7 +270,7 @@ def record_lump_sum_repayment(payment_currency):
             "categoryId": interest_category,
             "accountName": f"{debt_currency} Account",
             "description": interest_desc,
-            "timestamp": now_utc
+            "timestamp": payment_time_utc # --- FIX: Use payment time ---
         }
         db.transactions.insert_one(interest_tx)
 
@@ -282,7 +286,7 @@ def record_lump_sum_repayment(payment_currency):
             {'_id': debt['_id']},
             {
                 '$inc': {'remainingAmount': -repayment_for_this_debt},
-                '$push': {'repayments': {'amount': repayment_for_this_debt, 'date': now_utc}},
+                '$push': {'repayments': {'amount': repayment_for_this_debt, 'date': payment_time_utc}}, # --- FIX: Use payment time ---
                 '$set': {'status': new_status}
             }
         )
@@ -292,7 +296,7 @@ def record_lump_sum_repayment(payment_currency):
     tx_category = 'Debt Settled' if debt_type == 'lent' else 'Debt Repayment'
     tx_type = 'income' if debt_type == 'lent' else 'expense'
     tx_desc = f"Repayment from {person_name}" if debt_type == 'lent' else f"Repayment to {person_name}"
-
+    
     # This transaction logs what *actually* happened (e.g., +160,000 KHR)
     tx = {
         "type": tx_type,
@@ -301,14 +305,14 @@ def record_lump_sum_repayment(payment_currency):
         "categoryId": tx_category,
         "accountName": f"{payment_currency} Account",
         "description": tx_desc,
-        "timestamp": now_utc
+        "timestamp": payment_time_utc # --- FIX: Use payment time ---
     }
     db.transactions.insert_one(tx)
 
     # 6. Craft the final success message
     payment_format = ",.0f" if payment_currency == 'KHR' else ",.2f"
     debt_format = ",.0f" if debt_currency == 'KHR' else ",.2f"
-
+    
     final_message = f"✅ Repayment of {payment_amount:{payment_format}} {payment_currency} recorded for {person_name}."
 
     if debt_currency != payment_currency:
@@ -331,15 +335,15 @@ def cancel_debt(debt_id):
         debt = db.debts.find_one({'_id': ObjectId(debt_id)})
         if not debt:
             return jsonify({'error': 'Debt not found'}), 404
-
+        
         if debt['status'] == 'canceled':
             return jsonify({'error': 'Debt is already canceled'}), 400
-
+            
         # 1. Find the associated transaction
         tx_id = debt.get('associated_transaction_id')
         if not tx_id:
             return jsonify({'error': 'Cannot cancel debt: No associated transaction found.'}), 500
-
+            
         original_tx = db.transactions.find_one({'_id': ObjectId(tx_id)})
         if not original_tx:
             return jsonify({'error': 'Cannot cancel debt: Original transaction not found.'}), 500
@@ -362,13 +366,13 @@ def cancel_debt(debt_id):
             "timestamp": datetime.now(UTC_TZ)
         }
         db.transactions.insert_one(reverse_tx)
-
+        
         # 3. Set the debt status to 'canceled'
         db.debts.update_one(
             {'_id': ObjectId(debt_id)},
             {'$set': {'status': 'canceled', 'remainingAmount': 0}}
         )
-
+        
         return jsonify({'message': 'Debt canceled and transaction reversed.'})
 
     except Exception as e:
