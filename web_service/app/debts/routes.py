@@ -14,6 +14,11 @@ def serialize_debt(doc):
         doc['_id'] = str(doc['_id'])
     if 'created_at' in doc and isinstance(doc['created_at'], datetime):
         doc['created_at'] = doc['created_at'].isoformat()
+    # --- NEW: Serialize repayment dates ---
+    if 'repayments' in doc:
+        for rep in doc['repayments']:
+            if 'date' in rep and isinstance(rep['date'], datetime):
+                rep['date'] = rep['date'].isoformat()
     return doc
 
 def get_db_rate(db):
@@ -29,6 +34,7 @@ def get_db_rate(db):
 def add_debt():
     """Adds a new debt and a corresponding transaction to reflect the balance change."""
     data = request.json
+    db = current_app.db
     if not all(k in data for k in ['type', 'person', 'amount', 'currency']):
         return jsonify({'error': 'Missing required fields'}), 400
 
@@ -39,15 +45,9 @@ def add_debt():
 
     timestamp_str = data.get('timestamp')
     created_at = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now(UTC_TZ)
-
-    debt = {
-        "type": data['type'], "person": data['person'].strip().title(),
-        "originalAmount": amount, "remainingAmount": amount, "currency": data['currency'],
-        "status": "open", "purpose": data.get("purpose", ""), "repayments": [],
-        "created_at": created_at
-    }
-
     account_name = f"{data['currency']} Account"
+
+    # --- FIX: Create transaction first to get its ID ---
     tx_data = {
         "amount": amount, "currency": data['currency'], "accountName": account_name,
         "timestamp": created_at, "description": f"Loan {data['type']} {data['person']}"
@@ -58,8 +58,19 @@ def add_debt():
     else:
         tx_data['type'], tx_data['categoryId'] = 'income', 'Loan Received'
 
-    current_app.db.transactions.insert_one(tx_data)
-    result = current_app.db.debts.insert_one(debt)
+    tx_result = db.transactions.insert_one(tx_data)
+    tx_id = tx_result.inserted_id
+    # --- End Fix ---
+
+    debt = {
+        "type": data['type'], "person": data['person'].strip().title(),
+        "originalAmount": amount, "remainingAmount": amount, "currency": data['currency'],
+        "status": "open", "purpose": data.get("purpose", ""), "repayments": [],
+        "created_at": created_at,
+        "associated_transaction_id": tx_id # --- FIX: Store the transaction ID ---
+    }
+
+    result = db.debts.insert_one(debt)
     return jsonify({'message': 'Debt recorded', 'id': str(result.inserted_id)}), 201
 
 
@@ -72,6 +83,28 @@ def get_open_debts():
             '_id': {'person_normalized': {'$toLower': '$person'}, 'currency': '$currency', 'type': '$type'},
             'person_display': {'$first': '$person'},
             'totalAmount': {'$sum': '$remainingAmount'},
+            'count': {'$sum': 1}
+        }},
+        {'$project': {
+            '_id': 0, 'person': '$person_display', 'currency': '$_id.currency',
+            'type': '$_id.type', 'totalAmount': '$totalAmount', 'count': '$count'
+        }},
+        {'$sort': {'person': 1}}
+    ]
+    grouped_debts = list(current_app.db.debts.aggregate(pipeline))
+    return jsonify(grouped_debts)
+
+
+# --- NEW ROUTE: Get Settled Debts ---
+@debts_bp.route('/list/settled', methods=['GET'])
+def get_settled_debts_grouped():
+    """Fetches and groups settled OR canceled debts by person and currency."""
+    pipeline = [
+        {'$match': {'status': {'$in': ['settled', 'canceled']}}},
+        {'$group': {
+            '_id': {'person_normalized': {'$toLower': '$person'}, 'currency': '$currency', 'type': '$type'},
+            'person_display': {'$first': '$person'},
+            'totalAmount': {'$sum': '$originalAmount'}, # Show original amount for settled
             'count': {'$sum': 1}
         }},
         {'$project': {
@@ -101,8 +134,20 @@ def get_debts_by_person_and_currency(person_name, currency):
     return jsonify([serialize_debt(d) for d in debts])
 
 
-@debts_bp.route('/person/<person_name>/<payment_currency>/repay', methods=['POST'])
-def record_lump_sum_repayment(person_name, payment_currency):
+# --- NEW ROUTE: Get settled debts for a person ---
+@debts_bp.route('/person/<person_name>/<currency>/settled', methods=['GET'])
+def get_settled_debts_by_person(person_name, currency):
+    query_filter = {
+        'person': re.compile(f'^{re.escape(person_name)}$', re.IGNORECASE),
+        'currency': currency,
+        'status': {'$in': ['settled', 'canceled']}
+    }
+    debts = list(current_app.db.debts.find(query_filter).sort('created_at', 1))
+    return jsonify([serialize_debt(d) for d in debts])
+
+
+@debts_bp.route('/person/<payment_currency>/repay', methods=['POST'])
+def record_lump_sum_repayment(payment_currency):
     """
     Handles a lump-sum repayment, including cross-currency logic.
     """
@@ -112,6 +157,8 @@ def record_lump_sum_repayment(person_name, payment_currency):
         return jsonify({'error': 'Repayment amount and type are required'}), 400
 
     debt_type = data['type'] # 'lent' (someone pays me) or 'borrowed' (I pay someone)
+    person_name = data['person'] # Person is now in the payload
+
     if debt_type not in ['lent', 'borrowed']:
         return jsonify({'error': "Invalid debt type, must be 'lent' or 'borrowed'"}), 400
 
@@ -142,7 +189,7 @@ def record_lump_sum_repayment(person_name, payment_currency):
         alternate_debts = list(db.debts.find(query_filter).sort('created_at', 1))
 
         if not alternate_debts:
-            return jsonify({'error': f'No open {debt_type} debts found for this person in any currency'}), 404
+            return jsonify({'error': f'No open {debt_type} debts found for {person_name} in any currency'}), 404
 
         # 3. If alternate debt found, convert payment amount
         debts_to_process = alternate_debts
@@ -245,6 +292,82 @@ def record_lump_sum_repayment(person_name, payment_currency):
             final_message += f"\nThe debt of {total_remaining_debt:{debt_format}} {debt_currency} is now settled. The extra {interest_amount:{debt_format}} {debt_currency} was recorded as 'Interest Expense'."
 
     return jsonify({'message': final_message})
+
+
+# --- NEW ROUTE: Cancel a debt ---
+@debts_bp.route('/<debt_id>/cancel', methods=['POST'])
+def cancel_debt(debt_id):
+    db = current_app.db
+    try:
+        debt = db.debts.find_one({'_id': ObjectId(debt_id)})
+        if not debt:
+            return jsonify({'error': 'Debt not found'}), 404
+
+        if debt['status'] == 'canceled':
+            return jsonify({'error': 'Debt is already canceled'}), 400
+
+        # 1. Find the associated transaction
+        tx_id = debt.get('associated_transaction_id')
+        if not tx_id:
+            return jsonify({'error': 'Cannot cancel debt: No associated transaction found.'}), 500
+
+        original_tx = db.transactions.find_one({'_id': ObjectId(tx_id)})
+        if not original_tx:
+            return jsonify({'error': 'Cannot cancel debt: Original transaction not found.'}), 500
+
+        # 2. Create a reversing transaction
+        if original_tx['type'] == 'expense': # (e.g., Loan Lent)
+            reverse_type = 'income'
+            reverse_desc = f"Reversal for Canceled Debt: {original_tx['description']}"
+        else: # (e.g., Loan Received)
+            reverse_type = 'expense'
+            reverse_desc = f"Reversal for Canceled Debt: {original_tx['description']}"
+
+        reverse_tx = {
+            "type": reverse_type,
+            "amount": original_tx['amount'],
+            "currency": original_tx['currency'],
+            "categoryId": "Canceled Debt",
+            "accountName": original_tx['accountName'],
+            "description": reverse_desc,
+            "timestamp": datetime.now(UTC_TZ)
+        }
+        db.transactions.insert_one(reverse_tx)
+
+        # 3. Set the debt status to 'canceled'
+        db.debts.update_one(
+            {'_id': ObjectId(debt_id)},
+            {'$set': {'status': 'canceled', 'remainingAmount': 0}}
+        )
+
+        return jsonify({'message': 'Debt canceled and transaction reversed.'})
+
+    except Exception as e:
+        return jsonify({'error': f'An error occurred: {str(e)}'}), 500
+
+# --- NEW ROUTE: Edit a debt's person or purpose ---
+@debts_bp.route('/<debt_id>', methods=['PUT'])
+def update_debt(debt_id):
+    db = current_app.db
+    data = request.json
+    if not data or not any(k in data for k in ['person', 'purpose']):
+        return jsonify({'error': 'No valid fields (person, purpose) provided for update.'}), 400
+
+    update_fields = {}
+    if 'person' in data:
+        update_fields['person'] = data['person'].strip().title()
+    if 'purpose' in data:
+        update_fields['purpose'] = data['purpose'].strip()
+
+    result = db.debts.update_one(
+        {'_id': ObjectId(debt_id)},
+        {'$set': update_fields}
+    )
+
+    if result.matched_count == 0:
+        return jsonify({'error': 'Debt not found'}), 404
+
+    return jsonify({'message': 'Debt updated successfully'})
 
 
 @debts_bp.route('/analysis', methods=['GET'])

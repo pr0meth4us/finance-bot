@@ -47,6 +47,16 @@ def get_open_debts():
         print(f"API Error fetching debts: {e}")
         return []
 
+# --- NEW FUNCTION ---
+def get_settled_debts_grouped():
+    try:
+        res = requests.get(f"{BASE_URL}/debts/list/settled", timeout=10)
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error fetching settled debts: {e}")
+        return []
+
 
 def get_debts_by_person_and_currency(person_name, currency):
     try:
@@ -56,6 +66,17 @@ def get_debts_by_person_and_currency(person_name, currency):
         return res.json()
     except requests.exceptions.RequestException as e:
         print(f"API Error fetching debts for {person_name} ({currency}): {e}")
+        return []
+
+# --- NEW FUNCTION ---
+def get_settled_debts_by_person(person_name, currency):
+    try:
+        encoded_name = urllib.parse.quote(person_name)
+        res = requests.get(f"{BASE_URL}/debts/person/{encoded_name}/{currency}/settled", timeout=10)
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error fetching settled debts for {person_name} ({currency}): {e}")
         return []
 
 
@@ -68,15 +89,48 @@ def get_debt_details(debt_id):
         print(f"API Error fetching debt details: {e}")
         return None
 
+# --- NEW FUNCTION ---
+def cancel_debt(debt_id):
+    """Sends a POST request to cancel a debt and reverse its transaction."""
+    try:
+        res = requests.post(f"{BASE_URL}/debts/{debt_id}/cancel", timeout=15)
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error canceling debt: {e}")
+        try:
+            return e.response.json()
+        except:
+            return {'error': 'A network error occurred.'}
+
+# --- NEW FUNCTION ---
+def update_debt(debt_id, data):
+    """Sends a PUT request to update a debt's person or purpose."""
+    try:
+        res = requests.put(f"{BASE_URL}/debts/{debt_id}", json=data, timeout=10)
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error updating debt: {e}")
+        try:
+            return e.response.json()
+        except:
+            return {'error': 'A network error occurred.'}
+
 
 def record_lump_sum_repayment(person_name, currency, amount, debt_type):
     """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     try:
-        encoded_name = urllib.parse.quote(person_name)
-        url = f"{BASE_URL}/debts/person/{encoded_name}/{currency}/repay"
-        # --- FIX: Payload now includes 'type' ---
-        payload = {'amount': amount, 'type': debt_type}
+        # --- FIX: URL uses payment currency, payload includes person and type ---
+        encoded_currency = urllib.parse.quote(currency)
+        url = f"{BASE_URL}/debts/person/{encoded_currency}/repay"
+        payload = {
+            'amount': amount,
+            'type': debt_type,
+            'person': person_name
+        }
         res = requests.post(url, json=payload, timeout=15)
+        # --- End Fix ---
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:

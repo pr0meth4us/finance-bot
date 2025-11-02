@@ -152,14 +152,19 @@ def iou_menu_keyboard():
         [InlineKeyboardButton("➡️ I Lent Money", callback_data='iou_lent')],
         [InlineKeyboardButton("⬅️ I Borrowed Money", callback_data='iou_borrowed')],
         [InlineKeyboardButton("📖 View Open Debts", callback_data='iou_view')],
+        # --- NEW: Add Settled Debts button ---
+        [InlineKeyboardButton("✅ View Settled Debts", callback_data='iou_view_settled')],
         [InlineKeyboardButton("🔬 Debt Analysis", callback_data='debt_analysis')],
         [InlineKeyboardButton("‹ Back to Main Menu", callback_data='start')],
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
-def iou_list_keyboard(grouped_debts):
+def iou_list_keyboard(grouped_debts, is_settled=False):
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     keyboard = []
+    status_str = "settled" if is_settled else "open"
+
     lent = [d for d in grouped_debts if d['type'] == 'lent']
     borrowed = [d for d in grouped_debts if d['type'] == 'borrowed']
 
@@ -167,40 +172,89 @@ def iou_list_keyboard(grouped_debts):
         for debt in lent:
             amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
             label = f"Owed by {debt['person']}: {debt['totalAmount']:{amount_format}} {debt['currency']} ({debt['count']})"
+            # --- FIX: Add status_str to callback ---
             keyboard.append(
-                [InlineKeyboardButton(label, callback_data=f"iou:person:{debt['person']}:{debt['currency']}")])
+                [InlineKeyboardButton(label, callback_data=f"iou:person:{status_str}:{debt['person']}:{debt['currency']}")])
     if borrowed:
         for debt in borrowed:
             amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
             label = f"You owe {debt['person']}: {debt['totalAmount']:{amount_format}} {debt['currency']} ({debt['count']})"
+            # --- FIX: Add status_str to callback ---
             keyboard.append(
-                [InlineKeyboardButton(label, callback_data=f"iou:person:{debt['person']}:{debt['currency']}")])
+                [InlineKeyboardButton(label, callback_data=f"iou:person:{status_str}:{debt['person']}:{debt['currency']}")])
 
     keyboard.append([InlineKeyboardButton("‹ Back", callback_data='iou_menu')])
     return InlineKeyboardMarkup(keyboard)
 
 
-def iou_person_detail_keyboard(person_debts, person_name, currency, debt_type):
+def iou_person_detail_keyboard(person_debts, person_name, currency, debt_type, is_settled=False):
     """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
-    keyboard = [
-        # --- FIX: Callback data now includes debt_type ---
-        [InlineKeyboardButton(f"💰 Record Repayment ({currency})", callback_data=f"iou:repay:{person_name}:{currency}:{debt_type}")]
-    ]
+    keyboard = []
+    # --- FIX: Only show Repay button if not settled ---
+    if not is_settled:
+        keyboard.append(
+            [InlineKeyboardButton(f"💰 Record Repayment ({currency})", callback_data=f"iou:repay:{person_name}:{currency}:{debt_type}")]
+        )
+
     for debt in person_debts:
         created_date = datetime.fromisoformat(debt['created_at']).strftime('%d %b')
         purpose = debt.get('purpose') or 'No purpose'
+        amount_key = 'remainingAmount' if not is_settled else 'originalAmount'
+        amount = debt.get(amount_key, 0)
+
         amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
-        label = f"{debt['remainingAmount']:{amount_format}} {debt['currency']} ({created_date}) - {purpose}"
-        callback = f"iou:detail:{debt['_id']}:{person_name}:{currency}"
+        label = f"{amount:{amount_format}} {debt['currency']} ({created_date}) - {purpose}"
+
+        # --- FIX: Pass is_settled status to detail callback ---
+        callback = f"iou:detail:{debt['_id']}:{person_name}:{currency}:{is_settled}"
         keyboard.append([InlineKeyboardButton(label, callback_data=callback)])
 
-    keyboard.append([InlineKeyboardButton("‹ Back to Summary", callback_data='iou_view')])
+    back_callback = 'iou_view_settled' if is_settled else 'iou_view'
+    keyboard.append([InlineKeyboardButton("‹ Back to Summary", callback_data=back_callback)])
     return InlineKeyboardMarkup(keyboard)
 
 
-def iou_detail_keyboard(debt_id, person_name, currency):
+def iou_detail_actions_keyboard(debt_id, person_name, currency, is_settled, status):
+    """ --- NEW FUNCTION --- """
+    keyboard = []
+
+    # Only show edit/cancel buttons if the debt is 'open'
+    if status == 'open':
+        keyboard.append([
+            InlineKeyboardButton("✏️ Edit/Cancel", callback_data=f"iou:manage:{debt_id}:{person_name}:{currency}")
+        ])
+
+    back_callback = f"iou:person:settled:{person_name}:{currency}" if is_settled else f"iou:person:open:{person_name}:{currency}"
+    keyboard.append([InlineKeyboardButton("‹ Back to List", callback_data=back_callback)])
+    return InlineKeyboardMarkup(keyboard)
+
+# --- NEW FUNCTION ---
+def iou_manage_keyboard(debt_id, person, currency):
+    """Keyboard for editing or canceling a debt."""
     keyboard = [
-        [InlineKeyboardButton("‹ Back to List", callback_data=f"iou:person:{person_name}:{currency}")],
+        [
+            InlineKeyboardButton("✏️ Edit Person", callback_data=f"iou:edit:person:{debt_id}"),
+            InlineKeyboardButton("✏️ Edit Purpose", callback_data=f"iou:edit:purpose:{debt_id}")
+        ],
+        [
+            InlineKeyboardButton("❌ Cancel Debt", callback_data=f"iou:cancel:prompt:{debt_id}")
+        ],
+        [
+            InlineKeyboardButton("‹ Back", callback_data=f"iou:detail:{debt_id}:{person}:{currency}:False")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+# --- NEW FUNCTION ---
+def iou_cancel_confirm_keyboard(debt_id):
+    """Confirmation keyboard for canceling a debt."""
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Yes, Cancel Debt", callback_data=f"iou:cancel:confirm:{debt_id}")
+        ],
+        [
+            InlineKeyboardButton("‹ No, Go Back", callback_data=f"iou:manage:{debt_id}:_placeholder:_placeholder") # Placeholders, will be ignored
+        ]
     ]
     return InlineKeyboardMarkup(keyboard)
 

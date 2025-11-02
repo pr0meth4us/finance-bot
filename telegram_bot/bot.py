@@ -17,8 +17,12 @@ from handlers import (
     search_conversation_handler,
     history_menu, manage_transaction, delete_transaction_prompt, delete_transaction_confirm,
     iou_menu, iou_view, iou_person_detail, iou_detail, debt_analysis,
+    # --- NEW: Import new handlers ---
+    iou_view_settled, iou_person_detail_settled,
+    iou_manage_menu, iou_cancel_prompt, iou_cancel_confirm,
+    iou_edit_conversation_handler
+    # --- End New ---
 )
-# --- FIX: `repay_command_handler` removed, `unified_message_conversation_handler` imported ---
 from handlers.command_handler import unified_message_conversation_handler
 # --- MODIFICATION END ---
 
@@ -38,15 +42,9 @@ def main():
     # 1. System command handlers for start/cancel and specific commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cancel", cancel))
-    # --- MODIFICATION START: Remove old repay command handlers ---
-    # app.add_handler(CommandHandler("repaid", repay_command_handler))
-    # app.add_handler(CommandHandler("paid", repay_command_handler))
-    # --- MODIFICATION END ---
 
     # --- MODIFICATION START: Reorder handlers ---
     # 2. Add button-based conversation handlers FIRST.
-    # These handlers need to check for text messages while in an active state,
-    # so they must come before the general-purpose text handler.
     app.add_handler(tx_conversation_handler)
     app.add_handler(rate_conversation_handler)
     app.add_handler(iou_conversation_handler)
@@ -58,9 +56,9 @@ def main():
     app.add_handler(edit_tx_conversation_handler)
     app.add_handler(habits_conversation_handler)
     app.add_handler(search_conversation_handler)
+    app.add_handler(iou_edit_conversation_handler) # --- NEW: Add edit handler ---
 
     # 3. The unified message handler should be one of the LAST handlers.
-    # It acts as a fallback for any text that isn't part of an active conversation.
     app.add_handler(unified_message_conversation_handler)
     # --- MODIFICATION END ---
 
@@ -72,11 +70,19 @@ def main():
     app.add_handler(CallbackQueryHandler(manage_transaction, pattern='^manage_tx_'))
     app.add_handler(CallbackQueryHandler(delete_transaction_prompt, pattern='^delete_tx_'))
     app.add_handler(CallbackQueryHandler(delete_transaction_confirm, pattern='^confirm_delete_'))
+
+    # --- NEW: Add IOU CRUD handlers ---
     app.add_handler(CallbackQueryHandler(iou_menu, pattern='^iou_menu$'))
     app.add_handler(CallbackQueryHandler(iou_view, pattern='^iou_view$'))
-    app.add_handler(CallbackQueryHandler(iou_person_detail, pattern='^iou:person:'))
+    app.add_handler(CallbackQueryHandler(iou_view_settled, pattern='^iou_view_settled$'))
+    app.add_handler(CallbackQueryHandler(iou_person_detail, pattern='^iou:person:open:'))
+    app.add_handler(CallbackQueryHandler(iou_person_detail_settled, pattern='^iou:person:settled:'))
     app.add_handler(CallbackQueryHandler(iou_detail, pattern='^iou:detail:'))
+    app.add_handler(CallbackQueryHandler(iou_manage_menu, pattern='^iou:manage:'))
+    app.add_handler(CallbackQueryHandler(iou_cancel_prompt, pattern='^iou:cancel:prompt:'))
+    app.add_handler(CallbackQueryHandler(iou_cancel_confirm, pattern='^iou:cancel:confirm:'))
     app.add_handler(CallbackQueryHandler(debt_analysis, pattern='^debt_analysis$'))
+    # --- End New ---
 
     print("🚀 Bot is running...")
     app.run_polling()

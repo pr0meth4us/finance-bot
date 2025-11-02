@@ -12,7 +12,13 @@ from .iou import (
     iou_start, iou_received_date_choice, iou_received_custom_date, iou_received_person,
     iou_received_amount, iou_received_currency, iou_received_purpose,
     repay_lump_start, received_lump_repayment_amount,
-    IOU_ASK_DATE, IOU_CUSTOM_DATE, IOU_PERSON, IOU_AMOUNT, IOU_CURRENCY, IOU_PURPOSE, REPAY_LUMP_AMOUNT
+    # --- NEW: Import new handlers ---
+    iou_view_settled, iou_person_detail_settled,
+    iou_manage_menu, iou_cancel_prompt, iou_cancel_confirm,
+    iou_edit_start, iou_edit_received_value,
+    IOU_ASK_DATE, IOU_CUSTOM_DATE, IOU_PERSON, IOU_AMOUNT, IOU_CURRENCY, IOU_PURPOSE, REPAY_LUMP_AMOUNT,
+    IOU_EDIT_GET_VALUE
+    # --- End New ---
 )
 from .transaction import (
     add_transaction_start, forgot_log_start, received_forgot_day, received_forgot_custom_date,
@@ -21,9 +27,7 @@ from .transaction import (
     history_menu, manage_transaction, delete_transaction_prompt, delete_transaction_confirm,
     edit_transaction_start, edit_choose_field, edit_received_new_value, edit_received_new_category,
     edit_received_custom_category,
-    # --- FIX: Import new date handler and state ---
     edit_received_new_date, EDIT_GET_NEW_DATE,
-    # --- End Fix ---
     AMOUNT, CURRENCY, CATEGORY, CUSTOM_CATEGORY, ASK_REMARK, REMARK,
     FORGOT_DATE, FORGOT_CUSTOM_DATE, FORGOT_TYPE,
     EDIT_CHOOSE_FIELD, EDIT_GET_NEW_VALUE, EDIT_GET_NEW_CATEGORY, EDIT_GET_CUSTOM_CATEGORY
@@ -82,9 +86,7 @@ edit_tx_conversation_handler = ConversationHandler(
         EDIT_GET_NEW_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_received_new_value)],
         EDIT_GET_NEW_CATEGORY: [CallbackQueryHandler(edit_received_new_category, pattern='^cat_')],
         EDIT_GET_CUSTOM_CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_received_custom_category)],
-        # --- FIX: Add new state for date editing ---
         EDIT_GET_NEW_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_received_new_date)],
-        # --- End Fix ---
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     per_message=False
@@ -99,6 +101,16 @@ iou_conversation_handler = ConversationHandler(
         IOU_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_received_amount)],
         IOU_CURRENCY: [CallbackQueryHandler(iou_received_currency, pattern='^curr_')],
         IOU_PURPOSE: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_received_purpose)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+    per_message=False
+)
+
+# --- NEW: Conversation for editing a debt ---
+iou_edit_conversation_handler = ConversationHandler(
+    entry_points=[CallbackQueryHandler(iou_edit_start, pattern='^iou:edit:')],
+    states={
+        IOU_EDIT_GET_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_edit_received_value)]
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     per_message=False
