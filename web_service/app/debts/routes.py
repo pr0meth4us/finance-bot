@@ -96,11 +96,16 @@ def get_debts_by_person_and_currency(person_name, currency):
 @debts_bp.route('/person/<person_name>/<currency>/repay', methods=['POST'])
 def record_lump_sum_repayment(person_name, currency):
     """
-    Handles a lump-sum repayment. If the repayment is an overpayment,
-    it settles the debt and records the difference as interest income.
+    Handles a lump-sum repayment for a specific debt type ('lent' or 'borrowed').
+    If the repayment is an overpayment, it logs the difference as interest.
     """
     data = request.json
-    if 'amount' not in data: return jsonify({'error': 'Repayment amount is required'}), 400
+    if 'amount' not in data or 'type' not in data:
+        return jsonify({'error': 'Repayment amount and type are required'}), 400
+
+    debt_type = data['type'] # 'lent' (someone pays me) or 'borrowed' (I pay someone)
+    if debt_type not in ['lent', 'borrowed']:
+        return jsonify({'error': "Invalid debt type, must be 'lent' or 'borrowed'"}), 400
 
     try:
         repayment_amount = float(data['amount'])
@@ -108,32 +113,45 @@ def record_lump_sum_repayment(person_name, currency):
     except (ValueError, TypeError):
         return jsonify({'error': 'Amount must be a number'}), 400
 
+    # --- FIX: Query now filters by debt_type to avoid ambiguity ---
     query_filter = {
         'person': re.compile(f'^{re.escape(person_name)}$', re.IGNORECASE),
-        'currency': currency, 'status': 'open'
+        'currency': currency,
+        'status': 'open',
+        'type': debt_type
     }
     debts_to_repay = list(current_app.db.debts.find(query_filter).sort('created_at', 1))
 
     if not debts_to_repay:
-        return jsonify({'error': 'No open debts found for this person and currency'}), 404
+        return jsonify({'error': f'No open {debt_type} debts found for this person and currency'}), 404
 
     total_remaining = sum(d['remainingAmount'] for d in debts_to_repay)
-    debt_type = debts_to_repay[0]['type']
     now_utc = datetime.now(UTC_TZ)
 
     interest_amount = 0
     amount_to_apply_to_debt = repayment_amount
 
-    # --- THIS IS THE NEW LOGIC ---
+    # --- FIX: Handle overpayment based on debt_type ---
     if repayment_amount > total_remaining + 0.001: # It's an overpayment
         interest_amount = repayment_amount - total_remaining
         amount_to_apply_to_debt = total_remaining # Only apply the exact debt amount to the debts
 
-        # Create a new income transaction for the interest
+        # Create a new transaction for the interest
+        if debt_type == 'lent':
+            # Someone overpaid me = Interest Income
+            interest_tx_type = "income"
+            interest_category = "Loan Interest"
+            interest_desc = f"Interest from {person_name}"
+        else:
+            # I overpaid someone = Interest Expense
+            interest_tx_type = "expense"
+            interest_category = "Interest Expense"
+            interest_desc = f"Interest paid to {person_name}"
+
         interest_tx = {
-            "type": "income", "amount": interest_amount, "currency": currency,
-            "categoryId": "Loan Interest", "accountName": f"{currency} Account",
-            "description": f"Interest from {person_name}", "timestamp": now_utc
+            "type": interest_tx_type, "amount": interest_amount, "currency": currency,
+            "categoryId": interest_category, "accountName": f"{currency} Account",
+            "description": interest_desc, "timestamp": now_utc
         }
         current_app.db.transactions.insert_one(interest_tx)
 
@@ -169,7 +187,10 @@ def record_lump_sum_repayment(person_name, currency):
     # Craft the final success message
     final_message = f"✅ Repayment of {repayment_amount:,.2f} {currency} recorded for {person_name}."
     if interest_amount > 0:
-        final_message += f"\nThe debt of {total_remaining:,.2f} {currency} is now settled. The extra {interest_amount:,.2f} {currency} was recorded as 'Loan Interest' income."
+        if debt_type == 'lent':
+            final_message += f"\nThe debt of {total_remaining:,.2f} {currency} is now settled. The extra {interest_amount:,.2f} {currency} was recorded as 'Loan Interest' income."
+        else:
+            final_message += f"\nThe debt of {total_remaining:,.2f} {currency} is now settled. The extra {interest_amount:,.2f} {currency} was recorded as 'Interest Expense'."
 
     return jsonify({'message': final_message})
 

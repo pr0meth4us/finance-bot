@@ -14,23 +14,19 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import logging
 import shlex
-# --- MODIFICATION START: Add safe evaluator for calculator ---
 # NOTE: You must add 'asteval' to your requirements.txt
 from asteval import Interpreter
-# --- MODIFICATION END ---
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 SELECT_CATEGORY, GET_CUSTOM_CATEGORY = range(2)
-# --- MODIFICATION START: Initialize the safe calculator ---
 aeval = Interpreter()
-# --- MODIFICATION END ---
 
 COMMAND_MAP = {
     'coffee': {'categoryId': 'Drink', 'description': 'Coffee', 'type': 'expense'}, 'lunch': {'categoryId': 'Food', 'description': 'Lunch', 'type': 'expense'}, 'dinner': {'categoryId': 'Food', 'description': 'Dinner', 'type': 'expense'}, 'gas': {'categoryId': 'Transport', 'description': 'Gas', 'type': 'expense'}, 'parking': {'categoryId': 'Transport', 'description': 'Parking', 'type': 'expense'}, 'taxi': {'categoryId': 'Transport', 'description': 'Taxi/Tuktuk', 'type': 'expense'}, 'movie': {'categoryId': 'Entertainment', 'description': 'Movie', 'type': 'expense'}, 'groceries': {'categoryId': 'Shopping', 'description': 'Groceries', 'type': 'expense'}, 'shopping': {'categoryId': 'Shopping', 'description': 'Shopping', 'type': 'expense'}, 'bills': {'categoryId': 'Bills', 'description': 'Bills', 'type': 'expense'}, 'pizza': {'categoryId': 'Food', 'description': 'Pizza', 'type': 'expense'}, 'others': {'categoryId': 'For Others', 'description': 'For Others', 'type': 'expense'},
-    'alcohol': {'categoryId': 'Alcohol', 'description': 'Alcohol', 'type': 'expense'}, # <-- FIX: Added alcohol
+    'alcohol': {'categoryId': 'Alcohol', 'description': 'Alcohol', 'type': 'expense'},
     'salary': {'categoryId': 'Salary', 'description': 'Salary', 'type': 'income'}, 'bonus': {'categoryId': 'Bonus', 'description': 'Bonus', 'type': 'income'}, 'commission': {'categoryId': 'Commission', 'description': 'Commission', 'type': 'income'}, 'allowance': {'categoryId': 'Allowance', 'description': 'Allowance', 'type': 'income'}, 'gift': {'categoryId': 'Gift', 'description': 'Gift', 'type': 'income'},
 }
 
@@ -64,7 +60,6 @@ def parse_date_from_args(args):
     tx_datetime = today.replace(month=parsed_date.month, day=parsed_date.day, hour=12, minute=0, second=0, microsecond=0)
     return tx_datetime.isoformat(), args[:-1]
 
-# --- NEW HELPER FUNCTION ---
 def _format_success_message(data):
     """Formats a detailed success message for logged transactions or debts."""
     lines = ["<b>✅ Recorded:</b>"]
@@ -173,10 +168,12 @@ async def handle_quick_command(update: Update, command, args):
         return None, None
 
 
-async def handle_repayment(update: Update, args):
+async def handle_repayment(update: Update, args, debt_type: str):
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     try:
+        command_example = "`repaid by <Person> <Amount>`" if debt_type == 'lent' else "`paid <Person> <Amount>`"
         if len(args) < 2:
-            await update.message.reply_text(f"⚠️ Format: `paid <Person> <Amount> [MM-DD]`", parse_mode='Markdown')
+            await update.message.reply_text(f"⚠️ Format: {command_example}", parse_mode='Markdown')
             return
 
         args_str_fixed = " ".join(args).replace('“', '"').replace('”', '"')
@@ -187,8 +184,11 @@ async def handle_repayment(update: Update, args):
         amount_str = remaining_args[1]
         amount, currency = parse_amount_and_currency(amount_str)
 
-        response = api_client.record_lump_sum_repayment(person, currency, amount)
+        # --- FIX: Pass debt_type to the API client ---
+        response = api_client.record_lump_sum_repayment(person, currency, amount, debt_type)
         base_text = response.get('message', '❌ An error occurred.')
+        if response.get('error'):
+            base_text = f"❌ Error: {response.get('error')}"
 
     except Exception as e:
         logger.error(f"Error in handle_repayment: {e}", exc_info=True)
@@ -198,16 +198,6 @@ async def handle_repayment(update: Update, args):
     await update.message.reply_text(base_text + summary_text, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
 
 
-@restricted
-async def repay_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    if args and args[0].lower() == 'by':
-        await handle_repayment(update, args[1:])
-    else:
-        await handle_repayment(update, args)
-    return ConversationHandler.END
-
-
 # --- Main Message Router ---
 @restricted
 async def unified_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -215,7 +205,6 @@ async def unified_message_router(update: Update, context: ContextTypes.DEFAULT_T
     full_text = update.message.text
     logger.info(f"--- Message router received text: '{full_text}' ---")
 
-    # --- MODIFICATION START: Add calculator logic ---
     if '=' in full_text:
         expression = full_text.split('=')[0].strip()
         try:
@@ -225,21 +214,22 @@ async def unified_message_router(update: Update, context: ContextTypes.DEFAULT_T
             logger.error(f"Calculator error for expression '{expression}': {e}")
             await update.message.reply_text("Couldn't calculate that. Please check the expression.")
         return ConversationHandler.END
-    # --- MODIFICATION END ---
 
     parts = full_text.split()
     command = parts[0].lower()
     args = parts[1:]
 
     try:
-        if full_text.lower().startswith("repaid by"):
+        # --- FIX: Reroute repayment commands ---
+        if full_text.lower().startswith("repaid by") or full_text.lower().startswith("paid by"):
             args = parts[2:]
-            await handle_repayment(update, args)
+            await handle_repayment(update, args, debt_type='lent') # 'lent' = someone is paying me
             return ConversationHandler.END
 
         if command in ["paid", "repaid"]:
-            await handle_repayment(update, args)
+            await handle_repayment(update, args, debt_type='borrowed') # 'borrowed' = I am paying someone
             return ConversationHandler.END
+        # --- End Fix ---
 
         tx_data, debt_data, base_text = None, None, None
 
@@ -331,9 +321,7 @@ async def received_text_for_custom_category(update: Update, context: ContextType
 
 async def save_and_end_unknown(message, tx_data):
     response = api_client.add_transaction(tx_data)
-    # --- MODIFICATION START: Use detailed success message ---
     base_text = _format_success_message(tx_data) if response else "❌ Failed to record."
-    # --- MODIFICATION END ---
     summary_text = format_summary_message(api_client.get_detailed_summary())
     await message.reply_text(base_text + summary_text, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
     return ConversationHandler.END

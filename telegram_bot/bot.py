@@ -18,7 +18,8 @@ from handlers import (
     history_menu, manage_transaction, delete_transaction_prompt, delete_transaction_confirm,
     iou_menu, iou_view, iou_person_detail, iou_detail, debt_analysis,
 )
-from handlers.command_handler import unified_message_conversation_handler, repay_command_handler
+# --- FIX: `repay_command_handler` removed, `unified_message_conversation_handler` imported ---
+from handlers.command_handler import unified_message_conversation_handler
 # --- MODIFICATION END ---
 
 load_dotenv()
@@ -37,9 +38,9 @@ def main():
     # 1. System command handlers for start/cancel and specific commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cancel", cancel))
-    # --- MODIFICATION START: Add new repay command handlers ---
-    app.add_handler(CommandHandler("repaid", repay_command_handler))
-    app.add_handler(CommandHandler("paid", repay_command_handler))
+    # --- MODIFICATION START: Remove old repay command handlers ---
+    # app.add_handler(CommandHandler("repaid", repay_command_handler))
+    # app.add_handler(CommandHandler("paid", repay_command_handler))
     # --- MODIFICATION END ---
 
     # --- MODIFICATION START: Reorder handlers ---

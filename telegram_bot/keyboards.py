@@ -180,9 +180,11 @@ def iou_list_keyboard(grouped_debts):
     return InlineKeyboardMarkup(keyboard)
 
 
-def iou_person_detail_keyboard(person_debts, person_name, currency):
+def iou_person_detail_keyboard(person_debts, person_name, currency, debt_type):
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     keyboard = [
-        [InlineKeyboardButton(f"💰 Record Repayment ({currency})", callback_data=f"iou:repay:{person_name}:{currency}")]
+        # --- FIX: Callback data now includes debt_type ---
+        [InlineKeyboardButton(f"💰 Record Repayment ({currency})", callback_data=f"iou:repay:{person_name}:{currency}:{debt_type}")]
     ]
     for debt in person_debts:
         created_date = datetime.fromisoformat(debt['created_at']).strftime('%d %b')

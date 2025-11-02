@@ -69,11 +69,13 @@ def get_debt_details(debt_id):
         return None
 
 
-def record_lump_sum_repayment(person_name, currency, amount):
+def record_lump_sum_repayment(person_name, currency, amount, debt_type):
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     try:
         encoded_name = urllib.parse.quote(person_name)
         url = f"{BASE_URL}/debts/person/{encoded_name}/{currency}/repay"
-        payload = {'amount': amount}
+        # --- FIX: Payload now includes 'type' ---
+        payload = {'amount': amount, 'type': debt_type}
         res = requests.post(url, json=payload, timeout=15)
         res.raise_for_status()
         return res.json()

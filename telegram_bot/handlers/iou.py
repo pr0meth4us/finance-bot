@@ -54,7 +54,11 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     total = sum(d['remainingAmount'] for d in person_debts)
-    direction = "owes you" if person_debts[0]['type'] == 'lent' else "you owe"
+
+    # --- FIX: Get debt_type and pass it to keyboard ---
+    debt_type = person_debts[0]['type']
+    direction = "owes you" if debt_type == 'lent' else "you owe"
+
     amount_format = ",.0f" if currency == 'KHR' else ",.2f"
     text = (
         f"<b>Debts for {person_name}</b> ({direction})\n"
@@ -63,7 +67,7 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await query.edit_message_text(text=text, parse_mode='HTML',
                                   reply_markup=keyboards.iou_person_detail_keyboard(person_debts, person_name,
-                                                                                    currency))
+                                                                                    currency, debt_type))
 
 
 @restricted
@@ -184,6 +188,7 @@ async def iou_received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data['iou_amount'] = amount
 
         if amount < 100:
+            # Auto-select USD and skip to purpose
             currency = "USD"
             context.user_data['iou_currency'] = currency
             await update.message.reply_text(
@@ -191,6 +196,7 @@ async def iou_received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
                 parse_mode='HTML')
             return IOU_PURPOSE
         else:
+            # Ask for currency as usual
             await update.message.reply_text("Which currency?", reply_markup=keyboards.currency_keyboard())
             return IOU_CURRENCY
     except ValueError:
@@ -233,9 +239,16 @@ async def repay_lump_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Starts the lump-sum repayment conversation."""
     query = update.callback_query
     await query.answer()
-    _, _, person, currency = query.data.split(':')
-    context.user_data.update({'lump_repay_person': person, 'lump_repay_currency': currency})
-    await query.message.reply_text(f"How much did {person} repay in {currency}?")
+    # --- FIX: Parse new callback data format ---
+    _, _, person, currency, debt_type = query.data.split(':')
+    context.user_data.update({
+        'lump_repay_person': person,
+        'lump_repay_currency': currency,
+        'lump_repay_debt_type': debt_type
+    })
+
+    prompt = f"How much did {person} repay you in {currency}?" if debt_type == 'lent' else f"How much did you repay {person} in {currency}?"
+    await query.message.reply_text(prompt)
     return REPAY_LUMP_AMOUNT
 
 
@@ -245,20 +258,16 @@ async def received_lump_repayment_amount(update: Update, context: ContextTypes.D
         amount = float(update.message.text)
         person = context.user_data['lump_repay_person']
         currency = context.user_data['lump_repay_currency']
-        response = api_client.record_lump_sum_repayment(person, currency, amount)
+        debt_type = context.user_data['lump_repay_debt_type']
 
-        base_text = response.get('message')
-        if not base_text:
-            base_text = f"❌ Error: {response.get('error', 'Could not process repayment.')}"
+        # --- FIX: Call api client with debt_type ---
+        response = api_client.record_lump_sum_repayment(person, currency, amount, debt_type)
 
+        base_text = f"✅ {response['message']}" if 'message' in response else f"❌ Error: {response.get('error', 'Unknown error')}"
         summary_text = format_summary_message(api_client.get_detailed_summary())
         await update.message.reply_text(base_text + summary_text, parse_mode='HTML',
                                         reply_markup=keyboards.main_menu_keyboard())
-        # --- THIS IS THE FIX ---
-        # Always end the conversation, whether it's a success or a clear API error.
         return ConversationHandler.END
-
     except (ValueError, TypeError):
         await update.message.reply_text("Please enter a valid number for the repayment amount.")
-        # Stay in the conversation if the input was invalid (not a number)
         return REPAY_LUMP_AMOUNT
