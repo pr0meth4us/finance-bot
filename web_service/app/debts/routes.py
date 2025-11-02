@@ -14,6 +14,11 @@ def serialize_debt(doc):
         doc['_id'] = str(doc['_id'])
     if 'created_at' in doc and isinstance(doc['created_at'], datetime):
         doc['created_at'] = doc['created_at'].isoformat()
+
+    # --- FIX: Serialize associated_transaction_id to prevent TypeError ---
+    if 'associated_transaction_id' in doc and isinstance(doc['associated_transaction_id'], ObjectId):
+        doc['associated_transaction_id'] = str(doc['associated_transaction_id'])
+
     # --- NEW: Serialize repayment dates ---
     if 'repayments' in doc:
         for rep in doc['repayments']:

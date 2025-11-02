@@ -8,6 +8,7 @@ from decorators import restricted
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 from .helpers import format_summary_message
+from .command_handler import parse_amount_and_currency
 
 # Conversation states
 (
@@ -92,7 +93,7 @@ def _format_person_ledger(person_debts, is_settled=False):
             header_lines.append(f"  💵 {total_remaining_usd:,.2f} USD")
         if total_remaining_khr > 0:
             header_lines.append(f"  ៛ {total_remaining_khr:,.0f} KHR")
-        if not header_lines:
+        if total_remaining_usd == 0 and total_remaining_khr == 0:
             header_lines.append("  None")
         ledger_lines.append("\n".join(header_lines) + "\n")
 
