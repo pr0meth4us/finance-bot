@@ -174,9 +174,10 @@ habits_conversation_handler = ConversationHandler(
 )
 
 search_conversation_handler = ConversationHandler(
-    entry_points=[CallbackQueryHandler(search_menu_entry, pattern='^search_menu$')], # <-- MODIFIED
+    entry_points=[CallbackQueryHandler(search_menu_entry, pattern='^search_menu$')],
     states={
-        CHOOSE_ACTION: [CallbackQueryHandler(search_start, pattern='^start_search_')], # <-- NEW
+        # --- FIX: Using more specific regex pattern ---
+        CHOOSE_ACTION: [CallbackQueryHandler(search_start, pattern='^start_search_(manage|sum)$')],
         CHOOSE_PERIOD: [CallbackQueryHandler(received_period_choice, pattern='^report_period_')],
         GET_CUSTOM_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_custom_start)],
         GET_CUSTOM_END: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_custom_end)],
