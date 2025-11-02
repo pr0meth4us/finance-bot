@@ -16,6 +16,14 @@ def serialize_debt(doc):
         doc['created_at'] = doc['created_at'].isoformat()
     return doc
 
+def get_db_rate(db):
+    """Helper to fetch the stored KHR rate from settings."""
+    settings = db.settings.find_one({'_id': 'config'})
+    if settings and 'khr_to_usd_rate' in settings:
+        rate = float(settings['khr_to_usd_rate'])
+        if rate > 0:
+            return rate
+    return 4100.0 # Default fallback
 
 @debts_bp.route('/', methods=['POST'])
 def add_debt():
@@ -93,13 +101,13 @@ def get_debts_by_person_and_currency(person_name, currency):
     return jsonify([serialize_debt(d) for d in debts])
 
 
-@debts_bp.route('/person/<person_name>/<currency>/repay', methods=['POST'])
-def record_lump_sum_repayment(person_name, currency):
+@debts_bp.route('/person/<person_name>/<payment_currency>/repay', methods=['POST'])
+def record_lump_sum_repayment(person_name, payment_currency):
     """
-    Handles a lump-sum repayment for a specific debt type ('lent' or 'borrowed').
-    If the repayment is an overpayment, it logs the difference as interest.
+    Handles a lump-sum repayment, including cross-currency logic.
     """
     data = request.json
+    db = current_app.db
     if 'amount' not in data or 'type' not in data:
         return jsonify({'error': 'Repayment amount and type are required'}), 400
 
@@ -108,33 +116,60 @@ def record_lump_sum_repayment(person_name, currency):
         return jsonify({'error': "Invalid debt type, must be 'lent' or 'borrowed'"}), 400
 
     try:
-        repayment_amount = float(data['amount'])
-        if repayment_amount <= 0: return jsonify({'error': 'Amount must be a positive number'}), 400
+        payment_amount = float(data['amount']) # Amount in payment_currency
+        if payment_amount <= 0: return jsonify({'error': 'Amount must be a positive number'}), 400
     except (ValueError, TypeError):
         return jsonify({'error': 'Amount must be a number'}), 400
 
-    # --- FIX: Query now filters by debt_type to avoid ambiguity ---
+    # --- CROSS-CURRENCY LOGIC ---
+
+    # 1. Try to find debt matching the payment currency
     query_filter = {
         'person': re.compile(f'^{re.escape(person_name)}$', re.IGNORECASE),
-        'currency': currency,
+        'currency': payment_currency,
         'status': 'open',
         'type': debt_type
     }
-    debts_to_repay = list(current_app.db.debts.find(query_filter).sort('created_at', 1))
+    debts_to_process = list(db.debts.find(query_filter).sort('created_at', 1))
 
-    if not debts_to_repay:
-        return jsonify({'error': f'No open {debt_type} debts found for this person and currency'}), 404
+    debt_currency = payment_currency
+    converted_payment_amount = payment_amount
 
-    total_remaining = sum(d['remainingAmount'] for d in debts_to_repay)
+    # 2. If no matching debt, try to find debt in the *other* currency
+    if not debts_to_process:
+        alternate_currency = 'USD' if payment_currency == 'KHR' else 'KHR'
+        query_filter['currency'] = alternate_currency
+        alternate_debts = list(db.debts.find(query_filter).sort('created_at', 1))
+
+        if not alternate_debts:
+            return jsonify({'error': f'No open {debt_type} debts found for this person in any currency'}), 404
+
+        # 3. If alternate debt found, convert payment amount
+        debts_to_process = alternate_debts
+        debt_currency = alternate_currency # The currency of the debt
+        rate = get_db_rate(db)
+
+        if payment_currency == 'KHR' and debt_currency == 'USD':
+            # Payment is KHR, debt is USD. Convert payment to USD.
+            converted_payment_amount = payment_amount / rate
+        elif payment_currency == 'USD' and debt_currency == 'KHR':
+            # Payment is USD, debt is KHR. Convert payment to KHR.
+            converted_payment_amount = payment_amount * rate
+        else:
+            return jsonify({'error': 'Currency conversion error'}), 500
+
+    # --- REPAYMENT AND INTEREST LOGIC ---
+
+    total_remaining_debt = sum(d['remainingAmount'] for d in debts_to_process) # In debt_currency
     now_utc = datetime.now(UTC_TZ)
 
-    interest_amount = 0
-    amount_to_apply_to_debt = repayment_amount
+    interest_amount = 0 # In debt_currency
+    amount_to_apply_to_principal = converted_payment_amount # In debt_currency
 
-    # --- FIX: Handle overpayment based on debt_type ---
-    if repayment_amount > total_remaining + 0.001: # It's an overpayment
-        interest_amount = repayment_amount - total_remaining
-        amount_to_apply_to_debt = total_remaining # Only apply the exact debt amount to the debts
+    # Check for overpayment
+    if converted_payment_amount > total_remaining_debt + 0.001:
+        interest_amount = converted_payment_amount - total_remaining_debt
+        amount_to_apply_to_principal = total_remaining_debt
 
         # Create a new transaction for the interest
         if debt_type == 'lent':
@@ -149,21 +184,25 @@ def record_lump_sum_repayment(person_name, currency):
             interest_desc = f"Interest paid to {person_name}"
 
         interest_tx = {
-            "type": interest_tx_type, "amount": interest_amount, "currency": currency,
-            "categoryId": interest_category, "accountName": f"{currency} Account",
-            "description": interest_desc, "timestamp": now_utc
+            "type": interest_tx_type,
+            "amount": interest_amount, # The interest amount in the *debt's* currency
+            "currency": debt_currency, # The *debt's* currency
+            "categoryId": interest_category,
+            "accountName": f"{debt_currency} Account",
+            "description": interest_desc,
+            "timestamp": now_utc
         }
-        current_app.db.transactions.insert_one(interest_tx)
+        db.transactions.insert_one(interest_tx)
 
-    # Process the repayment for the debts (either the full or partial amount)
-    amount_left_to_apply = amount_to_apply_to_debt
-    for debt in debts_to_repay:
+    # 4. Apply principal repayment to the debts
+    amount_left_to_apply = amount_to_apply_to_principal
+    for debt in debts_to_process:
         if amount_left_to_apply <= 0: break
         repayment_for_this_debt = min(amount_left_to_apply, debt['remainingAmount'])
         new_remaining = debt['remainingAmount'] - repayment_for_this_debt
         new_status = 'settled' if new_remaining <= 0.001 else 'open'
 
-        current_app.db.debts.update_one(
+        db.debts.update_one(
             {'_id': debt['_id']},
             {
                 '$inc': {'remainingAmount': -repayment_for_this_debt},
@@ -173,24 +212,37 @@ def record_lump_sum_repayment(person_name, currency):
         )
         amount_left_to_apply -= repayment_for_this_debt
 
-    # Create the main transaction for the debt repayment portion
+    # 5. Create the main transaction for the *actual* cash flow
     tx_category = 'Debt Settled' if debt_type == 'lent' else 'Debt Repayment'
     tx_type = 'income' if debt_type == 'lent' else 'expense'
     tx_desc = f"Repayment from {person_name}" if debt_type == 'lent' else f"Repayment to {person_name}"
-    tx = {
-        "type": tx_type, "amount": amount_to_apply_to_debt, "currency": currency,
-        "categoryId": tx_category, "accountName": f"{currency} Account",
-        "description": tx_desc, "timestamp": now_utc
-    }
-    current_app.db.transactions.insert_one(tx)
 
-    # Craft the final success message
-    final_message = f"✅ Repayment of {repayment_amount:,.2f} {currency} recorded for {person_name}."
+    # This transaction logs what *actually* happened (e.g., +160,000 KHR)
+    tx = {
+        "type": tx_type,
+        "amount": payment_amount, # The original payment amount
+        "currency": payment_currency, # The original payment currency
+        "categoryId": tx_category,
+        "accountName": f"{payment_currency} Account",
+        "description": tx_desc,
+        "timestamp": now_utc
+    }
+    db.transactions.insert_one(tx)
+
+    # 6. Craft the final success message
+    payment_format = ",.0f" if payment_currency == 'KHR' else ",.2f"
+    debt_format = ",.0f" if debt_currency == 'KHR' else ",.2f"
+
+    final_message = f"✅ Repayment of {payment_amount:{payment_format}} {payment_currency} recorded for {person_name}."
+
+    if debt_currency != payment_currency:
+        final_message += f"\n(Converted to {converted_payment_amount:{debt_format}} {debt_currency} and applied to debt)."
+
     if interest_amount > 0:
         if debt_type == 'lent':
-            final_message += f"\nThe debt of {total_remaining:,.2f} {currency} is now settled. The extra {interest_amount:,.2f} {currency} was recorded as 'Loan Interest' income."
+            final_message += f"\nThe debt of {total_remaining_debt:{debt_format}} {debt_currency} is now settled. The extra {interest_amount:{debt_format}} {debt_currency} was recorded as 'Loan Interest' income."
         else:
-            final_message += f"\nThe debt of {total_remaining:,.2f} {currency} is now settled. The extra {interest_amount:,.2f} {currency} was recorded as 'Interest Expense'."
+            final_message += f"\nThe debt of {total_remaining_debt:{debt_format}} {debt_currency} is now settled. The extra {interest_amount:{debt_format}} {debt_currency} was recorded as 'Interest Expense'."
 
     return jsonify({'message': final_message})
 
