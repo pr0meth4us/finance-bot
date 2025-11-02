@@ -117,7 +117,7 @@ def search_type_keyboard():
         ],
         [InlineKeyboardButton("🌐 All Types", callback_data='search_type_all')],
     ]
-return InlineKeyboardMarkup(keyboard)
+    return InlineKeyboardMarkup(keyboard)
 
 
 def skip_keyboard(callback_data):
@@ -160,24 +160,24 @@ def iou_menu_keyboard():
 
 def iou_list_keyboard(grouped_debts):
     keyboard = []
-lent = [d for d in grouped_debts if d['type'] == 'lent']
-borrowed = [d for d in grouped_debts if d['type'] == 'borrowed']
+    lent = [d for d in grouped_debts if d['type'] == 'lent']
+    borrowed = [d for d in grouped_debts if d['type'] == 'borrowed']
 
-if lent:
-    for debt in lent:
-        amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
-        label = f"Owed by {debt['person']}: {debt['totalAmount']:{amount_format}} {debt['currency']} ({debt['count']})"
-        keyboard.append(
-            [InlineKeyboardButton(label, callback_data=f"iou:person:{debt['person']}:{debt['currency']}")])
-if borrowed:
-    for debt in borrowed:
-        amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
-        label = f"You owe {debt['person']}: {debt['totalAmount']:{amount_format}} {debt['currency']} ({debt['count']})"
-        keyboard.append(
-            [InlineKeyboardButton(label, callback_data=f"iou:person:{debt['person']}:{debt['currency']}")])
+    if lent:
+        for debt in lent:
+            amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
+            label = f"Owed by {debt['person']}: {debt['totalAmount']:{amount_format}} {debt['currency']} ({debt['count']})"
+            keyboard.append(
+                [InlineKeyboardButton(label, callback_data=f"iou:person:{debt['person']}:{debt['currency']}")])
+    if borrowed:
+        for debt in borrowed:
+            amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
+            label = f"You owe {debt['person']}: {debt['totalAmount']:{amount_format}} {debt['currency']} ({debt['count']})"
+            keyboard.append(
+                [InlineKeyboardButton(label, callback_data=f"iou:person:{debt['person']}:{debt['currency']}")])
 
-keyboard.append([InlineKeyboardButton("‹ Back", callback_data='iou_menu')])
-return InlineKeyboardMarkup(keyboard)
+    keyboard.append([InlineKeyboardButton("‹ Back", callback_data='iou_menu')])
+    return InlineKeyboardMarkup(keyboard)
 
 
 def iou_person_detail_keyboard(person_debts, person_name, currency):
@@ -190,10 +190,10 @@ def iou_person_detail_keyboard(person_debts, person_name, currency):
         amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
         label = f"{debt['remainingAmount']:{amount_format}} {debt['currency']} ({created_date}) - {purpose}"
         callback = f"iou:detail:{debt['_id']}:{person_name}:{currency}"
-    keyboard.append([InlineKeyboardButton(label, callback_data=callback)])
+        keyboard.append([InlineKeyboardButton(label, callback_data=callback)])
 
-keyboard.append([InlineKeyboardButton("‹ Back to Summary", callback_data='iou_view')])
-return InlineKeyboardMarkup(keyboard)
+    keyboard.append([InlineKeyboardButton("‹ Back to Summary", callback_data='iou_view')])
+    return InlineKeyboardMarkup(keyboard)
 
 
 def iou_detail_keyboard(debt_id, person_name, currency):
