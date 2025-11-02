@@ -146,7 +146,7 @@ report_conversation_handler = ConversationHandler(
         REPORT_ASK_START_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_report_start_date)],
         REPORT_ASK_END_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_report_end_date)],
     },
-    fallbacks=[CommandHandler('cancel', cancel)],
+    fallabacks=[CommandHandler('cancel', cancel)],
     per_message=False
 )
 

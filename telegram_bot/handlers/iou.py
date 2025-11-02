@@ -255,9 +255,10 @@ async def received_lump_repayment_amount(update: Update, context: ContextTypes.D
         await update.message.reply_text(base_text + summary_text, parse_mode='HTML',
                                         reply_markup=keyboards.main_menu_keyboard())
         # --- THIS IS THE FIX ---
-        # Always end the conversation, whether it's a success or an error.
+        # Always end the conversation, whether it's a success or a clear API error.
         return ConversationHandler.END
 
     except (ValueError, TypeError):
         await update.message.reply_text("Please enter a valid number for the repayment amount.")
-        return REPAY_LUMP_AMOUNT # Stay in the conversation if the input was invalid
+        # Stay in the conversation if the input was invalid (not a number)
+        return REPAY_LUMP_AMOUNT
