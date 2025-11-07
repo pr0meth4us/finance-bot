@@ -69,7 +69,7 @@ def main():
     app.add_handler(CallbackQueryHandler(manage_transaction, pattern='^manage_tx_'))
     app.add_handler(CallbackQueryHandler(delete_transaction_prompt, pattern='^delete_tx_'))
     app.add_handler(CallbackQueryHandler(delete_transaction_confirm, pattern='^confirm_delete_'))
-    app.add_handler(CallbackQueryHandler(get_current_rate, pattern='^get_rate$'))  # <-- NEW HANDLER
+    app.add_handler(CallbackQueryHandler(get_current_rate, pattern='^get_live_rate$'))  # <-- MODIFIED HANDLER
 
     app.add_handler(CallbackQueryHandler(iou_menu, pattern='^iou_menu$'))
     app.add_handler(CallbackQueryHandler(iou_view, pattern='^iou_view$'))

@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify, current_app
+from app.utils.currency import get_live_usd_to_khr_rate  # <-- NEW IMPORT
 
 settings_bp = Blueprint('settings', __name__, url_prefix='/settings')
 
@@ -23,15 +24,12 @@ def update_khr_rate():
     return jsonify({'message': f'Exchange rate updated to {new_rate}'})
 
 
-# --- NEW FUNCTION ---
 @settings_bp.route('/rate', methods=['GET'])
 def get_khr_rate():
-    """Fetches the currently stored KHR to USD exchange rate."""
-    settings = current_app.db.settings.find_one({'_id': 'config'})
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
+    """Fetches the current LIVE KHR to USD exchange rate."""
 
-    if settings and 'khr_to_usd_rate' in settings:
-        rate = float(settings['khr_to_usd_rate'])
-    else:
-        rate = 4100.0  # Default fallback
+    # Call the utility function that fetches the live rate
+    live_rate = get_live_usd_to_khr_rate()
 
-    return jsonify({'rate': rate})
+    return jsonify({'rate': live_rate})

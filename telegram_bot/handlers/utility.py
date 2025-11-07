@@ -25,7 +25,8 @@ PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 async def update_rate_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.message.reply_text("Please enter the new exchange rate for 1 USD to KHR (e.g., 4100).")
+    await query.message.reply_text(
+        "Please enter the new exchange rate for 1 USD to KHR (e.g., 4100). This will be used as a fallback if the live API fails.")
     return NEW_RATE
 
 
@@ -33,7 +34,7 @@ async def received_new_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         new_rate = float(update.message.text)
         if api_client.update_exchange_rate(new_rate):
-            await update.message.reply_text(f"✅ Exchange rate updated to {new_rate}",
+            await update.message.reply_text(f"✅ Fallback exchange rate updated to {new_rate}",
                                             reply_markup=keyboards.main_menu_keyboard())
         else:
             await update.message.reply_text("❌ Failed to update the rate.", reply_markup=keyboards.main_menu_keyboard())
@@ -46,17 +47,18 @@ async def received_new_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- NEW FUNCTION ---
 @restricted
 async def get_current_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Fetches and displays the current exchange rate."""
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
+    """Fetches and displays the current LIVE exchange rate."""
     query = update.callback_query
-    await query.answer("Fetching rate...")
+    await query.answer("Fetching live rate...")
 
     data = api_client.get_exchange_rate()
 
     if data and 'rate' in data:
         rate = data['rate']
-        text = f"📈 The current stored exchange rate is:\n<b>1 USD = {rate:,.0f} KHR</b>"
+        text = f"📈 The current **live** exchange rate is:\n<b>1 USD = {rate:,.0f} KHR</b>"
     else:
-        text = "❌ Could not fetch the current exchange rate."
+        text = "❌ Could not fetch the live exchange rate. Using fallback."
 
     await query.edit_message_text(
         text=text,

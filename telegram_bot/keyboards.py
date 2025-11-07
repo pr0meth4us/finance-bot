@@ -28,7 +28,7 @@ def main_menu_keyboard():
         # --- MODIFIED: Added 'Get Rate' button ---
         [
             InlineKeyboardButton("⚙️ Update Rate", callback_data='update_rate'),
-            InlineKeyboardButton("📊 Get Rate", callback_data='get_rate')
+            InlineKeyboardButton("📊 Get Live Rate", callback_data='get_live_rate')
         ],
         [InlineKeyboardButton("🤝 IOU / Debts", callback_data='iou_menu')],
     ]
