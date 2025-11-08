@@ -16,3 +16,4 @@ requests~=2.32.5
 pytz
 
 asteval~=1.0.6
+pandas
