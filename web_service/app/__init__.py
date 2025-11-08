@@ -255,22 +255,18 @@ def send_daily_reminder_job():
 # --- NEW DB CONNECTION FUNCTIONS ---
 
 def get_db():
-    """
-    Connects to the MongoDB database for the current application context.
-    """
     if 'db_client' not in g:
-
-        # --- THIS IS THE SECOND FIX ---
-        # Remove tlsCAFile to use system certificate store
+        uri = current_app.config['MONGODB_URI']
+        if 'tls=' not in uri:
+            sep = '&' if '?' in uri else '?'
+            uri = f"{uri}{sep}tls=true&tlsDisableOCSPEndpointCheck=true"
         g.db_client = MongoClient(
-            current_app.config['MONGODB_URI'],
-            tls=True
-            # tlsCAFile=certifi.where() <-- REMOVED
+            uri,
+            serverSelectionTimeoutMS=8000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=10000,
         )
-        # --- END FIX ---
-
         g.db = g.db_client[current_app.config['DB_NAME']]
-        print("✅ New MongoDB connection opened for this context.")
     return g.db
 
 
