@@ -72,6 +72,18 @@ def main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
 
 
 # --- NEW KEYBOARD ---
+def language_keyboard():
+    """Returns a keyboard for language selection."""
+    keyboard = [
+        [
+            InlineKeyboardButton("English 🇬🇧", callback_data='lang:en'),
+            InlineKeyboardButton("ភាសាខ្មែរ 🇰🇭", callback_data='lang:km')
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+# --- NEW KEYBOARD ---
 def report_actions_keyboard(start_date, end_date,
                             context: ContextTypes.DEFAULT_TYPE):
     """Keyboard shown after a report is generated."""

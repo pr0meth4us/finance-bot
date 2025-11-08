@@ -485,6 +485,22 @@ def complete_onboarding(user_id):
 # --- END NEW FUNCTION ---
 
 
+# --- NEW FUNCTION ---
+def update_language(user_id, lang):
+    """Updates the user's preferred language."""
+    try:
+        payload = {'user_id': user_id, 'language': lang}
+        res = requests.post(
+            f"{BASE_URL}/settings/language", json=payload, timeout=10
+        )
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        log.error(f"API Error updating language: {e}", exc_info=True)
+        return None
+# --- END NEW FUNCTION ---
+
+
 def add_category(user_id, cat_type, cat_name):
     """Adds a custom category for a user."""
     try:

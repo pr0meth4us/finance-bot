@@ -35,45 +35,39 @@ async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['user_profile'] = user_profile
     # --- END FIX ---
 
-    # Since this is the first interaction, we don't know the language.
-    # We will ask in English, then update.
-    # A more advanced flow might show a language picker first.
+    # --- MODIFICATION: ---
+    # 1. Ask for language (using "en" as the default for this first question)
+    # 2. Use the new language_keyboard()
+    # 3. Return ASK_LANGUAGE to wait for button press
+    # 4. Removed the "double throw" of asking for USD balance here
     await (update.message or update.callback_query.message).reply_text(
-        t("onboarding.welcome", context)
-        # For now, we skip language selection and default to 'en'
-        # reply_markup=keyboards.language_keyboard()
+        t("onboarding.welcome", context),
+        reply_markup=keyboards.language_keyboard()
     )
-
-    # Skipping language selection for now
-    await (update.message or update.callback_query.message).reply_text(
-        t("onboarding.ask_usd_balance", context)
-    )
-    return ASK_USD_BALANCE
-    # return ASK_LANGUAGE # Enable this when language selection is active
+    return ASK_LANGUAGE
 
 
 async def received_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Handles language selection.
+    Handles language selection from the callback buttons.
     """
-    # query = update.callback_query
-    # await query.answer()
-    # lang = query.data.split(':')[-1]
+    query = update.callback_query
+    await query.answer()
 
-    # For now, just using text
-    lang = update.message.text
-    if lang not in ['en', 'km']:
-        await update.message.reply_text(
-            t("onboarding.ask_language_fallback", context)
-        )
-        return ASK_LANGUAGE
+    lang = query.data.split(':')[-1]
+    user_id = context.user_data['user_profile']['_id']
 
-    # user_id = context.user_data['user_profile']['_id']
-    # api_client.update_user_setting(user_id, 'language', lang)
+    # Save to DB
+    api_client.update_language(user_id, lang)
+
+    # Save to local cache so the *next* message is translated
     context.user_data['user_profile']['settings']['language'] = lang
 
-    await update.message.reply_text(
-        t("onboarding.language_selected", context, lang=lang)
+    # --- MODIFICATION: ---
+    # Now that language is set, ask for USD balance.
+    # The t() function will now use the language (lang) we just set.
+    await query.edit_message_text(
+        t("onboarding.ask_usd_balance", context)
     )
     return ASK_USD_BALANCE
 
@@ -86,6 +80,7 @@ async def received_usd_balance(update: Update, context: ContextTypes.DEFAULT_TYP
 
         api_client.update_initial_balance(user_id, 'USD', amount)
 
+        # This message will be in the user's chosen language
         await update.message.reply_text(
             t("onboarding.usd_balance_set", context, amount=amount)
         )
@@ -141,13 +136,10 @@ onboarding_conversation_handler = ConversationHandler(
         # This handler is entered programmatically by the decorator
     ],
     states={
-        # ASK_LANGUAGE: [
-        #     CallbackQueryHandler(received_language, pattern='^lang:')
-        # ],
-        # Temp: Use text for language
-        ASK_LANGUAGE: [MessageHandler(
-            filters.TEXT & ~filters.COMMAND, received_language
-        )],
+        # --- MODIFICATION: Changed from MessageHandler to CallbackQueryHandler ---
+        ASK_LANGUAGE: [
+            CallbackQueryHandler(received_language, pattern='^lang:')
+        ],
         ASK_USD_BALANCE: [MessageHandler(
             filters.TEXT & ~filters.COMMAND, received_usd_balance
         )],
