@@ -1,41 +1,102 @@
-from flask import Blueprint, request, jsonify, current_app
-import hmac
-import hashlib
-import json
+# --- Start of new file: web_service/app/auth/routes.py ---
+
+from flask import Blueprint, request, jsonify
+from datetime import datetime
+from bson import ObjectId
+from app import get_db
+from zoneinfo import ZoneInfo
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
+UTC_TZ = ZoneInfo("UTC")
 
-@auth_bp.route('/verify-telegram', methods=['POST'])
-def verify_telegram_auth():
-    """Verifies the authentication data received from the Telegram Login Widget."""
-    user_data = request.json
+# --- Your hardcoded Admin configuration ---
+ADMIN_TELEGRAM_ID = "1836585300"
+ADMIN_REMINDER_CHAT_ID = "-1003192465072"
+ADMIN_REPORT_CHAT_ID = "-4876783109"
 
-    if 'hash' not in user_data:
-        return jsonify({'error': 'Hash not found in user data'}), 400
+def get_default_settings_for_user(telegram_id):
+    """
+    Generates the default user profile document.
+    Grants admin privileges and chat IDs if the user is the hardcoded admin.
+    """
+    is_admin = str(telegram_id) == ADMIN_TELEGRAM_ID
 
-    # Get required environment variables
-    bot_token = current_app.config.get('TELEGRAM_TOKEN')
-    allowed_user_id = current_app.config.get('ALLOWED_USER_ID')
+    if is_admin:
+        return {
+            "name": "Admin",
+            "role": "admin",
+            "subscription_status": "active", # Admins are always active
+            "settings": {
+                "language": "en",
+                "rate_preference": "live", # 'live' or 'fixed'
+                "fixed_rate": 4100,
+                "reminder_chat_id": ADMIN_REMINDER_CHAT_ID,
+                "report_chat_id": ADMIN_REPORT_CHAT_ID
+            }
+        }
+    else:
+        # Default for a new, non-admin user
+        return {
+            "name": "New User",
+            "role": "user",
+            "subscription_status": "inactive", # Default to inactive until they subscribe
+            "settings": {
+                "language": "en",
+                "rate_preference": "live",
+                "fixed_rate": 4100,
+                "reminder_chat_id": None, # Must be set by an admin
+                "report_chat_id": None   # Must be set by an admin
+            }
+        }
 
-    if not bot_token or not allowed_user_id:
-        return jsonify({'error': 'Server configuration missing for authentication'}), 500
+def serialize_user(user):
+    """Serializes user document for JSON, converting ObjectId."""
+    if '_id' in user:
+        user['_id'] = str(user['_id'])
+    return user
 
-    received_hash = user_data.pop('hash')
+@auth_bp.route('/find_or_create', methods=['POST'])
+def find_or_create_user():
+    """
+    This is the primary authentication endpoint for the bot.
+    It finds a user by their telegram_id or creates them if they don't exist.
+    """
+    db = get_db()
+    data = request.json
+    telegram_user_id = data.get('telegram_user_id')
 
-    # Create the data-check-string
-    sorted_items = sorted(user_data.items())
-    data_check_string = "\n".join([f"{k}={v}" for k, v in sorted_items])
+    if not telegram_user_id:
+        return jsonify({"error": "telegram_user_id is required"}), 400
 
-    # Verify the hash
-    secret_key = hashlib.sha256(bot_token.encode()).digest()
-    calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    # Ensure telegram_user_id is a string for consistent lookups
+    telegram_user_id = str(telegram_user_id)
 
-    if calculated_hash != received_hash:
-        return jsonify({'error': 'Hash verification failed'}), 403
+    user = db.users.find_one({"telegram_user_id": telegram_user_id})
 
-    # If hash is valid, check if the user is the allowed user
-    if str(user_data.get('id')) != allowed_user_id:
-        return jsonify({'error': 'User not authorized'}), 403
+    if not user:
+        # User doesn't exist, create them
+        default_profile = get_default_settings_for_user(telegram_user_id)
 
-    # If both checks pass, the user is authenticated
-    return jsonify({'status': 'ok', 'message': 'User authenticated successfully'})
+        new_user_doc = {
+            "telegram_user_id": telegram_user_id,
+            "created_at": datetime.now(UTC_TZ),
+            **default_profile
+        }
+
+        result = db.users.insert_one(new_user_doc)
+        user = db.users.find_one({"_id": result.inserted_id})
+
+        # This is their first time, flag for onboarding
+        user['is_new_user'] = True
+
+    if not user:
+        return jsonify({"error": "Failed to find or create user"}), 500
+
+    # Check subscription status (admins are always active)
+    if user['role'] != 'admin' and user['subscription_status'] != 'active':
+        return jsonify({
+            "error": "Subscription not active. Please subscribe to use this bot."
+        }), 403 # Forbidden
+
+    return jsonify(serialize_user(user))
+# --- End of new file ---

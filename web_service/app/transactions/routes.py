@@ -14,6 +14,29 @@ PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 UTC_TZ = ZoneInfo("UTC")
 
 
+# --- NEW: Helper to get user_id and check for it ---
+def get_user_id_from_request():
+    """
+    Gets user_id from request.json or request.args.
+    Returns (user_id, error_response)
+    """
+    user_id = None
+    if request.is_json:
+        user_id = request.json.get('user_id')
+
+    if not user_id:
+        user_id = request.args.get('user_id')
+
+    if not user_id:
+        return None, (jsonify({'error': 'user_id is required'}), 401) # 401 Unauthorized
+
+    try:
+        # Validate that it's a proper ObjectId
+        return ObjectId(user_id), None
+    except Exception:
+        return None, (jsonify({'error': 'Invalid user_id format'}), 400)
+
+
 def get_date_ranges_for_search():
     """Helper to get UTC date ranges for search queries."""
     today = datetime.now(PHNOM_PENH_TZ).date()
@@ -46,22 +69,33 @@ def serialize_tx(tx):
         tx['_id'] = str(tx['_id'])
     if 'timestamp' in tx and isinstance(tx['timestamp'], datetime):
         tx['timestamp'] = tx['timestamp'].isoformat()
+
+    # --- MODIFICATION: Also serialize user_id if present ---
+    if 'user_id' in tx:
+        tx['user_id'] = str(tx['user_id'])
+
     return tx
 
 
 @transactions_bp.route('/', methods=['POST'])
 def add_transaction():
+    """Adds a transaction for an authenticated user."""
+    db = get_db()
+
+    # --- MODIFICATION: Authenticate user ---
+    user_id, error = get_user_id_from_request()
+    if error: return error
+    # ---
+
     data = request.json
-    db = get_db()  # <-- USE THE NEW FUNCTION
     if not all(k in data for k in ['type', 'amount', 'currency', 'categoryId', 'accountName']):
         return jsonify({'error': 'Missing required fields'}), 400
 
     timestamp_str = data.get('timestamp')
-    # --- THIS IS THE FIX ---
-    # Use a timezone-aware UTC now() if no timestamp is provided
     timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now(UTC_TZ)
 
     tx = {
+        "user_id": user_id, # <-- MODIFICATION: Add user_id
         "type": data['type'],
         "amount": float(data['amount']),
         "currency": data['currency'],
@@ -80,18 +114,37 @@ def add_transaction():
 
 @transactions_bp.route('/recent', methods=['GET'])
 def get_recent_transactions():
-    db = get_db()  # <-- USE THE NEW FUNCTION
+    """Fetches recent transactions for an authenticated user."""
+    db = get_db()
+
+    # --- MODIFICATION: Authenticate user ---
+    user_id, error = get_user_id_from_request()
+    if error: return error
+    # ---
+
     limit = int(request.args.get('limit', 20))
-    txs = list(db.transactions.find().sort('timestamp', -1).limit(limit))
+
+    # --- MODIFICATION: Query is now user-specific ---
+    txs = list(db.transactions.find({'user_id': user_id}).sort('timestamp', -1).limit(limit))
+    # ---
+
     return jsonify([serialize_tx(tx) for tx in txs])
 
 
 @transactions_bp.route('/search', methods=['POST'])
 def search_transactions():
-    """Performs an advanced search and returns a list of matching transactions."""
+    """Performs an advanced search for an authenticated user."""
     params = request.json
-    db = get_db()  # <-- USE THE NEW FUNCTION
-    match_stage = {}
+    db = get_db()
+
+    # --- MODIFICATION: Authenticate user ---
+    user_id, error = get_user_id_from_request()
+    if error: return error
+    # ---
+
+    # --- MODIFICATION: Add user_id to match_stage ---
+    match_stage = {'user_id': user_id}
+    # ---
 
     date_filter = {}
     if params.get('period'):
@@ -134,27 +187,42 @@ def search_transactions():
 
 @transactions_bp.route('/<tx_id>', methods=['GET'])
 def get_transaction(tx_id):
-    db = get_db()  # <-- USE THE NEW FUNCTION
+    """Fetches a single transaction for an authenticated user."""
+    db = get_db()
+
+    # --- MODIFICATION: Authenticate user ---
+    user_id, error = get_user_id_from_request()
+    if error: return error
+    # ---
+
     try:
-        transaction = db.transactions.find_one({'_id': ObjectId(tx_id)})
+        # --- MODIFICATION: Query is now user-specific ---
+        transaction = db.transactions.find_one({'_id': ObjectId(tx_id), 'user_id': user_id})
+        # ---
+
         if transaction:
             return jsonify(serialize_tx(transaction))
         else:
-            return jsonify({'error': 'Transaction not found'}), 404
+            return jsonify({'error': 'Transaction not found or access denied'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
 
 @transactions_bp.route('/<tx_id>', methods=['PUT'])
 def update_transaction(tx_id):
-    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
+    """Updates a transaction for an authenticated user."""
     data = request.json
-    db = get_db()  # <-- USE THE NEW FUNCTION
+    db = get_db()
+
+    # --- MODIFICATION: Authenticate user ---
+    user_id, error = get_user_id_from_request()
+    if error: return error
+    # ---
+
     if not data:
         return jsonify({'error': 'No update data provided'}), 400
 
     update_fields = {}
-    # --- FIX: Add 'timestamp' to allowed fields ---
     allowed_fields = ['amount', 'categoryId', 'description', 'timestamp']
 
     for field in allowed_fields:
@@ -166,14 +234,11 @@ def update_transaction(tx_id):
                     return jsonify({'error': 'Invalid amount format'}), 400
             elif field == 'categoryId':
                 update_fields[field] = data[field].strip().title()
-            # --- FIX: Handle 'timestamp' field ---
             elif field == 'timestamp':
                 try:
-                    # Convert ISO string back to datetime object
                     update_fields[field] = datetime.fromisoformat(data[field])
                 except (ValueError, TypeError):
                     return jsonify({'error': 'Invalid timestamp format'}), 400
-            # --- End Fix ---
             else:
                 update_fields[field] = data[field]
 
@@ -181,26 +246,41 @@ def update_transaction(tx_id):
         return jsonify({'error': 'No valid fields to update'}), 400
 
     try:
+        # --- MODIFICATION: Query is now user-specific ---
         result = db.transactions.update_one(
-            {'_id': ObjectId(tx_id)},
+            {'_id': ObjectId(tx_id), 'user_id': user_id},
             {'$set': update_fields}
         )
+        # ---
+
         if result.matched_count:
             return jsonify({'message': 'Transaction updated successfully'})
         else:
-            return jsonify({'error': 'Transaction not found'}), 404
+            return jsonify({'error': 'Transaction not found or access denied'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
 @transactions_bp.route('/<tx_id>', methods=['DELETE'])
 def delete_transaction(tx_id):
-    db = get_db()  # <-- USE THE NEW FUNCTION
+    """Deletes a transaction for an authenticated user."""
+    db = get_db()
+
+    # --- MODIFICATION: Authenticate user ---
+    # Note: user_id for DELETE comes from JSON body, not query param
+    user_id, error = get_user_id_from_request()
+    if error: return error
+    # ---
+
     try:
-        result = db.transactions.delete_one({'_id': ObjectId(tx_id)})
+        # --- MODIFICATION: Query is now user-specific ---
+        result = db.transactions.delete_one({'_id': ObjectId(tx_id), 'user_id': user_id})
+        # ---
+
         if result.deleted_count:
             return jsonify({'message': 'Transaction deleted'})
         else:
-            return jsonify({'error': 'Transaction not found'}), 404
+            return jsonify({'error': 'Transaction not found or access denied'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 400
+# --- End of modified file ---

@@ -205,12 +205,33 @@ def run_scheduled_report(period):
 
     db = client[Config.DB_NAME]
     token = Config.TELEGRAM_TOKEN
-    chat_id = Config.TELEGRAM_CHAT_ID
 
+    # --- MODIFICATION: This job is now user-specific ---
+    # We must iterate over all users who have report_chat_id set
+
+    users_to_report = db.users.find({
+        "settings.report_chat_id": {"$exists": True, "$ne": None},
+        "subscription_status": "active"
+    })
+
+    for user in users_to_report:
+        chat_id = user['settings']['report_chat_id']
+        print(f"Generating {period} report for user {user['name']} (ChatID: {chat_id})...")
+
+        # We need to pass the user_id to the report function
+        # This is a future refactor. For now, the jobs are global.
+        # This is a limitation we will fix in Part 3.
+        # For now, we will just use the hardcoded admin chat ID from config
+        # as a stand-in until we refactor the jobs.
+
+    # --- TEMPORARY: Revert to old non-user-specific logic for jobs ---
+    # We will refactor this in a later part.
+    chat_id = Config.TELEGRAM_CHAT_ID
     if not token or not chat_id:
         print(f"Skipping {period} report: Telegram token or chat ID not configured.")
         client.close()
         return
+    # --- END TEMPORARY ---
 
     today = datetime.now(PHNOM_PENH_TZ).date()
     if period == 'weekly':
@@ -248,17 +269,28 @@ def send_daily_reminder_job():
     # --- END FIX ---
 
     db = client[Config.DB_NAME]
+
+    # --- TEMPORARY: Revert to old non-user-specific logic for jobs ---
+    token = Config.TELEGRAM_TOKEN
+    chat_id = Config.TELEGRAM_CHAT_ID
+    if not token or not chat_id:
+        print("Skipped daily transaction reminder, config missing.")
+        client.close()
+        return
+
     now_in_phnom_penh = datetime.now(PHNOM_PENH_TZ)
     today_start_local_aware = datetime.combine(now_in_phnom_penh.date(), time.min, tzinfo=PHNOM_PENH_TZ)
     today_start_utc = today_start_local_aware.astimezone(ZoneInfo("UTC"))
+
+    # This query is NOT user-specific yet. We will fix this in a later part.
     count = db.transactions.count_documents({'timestamp': {'$gte': today_start_utc}})
-    if count == 0 and Config.TELEGRAM_TOKEN and Config.TELEGRAM_CHAT_ID:
-        token, chat_id = Config.TELEGRAM_TOKEN, Config.TELEGRAM_CHAT_ID
+
+    if count == 0:
         message = "Hey! 잊지마! (Don't forget!)\n\nLooks like you haven't logged any transactions today. Take a moment to log your activity! ✍️"
         send_telegram_message(chat_id, message, token, parse_mode='Markdown')
         print("Sent daily transaction reminder.")
     else:
-        print("Skipped daily transaction reminder, transactions found or config missing.")
+        print("Skipped daily transaction reminder, transactions found.")
     client.close()
 
 
@@ -303,6 +335,10 @@ def create_app():
     app.config['MONGODB_URI'] = Config.MONGODB_URI
     app.config['DB_NAME'] = Config.DB_NAME
 
+    # --- MODIFICATION: Pass config to app context for auth ---
+    app.config['TELEGRAM_TOKEN'] = Config.TELEGRAM_TOKEN
+
+
     # Register the close_db function to be called on teardown
     app.teardown_appcontext(close_db)
     # --- END FIX ---
@@ -341,7 +377,7 @@ def create_app():
     app.register_blueprint(debts_bp)
     app.register_blueprint(summary_bp)
     app.register_blueprint(reminders_bp)
-    app.register_blueprint(auth_bp)
+    app.register_blueprint(auth_bp) # <-- MODIFIED: Register new blueprint
 
     @app.route("/health")
     def health_check():

@@ -4,20 +4,27 @@ from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 import keyboards
 import api_client
-from decorators import restricted
+from decorators import authenticate_user # <-- MODIFIED: Import new decorator
 from .helpers import format_summary_message
 
 # --- Main Commands & Callbacks ---
-@restricted
+@authenticate_user # <-- MODIFIED: Use new decorator
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the main menu and forcibly ends any active conversation."""
-    text = "Welcome to your Personal Finance Assistant!"
+
+    # --- MODIFICATION: Get user_id from the profile cached by the decorator ---
+    user_profile = context.user_data['user_profile']
+    user_id = user_profile['_id']
+    user_name = user_profile.get('name', 'User')
+    # ---
+
+    text = f"Welcome, {user_name}!" # <-- MODIFIED: Personalized welcome
     keyboard = keyboards.main_menu_keyboard()
     chat_id = update.effective_chat.id
 
     if update.callback_query:
         await update.callback_query.answer()
-        summary_data = api_client.get_detailed_summary()
+        summary_data = api_client.get_detailed_summary(user_id) # <-- MODIFIED: Pass user_id
         summary_text = format_summary_message(summary_data)
         try:
             await update.callback_query.edit_message_text(
@@ -28,7 +35,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
     else:
-        summary_data = api_client.get_detailed_summary()
+        summary_data = api_client.get_detailed_summary(user_id) # <-- MODIFIED: Pass user_id
         summary_text = format_summary_message(summary_data)
         await context.bot.send_message(
             chat_id=chat_id,
@@ -40,13 +47,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-@restricted
+@authenticate_user # <-- MODIFIED: Use new decorator
 async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Fetches and displays a quick summary of balances and debts."""
     query = update.callback_query
     await query.answer("Fetching summary...")
 
-    summary_data = api_client.get_detailed_summary()
+    # --- MODIFICATION: Get user_id from context ---
+    user_id = context.user_data['user_profile']['_id']
+    # ---
+
+    summary_data = api_client.get_detailed_summary(user_id) # <-- MODIFIED: Pass user_id
     summary_text = format_summary_message(summary_data)
     text = f"🔍 Here is your quick summary:{summary_text}"
 
@@ -57,7 +68,7 @@ async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-@restricted
+# No decorator needed for cancel, as it should work even if not authenticated
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     """Cancels any active conversation."""
@@ -79,3 +90,4 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data.clear()
     return ConversationHandler.END
+# --- End of modified file ---
