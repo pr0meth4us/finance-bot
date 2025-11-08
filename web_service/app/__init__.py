@@ -187,7 +187,12 @@ def _send_report_job(period_name, start_date, end_date, db, token, chat_id):
 def run_scheduled_report(period):
     """Main function called by scheduler to run a report for a given period."""
     print(f"Running {period} scheduled report job...")
-    client = MongoClient(Config.MONGODB_URI, tls=True, tlsCAFile=certifi.where())
+
+    # --- THIS IS THE FIRST FIX ---
+    # Remove tlsCAFile to use system certificate store
+    client = MongoClient(Config.MONGODB_URI, tls=True)
+    # --- END FIX ---
+
     db = client[Config.DB_NAME]
     token = Config.TELEGRAM_TOKEN
     chat_id = Config.TELEGRAM_CHAT_ID
@@ -226,7 +231,12 @@ def run_scheduled_report(period):
 
 def send_daily_reminder_job():
     # This job is different, so it keeps its own logic
-    client = MongoClient(Config.MONGODB_URI, tls=True, tlsCAFile=certifi.where())
+
+    # --- THIS IS A FIX (though not related to the crash) ---
+    # We should also remove tlsCAFile from here
+    client = MongoClient(Config.MONGODB_URI, tls=True)
+    # --- END FIX ---
+
     db = client[Config.DB_NAME]
     now_in_phnom_penh = datetime.now(PHNOM_PENH_TZ)
     today_start_local_aware = datetime.combine(now_in_phnom_penh.date(), time.min, tzinfo=PHNOM_PENH_TZ)
@@ -249,11 +259,16 @@ def get_db():
     Connects to the MongoDB database for the current application context.
     """
     if 'db_client' not in g:
+
+        # --- THIS IS THE SECOND FIX ---
+        # Remove tlsCAFile to use system certificate store
         g.db_client = MongoClient(
             current_app.config['MONGODB_URI'],
-            tls=True,
-            tlsCAFile=certifi.where()
+            tls=True
+            # tlsCAFile=certifi.where() <-- REMOVED
         )
+        # --- END FIX ---
+
         g.db = g.db_client[current_app.config['DB_NAME']]
         print("✅ New MongoDB connection opened for this context.")
     return g.db
