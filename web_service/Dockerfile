@@ -5,24 +5,25 @@ FROM python:3.11-slim
 ENV TZ=Asia/Phnom_Penh
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# Set the working directory in the container
+# Set the working directory inside the container
 WORKDIR /app
 
-# --- FIX 1: Add Python Path ---
-# Add the working directory to the Python path to find modules like 'utils'
-ENV PYTHONPATH=/app
-
-# --- FIX 2: Correct requirements.txt path ---
-# Copy the requirements file from the build context (project root)
+# Copy the requirements file from the repository root
 COPY requirements.txt .
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# --- FIX 3: Correct code copy path ---
-# Copy only the contents of the 'telegram_bot' directory
-# (from the build context) into the container's /app directory
-COPY ./telegram_bot .
+# Copy the web_service directory contents to /app
+COPY web_service/ .
 
-# Define the command to run your bot
-CMD ["python", "bot.py"]
+# Make port 8000 available to the world outside this container
+EXPOSE 8000
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV FLASK_APP=run.py
+
+# Run the application using the run.py file directly
+CMD ["python", "run.py"]
+
