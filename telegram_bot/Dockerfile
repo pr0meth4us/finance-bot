@@ -8,17 +8,21 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 # Set the working directory in the container
 WORKDIR /app
 
-# --- THIS IS THE FIX ---
 # Explicitly add the working directory to the Python path
+# This ensures modules like 'utils' can be found
 ENV PYTHONPATH=/app
-# --- END FIX ---
 
 # Copy the requirements file first for caching
+# This assumes you run 'docker build .' from WITHIN the 'telegram_bot' directory
 COPY ../requirements.txt .
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy only the contents of the telegram_bot directory into the container's /app directory
-COPY ./telegram_bot .
+# --- THIS IS THE FIX ---
+# Copy the contents of the current directory (the build context)
+# into the container's /app directory
+COPY . .
+# --- END FIX ---
+
 # Define the command to run your bot
 CMD ["python", "bot.py"]
