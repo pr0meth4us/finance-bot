@@ -19,6 +19,16 @@ FINANCIAL_TRANSACTION_CATEGORIES = [
     'Loan Lent', 'Debt Repayment', 'Loan Received', 'Debt Settled', 'Initial Balance'
 ]
 
+# --- Default Connection Arguments ---
+# Use these for ALL client instances
+MONGO_CONNECTION_ARGS = {
+    "tls": True,
+    "tlsDisableOCSPEndpointCheck": True,
+    "serverSelectionTimeoutMS": 8000,
+    "connectTimeoutMS": 5000,
+    "socketTimeoutMS": 10000,
+}
+
 
 # --- HELPER FUNCTIONS FOR SCHEDULED JOBS (No changes here) ---
 
@@ -169,7 +179,7 @@ def create_pie_chart_from_data(data, start_date, end_date):
     return buf.getvalue()
 
 
-# --- SCHEDULED JOB DEFINITIONS (No changes here) ---
+# --- SCHEDULED JOB DEFINITIONS (Modified) ---
 def _send_report_job(period_name, start_date, end_date, db, token, chat_id):
     """Generic helper to generate and send a report."""
     report_data = get_report_data(start_date, end_date, db)
@@ -188,9 +198,9 @@ def run_scheduled_report(period):
     """Main function called by scheduler to run a report for a given period."""
     print(f"Running {period} scheduled report job...")
 
-    # --- THIS IS THE FIRST FIX ---
-    # Remove tlsCAFile to use system certificate store
-    client = MongoClient(Config.MONGODB_URI, tls=True)
+    # --- THIS IS THE FIX ---
+    # Use the robust connection arguments for the background job
+    client = MongoClient(Config.MONGODB_URI, **MONGO_CONNECTION_ARGS)
     # --- END FIX ---
 
     db = client[Config.DB_NAME]
@@ -232,9 +242,9 @@ def run_scheduled_report(period):
 def send_daily_reminder_job():
     # This job is different, so it keeps its own logic
 
-    # --- THIS IS A FIX (though not related to the crash) ---
-    # We should also remove tlsCAFile from here
-    client = MongoClient(Config.MONGODB_URI, tls=True)
+    # --- THIS IS THE FIX ---
+    # Use the robust connection arguments for the background job
+    client = MongoClient(Config.MONGODB_URI, **MONGO_CONNECTION_ARGS)
     # --- END FIX ---
 
     db = client[Config.DB_NAME]
@@ -252,20 +262,21 @@ def send_daily_reminder_job():
     client.close()
 
 
-# --- NEW DB CONNECTION FUNCTIONS ---
+# --- NEW DB CONNECTION FUNCTIONS (Modified) ---
 
 def get_db():
     if 'db_client' not in g:
         uri = current_app.config['MONGODB_URI']
-        if 'tls=' not in uri:
-            sep = '&' if '?' in uri else '?'
-            uri = f"{uri}{sep}tls=true&tlsDisableOCSPEndpointCheck=true"
+
+        # --- THIS IS THE FIX ---
+        # Don't manipulate the URI string.
+        # Pass connection arguments directly to the constructor.
         g.db_client = MongoClient(
             uri,
-            serverSelectionTimeoutMS=8000,
-            connectTimeoutMS=5000,
-            socketTimeoutMS=10000,
+            **MONGO_CONNECTION_ARGS
         )
+        # --- END FIX ---
+
         g.db = g.db_client[current_app.config['DB_NAME']]
     return g.db
 
