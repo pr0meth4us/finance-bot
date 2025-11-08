@@ -12,14 +12,12 @@ BASE_URL = os.getenv("WEB_SERVICE_URL")
 # api_client.py
 def find_or_create_user(telegram_id):
     try:
-        data = {'telegram_user_id': str(telegram_id)}
+        data = {"telegram_user_id": str(telegram_id)}
         res = requests.post(f"{BASE_URL}/auth/find_or_create", json=data, timeout=10)
-        # Try to parse JSON even on non-2xx so we can relay details
         if res.status_code == 200:
             return res.json()
         if res.status_code == 403:
-            return res.json()  # { "error": "...subscription inactive..." }
-        # Log body for diagnostics (502, 500, 404, etc.)
+            return res.json()
         print(f"[AUTH] HTTP {res.status_code}: {res.text}")
         return {"error": f"Auth API error ({res.status_code})"}
     except requests.exceptions.RequestException as e:
