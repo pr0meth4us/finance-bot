@@ -29,8 +29,11 @@ def authenticate_user(func):
                 return ConversationHandler.END
             context.user_data["user_profile"] = profile
 
+        # --- THIS IS THE FIX ---
         # Onboarding redirect for first-time users
-        if context.user_data["user_profile"].get("is_new_user"):
+        # Checks the persistent 'onboarding_complete' flag from the DB
+        if not context.user_data["user_profile"].get("onboarding_complete"):
+            # --- END FIX ---
             # Only start onboarding if we're not already inside it
             if func.__name__ not in [
                 "onboarding_start", "received_language",
@@ -48,3 +51,4 @@ def authenticate_user(func):
         return await func(update, context, *args, **kwargs)
 
     return wrapped
+

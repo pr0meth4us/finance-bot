@@ -106,20 +106,20 @@ def find_or_create_user():
         new_user_doc = {
             "telegram_user_id": telegram_user_id,
             "created_at": datetime.now(UTC_TZ),
+            "onboarding_complete": False,  # <-- THIS IS THE FIX
             **default_profile
         }
 
         result = db.users.insert_one(new_user_doc)
         user = db.users.find_one({"_id": result.inserted_id})
-        user['is_new_user'] = True
+        # REMOVED: user['is_new_user'] = True (this was the bug)
 
     if not user:
         return jsonify({"error": "Failed to find or create user"}), 500
 
     if user['role'] != 'admin' and user['subscription_status'] != 'active':
         return jsonify({
-            "error": "Subscription not active. "
-                     "Please subscribe to use this bot."
+            "error": "Subscription not active. Please subscribe to use this bot."
         }), 403
 
     return jsonify(serialize_user(user))

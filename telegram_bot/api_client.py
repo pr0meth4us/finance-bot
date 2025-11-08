@@ -457,6 +457,22 @@ def update_initial_balance(user_id, currency, amount):
         return None
 
 
+# --- NEW FUNCTION ---
+def complete_onboarding(user_id):
+    """Marks the user's onboarding as complete."""
+    try:
+        payload = {'user_id': user_id}
+        res = requests.post(
+            f"{BASE_URL}/settings/complete_onboarding", json=payload, timeout=10
+        )
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error completing onboarding: {e}")
+        return None
+# --- END NEW FUNCTION ---
+
+
 def add_category(user_id, cat_type, cat_name):
     """Adds a custom category for a user."""
     try:

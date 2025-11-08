@@ -28,7 +28,9 @@ MONGO_CONNECTION_ARGS = {
     "serverSelectionTimeoutMS": 8000,
     "connectTimeoutMS": 5000,
     "socketTimeoutMS": 10000,
+    "tlsCAFile": certifi.where(),      # <-- ADD THIS LINE
 }
+
 
 
 # --- HELPER FUNCTIONS FOR SCHEDULED JOBS (No changes here) ---

@@ -184,4 +184,25 @@ def get_khr_rate():
     live_rate = get_live_usd_to_khr_rate()
     return jsonify({'rate': live_rate, 'source': 'live'})
 
+
+# --- NEW ENDPOINT ---
+@settings_bp.route('/complete_onboarding', methods=['POST'])
+def complete_onboarding():
+    """Marks the user's onboarding as complete."""
+    db = get_db()
+    user_id, error = get_user_id_from_request()
+    if error:
+        return error
+
+    result = db.users.update_one(
+        {'_id': user_id},
+        {'$set': {'onboarding_complete': True}}
+    )
+
+    if result.matched_count == 0:
+        return jsonify({'error': 'User not found'}), 404
+
+    return jsonify({'message': 'Onboarding complete.'})
+# --- END NEW ENDPOINT ---
+
 # --- End of file ---

@@ -12,7 +12,7 @@ from telegram.ext import (
 import api_client
 import keyboards
 # from .common import start  <-- REMOVED TO FIX CIRCULAR IMPORT
-from utils.i18n import t  # <-- THIS IS THE FIX
+from utils.i18n import t
 
 # Conversation states
 (
@@ -115,7 +115,11 @@ async def received_khr_balance(update: Update, context: ContextTypes.DEFAULT_TYP
             t("onboarding.khr_balance_set", context, amount=amount)
         )
 
-        context.user_data['user_profile']['is_new_user'] = False
+        # --- THIS IS THE FIX ---
+        # Mark onboarding as complete in the DB and local cache
+        api_client.complete_onboarding(user_id)
+        context.user_data['user_profile']['onboarding_complete'] = True
+        # --- END FIX ---
 
         await update.message.reply_text(
             t("onboarding.setup_complete", context)
