@@ -31,10 +31,6 @@ COMMAND_MAP = {
     'salary': {'categoryId': 'Salary', 'description': 'Salary', 'type': 'income'}, 'bonus': {'categoryId': 'Bonus', 'description': 'Bonus', 'type': 'income'}, 'commission': {'categoryId': 'Commission', 'description': 'Commission', 'type': 'income'}, 'allowance': {'categoryId': 'Allowance', 'description': 'Allowance', 'type': 'income'}, 'gift': {'categoryId': 'Gift', 'description': 'Gift', 'type': 'income'},
 }
 
-# --- Regex for category buttons ---
-CAT_REGEX = '^(🍔 Food|🍹 Drink|🚗 Transport|🛍️ Shopping|🧾 Bills|💡 Utilities|🎬 Entertainment|🧴 Personal Care|💼 Work|🍺 Alcohol|🤝 For Others|💊 Health|📈 Investment|❓ Forgot|📝 Other|💼 Salary|📈 Bonus|💻 Freelance|📊 Commission|💸 Allowance|🎁 Gift)$'
-
-
 def parse_amount_and_currency(amount_str: str):
     amount_str = amount_str.lower()
     if 'khr' in amount_str:
@@ -207,6 +203,7 @@ async def handle_repayment(update: Update, args, debt_type: str):
     except Exception as e:
         logger.error(f"Error in handle_repayment: {e}", exc_info=True)
         base_text = "⚠️ Invalid format for repayment command."
+
     summary_text = format_summary_message(api_client.get_detailed_summary())
     await update.message.reply_text(base_text + summary_text, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
 
@@ -282,6 +279,7 @@ async def unified_message_router(update: Update, context: ContextTypes.DEFAULT_T
         elif debt_data:
             response = api_client.add_debt(debt_data)
             if not response: base_text = "❌ Failed to save record."
+
         if (tx_data or debt_data) and base_text:
             summary_text = format_summary_message(api_client.get_detailed_summary())
             await update.message.reply_text(base_text + summary_text, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
@@ -338,21 +336,19 @@ async def unknown_command_entry_point(update: Update, context: ContextTypes.DEFA
         return ConversationHandler.END
 
 async def received_category_for_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    category = update.message.text
+    query = update.callback_query
+    await query.answer()
+    category = query.data.split('_')[1]
 
-    # Remove emoji prefix if present
-    if ' ' in category:
-        category = category.split(' ', 1)[1]
-
-    if category == 'Other':
-        await update.message.reply_text("Please type your new custom category name:", reply_markup=keyboards.HIDE_KEYBOARD)
+    if category == 'other':
+        await query.edit_message_text("Please type your new custom category name:")
         return GET_CUSTOM_CATEGORY
 
     tx_data = context.user_data.get('new_tx')
     if not tx_data: return ConversationHandler.END
 
     tx_data['categoryId'] = category
-    return await save_and_end_unknown(update.message, tx_data)
+    return await save_and_end_unknown(query.message, tx_data)
 
 async def received_text_for_custom_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tx_data = context.user_data.get('new_tx')
@@ -371,10 +367,10 @@ async def save_and_end_unknown(message, tx_data):
 unified_message_conversation_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, unified_message_router)],
     states={
-        SELECT_CATEGORY: [MessageHandler(filters.Regex(CAT_REGEX), received_category_for_unknown)],
+        SELECT_CATEGORY: [CallbackQueryHandler(received_category_for_unknown, pattern='^cat_')],
         GET_CUSTOM_CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_text_for_custom_category)],
     },
-    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
+    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start), CallbackQueryHandler(start, pattern='^start$')],
     per_message=False,
     conversation_timeout=60
 )

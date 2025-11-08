@@ -19,19 +19,14 @@ import os
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
-# --- Regex for buttons ---
-SETBALANCE_ACC_REGEX = '^(💵 USD Account|៛ KHR Account)$'
-REMINDER_DATE_REGEX = '^(Tomorrow|In 3 Days|In 1 Week|Custom Date)$'
-
 
 # --- Rate Update Conversation ---
 @restricted
 async def update_rate_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Please enter the new exchange rate for 1 USD to KHR (e.g., 4100).\n"
-        "This will be used as a fallback if the live API fails.",
-        reply_markup=keyboards.HIDE_KEYBOARD
-    )
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(
+        "Please enter the new exchange rate for 1 USD to KHR (e.g., 4100). This will be used as a fallback if the live API fails.")
     return NEW_RATE
 
 
@@ -49,10 +44,14 @@ async def received_new_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return NEW_RATE
 
 
+# --- NEW FUNCTION ---
 @restricted
 async def get_current_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     """Fetches and displays the current LIVE exchange rate."""
-    loading_msg = await update.message.reply_text("Fetching live rate...")
+    query = update.callback_query
+    await query.answer("Fetching live rate...")
+
     data = api_client.get_exchange_rate()
 
     if data and 'rate' in data:
@@ -61,28 +60,30 @@ async def get_current_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         text = "❌ Could not fetch the live exchange rate. Using fallback."
 
-    await loading_msg.edit_text(
+    await query.edit_message_text(
         text=text,
-        parse_mode='HTML'
+        parse_mode='HTML',
+        reply_markup=keyboards.main_menu_keyboard()
     )
-    # Send main keyboard separately
-    await update.message.reply_text("Rate check complete.", reply_markup=keyboards.main_menu_keyboard())
 
 
 # --- Set Initial Balance Conversation ---
 @restricted
 async def set_balance_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Which account balance do you want to set?",
-                                    reply_markup=keyboards.set_balance_account_keyboard())
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text("Which account balance do you want to set?",
+                                   reply_markup=keyboards.set_balance_account_keyboard())
     return SETBALANCE_ACCOUNT
 
 
 async def received_balance_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    choice = update.message.text
-    currency = "USD" if choice == "💵 USD Account" else "KHR"
+    query = update.callback_query
+    await query.answer()
+    currency = query.data.split('_')[-1]
     context.user_data['currency'] = currency
-    await update.message.reply_text(f"Account: <b>{currency}</b>\n\nWhat is the total current balance?",
-                                    parse_mode='HTML', reply_markup=keyboards.HIDE_KEYBOARD)
+    await query.message.reply_text(f"Account: <b>{currency}</b>\n\nWhat is the total current balance?",
+                                   parse_mode='HTML')
     return SETBALANCE_AMOUNT
 
 
@@ -110,8 +111,10 @@ async def received_balance_amount(update: Update, context: ContextTypes.DEFAULT_
 # --- Set Reminder Conversation ---
 @restricted
 async def set_reminder_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
     context.user_data.clear()
-    await update.message.reply_text("What would you like to be reminded of?", reply_markup=keyboards.HIDE_KEYBOARD)
+    await query.message.reply_text("What would you like to be reminded of?")
     return REMINDER_PURPOSE
 
 
@@ -122,26 +125,16 @@ async def received_reminder_purpose(update: Update, context: ContextTypes.DEFAUL
 
 
 async def received_reminder_date_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    choice = update.message.text
-
-    days_map = {
-        "Tomorrow": 1,
-        "In 3 Days": 3,
-        "In 1 Week": 7
-    }
-
-    if choice == 'Custom Date':
-        await update.message.reply_text("Please enter the date in YYYY-MM-DD format.", reply_markup=keyboards.HIDE_KEYBOARD)
+    query = update.callback_query
+    await query.answer()
+    choice = query.data.split('_')[-1]
+    if choice == 'custom':
+        await query.message.reply_text("Please enter the date in YYYY-MM-DD format.")
         return REMINDER_CUSTOM_DATE
 
-    days = days_map.get(choice)
-    if not days:
-        await update.message.reply_text("Invalid choice.", reply_markup=keyboards.reminder_date_keyboard())
-        return REMINDER_ASK_DATE
-
-    reminder_date = datetime.now(PHNOM_PENH_TZ).date() + timedelta(days=int(days))
+    reminder_date = datetime.now(PHNOM_PENH_TZ).date() + timedelta(days=int(choice))
     context.user_data['reminder_date_part'] = reminder_date
-    await update.message.reply_text("Got it. And at what time? (e.g., 09:00, 17:30)", reply_markup=keyboards.HIDE_KEYBOARD)
+    await query.message.reply_text("Got it. And at what time? (e.g., 09:00, 17:30)")
     return REMINDER_ASK_TIME
 
 
@@ -149,7 +142,7 @@ async def received_reminder_custom_date(update: Update, context: ContextTypes.DE
     try:
         custom_date = datetime.strptime(update.message.text, "%Y-%m-%d").date()
         context.user_data['reminder_date_part'] = custom_date
-        await update.message.reply_text("Got it. And at what time? (e.g., 09:00, 17:30)", reply_markup=keyboards.HIDE_KEYBOARD)
+        await update.message.reply_text("Got it. And at what time? (e.g., 09:00, 17:30)")
         return REMINDER_ASK_TIME
     except ValueError:
         await update.message.reply_text("Invalid format. Please use YYYY-MM-DD.")
@@ -163,6 +156,8 @@ async def received_reminder_time(update: Update, context: ContextTypes.DEFAULT_T
         aware_dt = datetime.combine(reminder_date, reminder_time, tzinfo=PHNOM_PENH_TZ)
         context.user_data['reminder_datetime'] = aware_dt.isoformat()
 
+        # --- THIS IS THE FIX ---
+        # Get the target chat ID from .env, or fall back to the current chat if not set.
         target_chat_id = os.getenv("REMINDER_TARGET_CHAT_ID") or update.effective_chat.id
 
         reminder_data = {

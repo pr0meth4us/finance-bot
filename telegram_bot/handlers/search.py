@@ -14,72 +14,55 @@ from zoneinfo import ZoneInfo
 (
     CHOOSE_PERIOD, GET_CUSTOM_START, GET_CUSTOM_END, CHOOSE_TYPE,
     GET_CATEGORIES, GET_KEYWORDS, GET_KEYWORD_LOGIC,
-    CHOOSE_ACTION
-) = range(8)
+    CHOOSE_ACTION # <-- NEW STATE
+) = range(8) # <-- NEW RANGE
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
-# --- Regex for buttons ---
-SEARCH_ACTION_REGEX = '^(What type of search do you want to perform?)$' # Dummy for CHOOSE_ACTION
-REPORT_PERIOD_REGEX = '^(Today|This Week|Last Week|This Month|Last Month|Custom Range|♾️ All Time)$'
-SEARCH_TYPE_REGEX = '^(💸 Expense|💰 Income|🌐 All Types)$'
-SKIP_CAT_REGEX = '^(⏩ Skip)$'
-SKIP_KWD_REGEX = '^(⏩ Skip)$'
-LOGIC_REGEX = '^(Must contain ALL \(AND\)|Contains ANY \(OR\))$'
-
 
 @restricted
-async def search_menu_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def search_menu_entry(update: Update, context: ContextTypes.DEFAULT_TYPE): # <-- NEW ENTRY FUNCTION
     """Displays the search sub-menu and enters the conversation."""
-    await update.message.reply_text(
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
         text="What type of search do you want to perform?",
         reply_markup=keyboards.search_menu_keyboard()
     )
-    return CHOOSE_ACTION
+    return CHOOSE_ACTION # <-- NEW RETURN
 
 
 @restricted
-async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE): # <-- MODIFIED
     """Handles the search type choice ('manage' or 'sum') and moves to period selection."""
-    command = update.message.text # /search_manage or /search_sum
-    search_type = command.replace('/search_', '') # 'manage' or 'sum'
+    query = update.callback_query
+    await query.answer()
+
+    search_type = query.data.replace('start_search_', '')  # 'manage' or 'sum'
     context.user_data['search_type'] = search_type
     context.user_data['search_params'] = {}
 
-    await update.message.reply_text(
+    await query.edit_message_text(
         "🔎 Advanced Search\n\nFirst, select a time period for the search.",
         reply_markup=keyboards.report_period_keyboard(is_search=True)
     )
-    return CHOOSE_PERIOD
+    return CHOOSE_PERIOD # <-- MOVED FROM search_start
 
 
 @restricted
 async def received_period_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the period choice and asks for transaction type."""
-    period_text = update.message.text
-
-    period_map = {
-        "Today": "today",
-        "This Week": "this_week",
-        "Last Week": "last_week",
-        "This Month": "this_month",
-        "Last Month": "last_month",
-        "Custom Range": "custom",
-        "♾️ All Time": "all_time"
-    }
-
-    period = period_map.get(period_text)
-    if not period:
-        await update.message.reply_text("Invalid choice.", reply_markup=keyboards.report_period_keyboard(is_search=True))
-        return CHOOSE_PERIOD
+    query = update.callback_query
+    await query.answer()
+    period = query.data.replace('report_period_', '')
 
     if period == "custom":
-        await update.message.reply_text("Please enter the start date (YYYY-MM-DD):", reply_markup=keyboards.HIDE_KEYBOARD)
+        await query.edit_message_text("Please enter the start date (YYYY-MM-DD):")
         return GET_CUSTOM_START
     elif period != "all_time":
         context.user_data['search_params']['period'] = period
 
-    await update.message.reply_text(
+    await query.edit_message_text(
         "Which transaction type do you want to search?",
         reply_markup=keyboards.search_type_keyboard()
     )
@@ -123,25 +106,15 @@ async def received_custom_end(update: Update, context: ContextTypes.DEFAULT_TYPE
 @restricted
 async def received_type_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the transaction type choice and asks for categories."""
-    type_text = update.message.text
-
-    type_map = {
-        "💸 Expense": "expense",
-        "💰 Income": "income",
-        "🌐 All Types": "all"
-    }
-
-    tx_type = type_map.get(type_text)
-    if not tx_type:
-        await update.message.reply_text("Invalid choice.", reply_markup=keyboards.search_type_keyboard())
-        return CHOOSE_TYPE
-
+    query = update.callback_query
+    await query.answer()
+    tx_type = query.data.replace('search_type_', '')
     if tx_type != 'all':
         context.user_data['search_params']['transaction_type'] = tx_type
 
-    await update.message.reply_text(
+    await query.edit_message_text(
         "Enter the categories you want to include, separated by a comma (e.g., Food, Drink).\n\nOr press Skip to include all categories.",
-        reply_markup=keyboards.skip_keyboard()
+        reply_markup=keyboards.skip_keyboard('search_skip_categories')
     )
     return GET_CATEGORIES
 
@@ -150,21 +123,23 @@ async def received_type_choice(update: Update, context: ContextTypes.DEFAULT_TYP
 async def received_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives categories and asks for keywords."""
     message_text = "Enter keywords to search for in the description, separated by a comma (e.g., coffee, lunch).\n\nOr press Skip to not filter by keywords."
-
-    if update.message.text == '⏩ Skip':
-        pass # Do nothing, just move to next step
+    if update.callback_query:  # User pressed skip
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(message_text,
+                                                      reply_markup=keyboards.skip_keyboard('search_skip_keywords'))
     else:  # User sent text
         categories = [c.strip() for c in update.message.text.split(',')]
         context.user_data['search_params']['categories'] = categories
+        await update.message.reply_text(message_text, reply_markup=keyboards.skip_keyboard('search_skip_keywords'))
 
-    await update.message.reply_text(message_text, reply_markup=keyboards.skip_keyboard())
     return GET_KEYWORDS
 
 
 @restricted
 async def received_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives keywords and either asks for logic or executes the search."""
-    if update.message.text == '⏩ Skip':
+    if update.callback_query:  # User pressed skip
+        await update.callback_query.answer()
         return await execute_search(update, context)
 
     keywords = [k.strip() for k in update.message.text.split(',')]
@@ -184,25 +159,24 @@ async def received_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @restricted
 async def received_keyword_logic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives the keyword logic and executes the search."""
-    logic_text = update.message.text
-    if logic_text == "Must contain ALL (AND)":
-        logic = 'AND'
-    elif logic_text == "Contains ANY (OR)":
-        logic = 'OR'
-    else:
-        await update.message.reply_text("Invalid choice.", reply_markup=keyboards.search_keyword_logic_keyboard())
-        return GET_KEYWORD_LOGIC
-
+    query = update.callback_query
+    await query.answer()
+    logic = query.data.replace('search_logic_', '')
     context.user_data['search_params']['keyword_logic'] = logic.upper()
     return await execute_search(update, context)
 
 
 async def execute_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Executes the correct search type and displays results."""
+    """Executes the correct search type and displays results by editing the message."""
     params = context.user_data.get('search_params', {})
     search_type = context.user_data.get('search_type')
 
-    message_to_edit = await update.message.reply_text("🔎 searching...", reply_markup=keyboards.main_menu_keyboard())
+    message_to_edit = None
+    if update.callback_query:
+        await update.callback_query.edit_message_text("🔎 searching...")
+        message_to_edit = update.callback_query.message
+    else:
+        message_to_edit = await update.message.reply_text("🔎 searching...")
 
     if search_type == 'manage':
         results = api_client.search_transactions_for_management(params)
@@ -223,12 +197,10 @@ async def execute_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"<b>Description:</b> {tx.get('description') or 'N/A'}\n"
                 f"<b>Date:</b> {date_str}"
             )
-            # This MUST be an InlineKeyboard
             await message_to_edit.edit_text(text=text, parse_mode='HTML',
                                             reply_markup=keyboards.manage_tx_keyboard(tx['_id']))
         else:
             text = f"Found {len(results)} matching transactions. Select one to manage:"
-            # This MUST be an InlineKeyboard
             await message_to_edit.edit_text(text=text,
                                             reply_markup=keyboards.history_keyboard(results, is_search_result=True))
 
