@@ -12,7 +12,7 @@ from .helpers import (
     _create_income_expense_chart,
     _create_expense_pie_chart,
     _format_habits_message,
-    _create_spending_line_chart  # <-- NEW IMPORT
+    _create_spending_line_chart
 )
 
 # Conversation states
@@ -28,9 +28,7 @@ PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 @restricted
 async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the menu for selecting a report period."""
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text(
+    await update.message.reply_text(
         "What period would you like a report for?",
         reply_markup=keyboards.report_period_keyboard()
     )
@@ -40,12 +38,24 @@ async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @restricted
 async def process_report_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles standard period selection or transitions to custom date entry."""
-    query = update.callback_query
-    await query.answer()
-    period = query.data.replace('report_period_', '')
+    period_text = update.message.text
+
+    period_map = {
+        "Today": "today",
+        "This Week": "this_week",
+        "Last Week": "last_week",
+        "This Month": "this_month",
+        "Last Month": "last_month",
+        "Custom Range": "custom"
+    }
+
+    period = period_map.get(period_text)
+    if not period:
+        await update.message.reply_text("Invalid choice. Please select from the keyboard.", reply_markup=keyboards.report_period_keyboard())
+        return CHOOSE_REPORT_PERIOD
 
     if period == "custom":
-        await query.edit_message_text("Please enter the start date (YYYY-MM-DD):")
+        await update.message.reply_text("Please enter the start date (YYYY-MM-DD):", reply_markup=keyboards.HIDE_KEYBOARD)
         return REPORT_ASK_START_DATE
 
     today = datetime.now(PHNOM_PENH_TZ).date()
@@ -66,7 +76,7 @@ async def process_report_choice(update: Update, context: ContextTypes.DEFAULT_TY
         start_date, end_date = date_pair
         await _generate_report(update, context, start_date, end_date)
     else:
-        await query.edit_message_text("Invalid period selected.", reply_markup=keyboards.main_menu_keyboard())
+        await update.message.reply_text("Invalid period selected.", reply_markup=keyboards.main_menu_keyboard())
 
     return ConversationHandler.END
 
@@ -108,9 +118,8 @@ async def _generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE, s
     """Shared logic to generate and send report summary and charts."""
     chat_id = update.effective_chat.id
     loading_text = f"📈 Generating your report for {start_date:%b %d, %Y} to {end_date:%b %d, %Y}..."
-    loading_message = await context.bot.send_message(chat_id=chat_id, text=loading_text)
-    if update.callback_query:
-        await update.callback_query.message.delete()
+    # Send main keyboard to replace any conversation keyboards
+    loading_message = await context.bot.send_message(chat_id=chat_id, text=loading_text, reply_markup=keyboards.main_menu_keyboard())
 
     report_data = api_client.get_detailed_report(start_date, end_date)
     await loading_message.delete()
@@ -119,11 +128,9 @@ async def _generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE, s
         summary_message = _format_report_summary_message(report_data)
         await context.bot.send_message(chat_id=chat_id, text=summary_message, parse_mode='HTML')
 
-        # --- MODIFICATION: Pass dates to chart functions ---
         if bar_chart := _create_income_expense_chart(report_data, start_date, end_date):
             await context.bot.send_photo(chat_id=chat_id, photo=bar_chart)
 
-        # --- NEW: Generate and send line chart ---
         if line_chart := _create_spending_line_chart(report_data, start_date, end_date):
             await context.bot.send_photo(chat_id=chat_id, photo=line_chart)
 
@@ -142,9 +149,7 @@ async def _generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE, s
 @restricted
 async def habits_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays menu to choose a period for habits analysis."""
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text(
+    await update.message.reply_text(
         "🧠 For which period would you like to analyze your spending habits?",
         reply_markup=keyboards.report_period_keyboard()
     )
@@ -153,12 +158,24 @@ async def habits_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def process_habits_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Generates and sends the habits report for the selected period."""
-    query = update.callback_query
-    await query.answer()
-    period = query.data.replace('report_period_', '')
+    period_text = update.message.text
+
+    period_map = {
+        "Today": "today",
+        "This Week": "this_week",
+        "Last Week": "last_week",
+        "This Month": "this_month",
+        "Last Month": "last_month",
+        "Custom Range": "custom"
+    }
+
+    period = period_map.get(period_text)
+    if not period:
+        await update.message.reply_text("Invalid choice. Please select from the keyboard.", reply_markup=keyboards.report_period_keyboard())
+        return CHOOSE_HABITS_PERIOD
 
     if period == "custom":
-        await query.edit_message_text(
+        await update.message.reply_text(
             "Custom date range is not available for habits analysis. Please select a standard period.",
             reply_markup=keyboards.report_period_keyboard())
         return CHOOSE_HABITS_PERIOD
@@ -179,16 +196,17 @@ async def process_habits_choice(update: Update, context: ContextTypes.DEFAULT_TY
     date_pair = date_ranges.get(period)
     if date_pair:
         start_date, end_date = date_pair
-        await query.edit_message_text("🧠 Analyzing your habits...")
+        loading_msg = await update.message.reply_text("🧠 Analyzing your habits...", reply_markup=keyboards.main_menu_keyboard())
         habits_data = api_client.get_spending_habits(start_date, end_date)
+        await loading_msg.delete()
 
         if habits_data:
             message = _format_habits_message(habits_data)
-            await query.edit_message_text(text=message, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
+            await update.message.reply_text(text=message, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
         else:
-            await query.edit_message_text("Could not find enough data to analyze your habits for this period.",
-                                          reply_markup=keyboards.main_menu_keyboard())
+            await update.message.reply_text("Could not find enough data to analyze your habits for this period.",
+                                            reply_markup=keyboards.main_menu_keyboard())
     else:
-        await query.edit_message_text("Invalid period selected.", reply_markup=keyboards.main_menu_keyboard())
+        await update.message.reply_text("Invalid period selected.", reply_markup=keyboards.main_menu_keyboard())
 
     return ConversationHandler.END

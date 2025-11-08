@@ -24,6 +24,10 @@ from .command_handler import parse_amount_and_currency
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
+# --- Regex for buttons ---
+IOU_DATE_REGEX = '^(Today|Yesterday|Custom Date)$'
+CURRENCY_REGEX = '^(💵 USD|៛ KHR)$'
+
 def _format_debt_details(debt):
     """Helper to format the full details of a debt, including repayments."""
     direction = "Owes you" if debt['type'] == 'lent' else "You owe"
@@ -118,37 +122,34 @@ def _format_person_ledger(person_debts, is_settled=False):
 @restricted
 async def iou_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the IOU management menu."""
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text(text="🤝 Let's manage your IOUs.", reply_markup=keyboards.iou_menu_keyboard())
+    await update.message.reply_text(text="🤝 Let's manage your IOUs.", reply_markup=keyboards.iou_menu_keyboard())
 
 
 @restricted
 async def iou_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows a summary list of all open debts, grouped by person."""
-    query = update.callback_query
-    await query.answer()
     grouped_debts = api_client.get_open_debts()
     text = "Here is a summary of your **open** debts.\nSelect one to see details:"
+    # This keyboard is dynamic, so it MUST be Inline. We hide the ReplyKeyboard.
     keyboard = keyboards.iou_list_keyboard(grouped_debts, is_settled=False)
     if not grouped_debts:
         text = "You have no open debts! 👍"
-        keyboard = keyboards.iou_menu_keyboard()
-    await query.edit_message_text(text=text, reply_markup=keyboard, parse_mode='Markdown')
+        await update.message.reply_text(text=text, reply_markup=keyboards.iou_menu_keyboard())
+    else:
+        await update.message.reply_text(text=text, reply_markup=keyboard, parse_mode='Markdown')
 
 # --- NEW FUNCTION ---
 @restricted
 async def iou_view_settled(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows a summary list of all settled debts, grouped by person."""
-    query = update.callback_query
-    await query.answer()
     grouped_debts = api_client.get_settled_debts_grouped()
     text = "Here is a summary of your **settled/canceled** debts.\nSelect one to see details:"
     keyboard = keyboards.iou_list_keyboard(grouped_debts, is_settled=True)
     if not grouped_debts:
         text = "You have no settled debts."
-        keyboard = keyboards.iou_menu_keyboard()
-    await query.edit_message_text(text=text, reply_markup=keyboard, parse_mode='Markdown')
+        await update.message.reply_text(text=text, reply_markup=keyboards.iou_menu_keyboard())
+    else:
+        await update.message.reply_text(text=text, reply_markup=keyboard, parse_mode='Markdown')
 
 
 @restricted
@@ -164,7 +165,7 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not person_debts:
         await query.edit_message_text(f"❌ Could not find any open debts for {person_name}.",
-                                      reply_markup=keyboards.iou_menu_keyboard())
+                                      reply_markup=keyboards.iou_list_keyboard(api_client.get_open_debts(), is_settled=False))
         return
 
     debt_type = person_debts[0]['type']
@@ -191,7 +192,7 @@ async def iou_person_detail_settled(update: Update, context: ContextTypes.DEFAUL
 
     if not person_debts:
         await query.edit_message_text(f"❌ Could not find any settled debts for {person_name}.",
-                                      reply_markup=keyboards.iou_menu_keyboard())
+                                      reply_markup=keyboards.iou_list_keyboard(api_client.get_settled_debts_grouped(), is_settled=True))
         return
 
     debt_type = person_debts[0]['type']
@@ -222,7 +223,7 @@ async def iou_manage_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         person_debts = api_client.get_all_debts_by_person(person_name)
 
     if not person_debts:
-        await query.edit_message_text("❌ No debts found to manage.", reply_markup=keyboards.iou_menu_keyboard())
+        await query.edit_message_text("❌ No debts found to manage.", reply_markup=keyboards.iou_person_actions_keyboard(person_name, debt_type, is_settled))
         return
 
     await query.edit_message_text(
@@ -233,9 +234,7 @@ async def iou_manage_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @restricted
 async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Shows details for a single debt, open or settled.
-    """
+    """Shows details for a single debt, open or settled."""
     query = update.callback_query
     await query.answer()
     # Callback format: iou:detail:{debt_id}:{person_name}:{is_settled}
@@ -257,21 +256,20 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @restricted
 async def debt_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     """Fetches, displays debt analysis text, and sends charts."""
-    query = update.callback_query
-    await query.answer("Analyzing debts...")
     chat_id = update.effective_chat.id
+    loading_msg = await update.message.reply_text("🔬 Analyzing debts...", reply_markup=keyboards.main_menu_keyboard())
 
     analysis_data = api_client.get_debt_analysis()
+    await loading_msg.delete()
 
     if not analysis_data:
-        await query.edit_message_text("Could not perform debt analysis.", reply_markup=keyboards.iou_menu_keyboard())
+        await update.message.reply_text("Could not perform debt analysis.", reply_markup=keyboards.iou_menu_keyboard())
         return
 
     # 1. Format text message
     final_text = _format_debt_analysis_message(analysis_data)
-    await query.edit_message_text(text=final_text, parse_mode='HTML', reply_markup=keyboards.iou_menu_keyboard())
+    await update.message.reply_text(text=final_text, parse_mode='HTML', reply_markup=keyboards.iou_menu_keyboard())
 
     # 2. Generate and send Overview Pie Chart
     if overview_pie := _create_debt_overview_pie(analysis_data):
@@ -286,32 +284,28 @@ async def debt_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @restricted
 async def iou_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Starts the IOU conversation by asking for the date."""
-    query = update.callback_query
-    await query.answer()
     context.user_data.clear()
-    context.user_data['iou_type'] = 'lent' if query.data == 'iou_lent' else 'borrowed'
-    await query.message.reply_text("When did this happen?", reply_markup=keyboards.iou_date_keyboard())
+    command = update.message.text
+    context.user_data['iou_type'] = 'lent' if command == '/iou_lent' else 'borrowed'
+    await update.message.reply_text("When did this happen?", reply_markup=keyboards.iou_date_keyboard())
     return IOU_ASK_DATE
 
 
 async def iou_received_date_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the date choice for an IOU."""
-    query = update.callback_query
-    await query.answer()
-    choice = query.data
-    prompt = "Who did you lend money to?" if context.user_data[
-                                                 'iou_type'] == 'lent' else "Who did you borrow money from?"
+    choice_text = update.message.text
+    prompt = "Who did you lend money to?" if context.user_data['iou_type'] == 'lent' else "Who did you borrow money from?"
 
-    if choice == 'iou_date_today':
-        await query.message.reply_text(prompt)
+    if choice_text == 'Today':
+        await update.message.reply_text(prompt, reply_markup=keyboards.HIDE_KEYBOARD)
         return IOU_PERSON
-    elif choice == 'iou_date_yesterday':
+    elif choice_text == 'Yesterday':
         yesterday = datetime.now(PHNOM_PENH_TZ).date() - timedelta(days=1)
         context.user_data['timestamp'] = datetime.combine(yesterday, time(12, 0), tzinfo=PHNOM_PENH_TZ).isoformat()
-        await query.message.reply_text(prompt)
+        await update.message.reply_text(prompt, reply_markup=keyboards.HIDE_KEYBOARD)
         return IOU_PERSON
-    elif choice == 'iou_date_custom':
-        await query.message.reply_text("Please enter the date in YYYY-MM-DD format.")
+    elif choice_text == 'Custom Date':
+        await update.message.reply_text("Please enter the date in YYYY-MM-DD format.", reply_markup=keyboards.HIDE_KEYBOARD)
         return IOU_CUSTOM_DATE
 
 
@@ -320,8 +314,7 @@ async def iou_received_custom_date(update: Update, context: ContextTypes.DEFAULT
     try:
         custom_date = datetime.strptime(update.message.text, "%Y-%m-%d").date()
         context.user_data['timestamp'] = datetime.combine(custom_date, time(12, 0), tzinfo=PHNOM_PENH_TZ).isoformat()
-        prompt = "Who did you lend money to?" if context.user_data[
-                                                     'iou_type'] == 'lent' else "Who did you borrow money from?"
+        prompt = "Who did you lend money to?" if context.user_data['iou_type'] == 'lent' else "Who did you borrow money from?"
         await update.message.reply_text(prompt)
         return IOU_PERSON
     except ValueError:
@@ -350,7 +343,7 @@ async def iou_received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
                 parse_mode='HTML')
             return IOU_PURPOSE
 
-        # Fallback for old logic (though helper should handle it)
+        # Fallback for old logic
         if amount < 100:
             currency = "USD"
             context.user_data['iou_currency'] = currency
@@ -367,12 +360,12 @@ async def iou_received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def iou_received_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    context.user_data['iou_currency'] = query.data.split('_')[1]
-    await query.message.reply_text(
+    currency_text = update.message.text
+    currency = "USD" if currency_text == "💵 USD" else "KHR"
+    context.user_data['iou_currency'] = currency
+    await update.message.reply_text(
         f"Currency: <b>{context.user_data['iou_currency']}</b>\n\nWhat was this for? (e.g., Lunch, Deposit)",
-        parse_mode='HTML')
+        parse_mode='HTML', reply_markup=keyboards.HIDE_KEYBOARD)
     return IOU_PURPOSE
 
 
@@ -409,7 +402,8 @@ async def repay_lump_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
 
     prompt = f"How much did {person} repay you (in USD or KHR)?" if debt_type == 'lent' else f"How much did you repay {person} (in USD or KHR)?"
-    await query.message.reply_text(prompt)
+    # We must send a new message here to ask for text input
+    await query.message.reply_text(prompt, reply_markup=keyboards.HIDE_KEYBOARD)
     return REPAY_LUMP_AMOUNT
 
 
@@ -436,7 +430,7 @@ async def received_lump_repayment_amount(update: Update, context: ContextTypes.D
         await update.message.reply_text("Please enter a valid amount and currency (e.g., '50.50' or '20000khr').")
         return REPAY_LUMP_AMOUNT
 
-# --- NEW: Debt Edit/Cancel Handlers ---
+# --- NEW: Debt Edit/Cancel Handlers (Remain CallbackQueryHandlers) ---
 
 @restricted
 async def iou_manage_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -482,14 +476,16 @@ async def iou_cancel_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE)
         base_text = f"❌ Error: {response.get('error', 'Unknown error')}"
 
     summary_text = format_summary_message(api_client.get_detailed_summary())
+    # Edit the message, don't send a new one
     await query.edit_message_text(
         base_text + summary_text,
-        parse_mode='HTML',
-        reply_markup=keyboards.main_menu_keyboard()
+        parse_mode='HTML'
     )
+    # We must also send the main menu keyboard in a new message
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="IOU menu closed.", reply_markup=keyboards.main_menu_keyboard())
     return ConversationHandler.END # End any conversation, just in case
 
-# --- NEW: Debt Edit Conversation ---
+# --- NEW: Debt Edit Conversation (Remains CallbackQueryHandler entry) ---
 
 @restricted
 async def iou_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -503,9 +499,9 @@ async def iou_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['iou_edit_field'] = field
 
     if field == 'person':
-        await query.message.reply_text("Please enter the new person's name:")
+        await query.message.reply_text("Please enter the new person's name:", reply_markup=keyboards.HIDE_KEYBOARD)
     elif field == 'purpose':
-        await query.message.reply_text("Please enter the new purpose:")
+        await query.message.reply_text("Please enter the new purpose:", reply_markup=keyboards.HIDE_KEYBOARD)
 
     return IOU_EDIT_GET_VALUE
 

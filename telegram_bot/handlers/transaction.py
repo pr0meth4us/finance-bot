@@ -15,42 +15,44 @@ from .helpers import format_summary_message
     FORGOT_DATE, FORGOT_CUSTOM_DATE, FORGOT_TYPE,
     EDIT_CHOOSE_FIELD, EDIT_GET_NEW_VALUE, EDIT_GET_NEW_CATEGORY,
     EDIT_GET_CUSTOM_CATEGORY,
-    EDIT_GET_NEW_DATE # <-- FIX: Added new state
-) = range(14) # <-- FIX: Updated range
+    EDIT_GET_NEW_DATE
+) = range(14)
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
+
+# --- Regex for buttons ---
+FORGOT_DAY_REGEX = '^(Yesterday|2 Days Ago|Custom Date)$'
+FORGOT_TYPE_REGEX = '^(💸 Expense|💰 Income)$'
+CURRENCY_REGEX = '^(💵 USD|៛ KHR)$'
+CAT_REGEX = '^(🍔 Food|🍹 Drink|🚗 Transport|🛍️ Shopping|🧾 Bills|💡 Utilities|🎬 Entertainment|🧴 Personal Care|💼 Work|🍺 Alcohol|🤝 For Others|💊 Health|📈 Investment|❓ Forgot|📝 Other|💼 Salary|📈 Bonus|💻 Freelance|📊 Commission|💸 Allowance|🎁 Gift)$'
+REMARK_REGEX = '^(✅ Add Remark|⏩ Skip)$'
 
 # --- Add Transaction & Forgot Log (Shared Logic) ---
 @restricted
 async def add_transaction_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
     context.user_data.clear()
-    context.user_data['type'] = 'expense' if query.data == 'add_expense' else 'income'
+    command = update.message.text
+    context.user_data['type'] = 'expense' if command == '/add_expense' else 'income'
     emoji = "💸" if context.user_data['type'] == 'expense' else "💰"
-    await query.message.reply_text(f"{emoji} Enter the amount:")
+    await update.message.reply_text(f"{emoji} Enter the amount:", reply_markup=keyboards.HIDE_KEYBOARD)
     return AMOUNT
 
 @restricted
 async def forgot_log_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
     context.user_data.clear()
-    await query.message.reply_text("Which day did you forget to log?", reply_markup=keyboards.forgot_day_keyboard())
+    await update.message.reply_text("Which day did you forget to log?", reply_markup=keyboards.forgot_day_keyboard())
     return FORGOT_DATE
 
 async def received_forgot_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    choice = query.data.split('_')[-1]
-    if choice == 'custom':
-        await query.message.reply_text("Please enter the date in YYYY-MM-DD format.")
+    choice = update.message.text
+    if choice == 'Custom Date':
+        await update.message.reply_text("Please enter the date in YYYY-MM-DD format.", reply_markup=keyboards.HIDE_KEYBOARD)
         return FORGOT_CUSTOM_DATE
 
-    days_ago = int(choice)
+    days_ago = 1 if choice == 'Yesterday' else 2
     forgotten_date = datetime.now(PHNOM_PENH_TZ).date() - timedelta(days=days_ago)
     context.user_data['timestamp'] = datetime.combine(forgotten_date, time(12, 0), tzinfo=PHNOM_PENH_TZ).isoformat()
-    await query.message.reply_text("Got it. Was it an expense or an income?", reply_markup=keyboards.forgot_type_keyboard())
+    await update.message.reply_text("Got it. Was it an expense or an income?", reply_markup=keyboards.forgot_type_keyboard())
     return FORGOT_TYPE
 
 async def received_forgot_custom_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -64,10 +66,9 @@ async def received_forgot_custom_date(update: Update, context: ContextTypes.DEFA
         return FORGOT_CUSTOM_DATE
 
 async def received_forgot_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    context.user_data['type'] = query.data.split('_')[-1]
-    await query.message.reply_text(f"Type: <b>{context.user_data['type'].capitalize()}</b>\n\nEnter the amount:", parse_mode='HTML')
+    choice = update.message.text
+    context.user_data['type'] = 'expense' if choice == '💸 Expense' else 'income'
+    await update.message.reply_text(f"Type: <b>{context.user_data['type'].capitalize()}</b>\n\nEnter the amount:", parse_mode='HTML', reply_markup=keyboards.HIDE_KEYBOARD)
     return AMOUNT
 
 async def received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -90,24 +91,26 @@ async def received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return AMOUNT
 
 async def received_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    currency = query.data.split('_')[1]
+    choice = update.message.text
+    currency = "USD" if choice == "💵 USD" else "KHR"
     context.user_data['currency'] = currency
     context.user_data['accountName'] = "USD Account" if currency == "USD" else "KHR Account"
     keyboard = keyboards.income_categories_keyboard() if context.user_data.get('type') == 'income' else keyboards.expense_categories_keyboard()
-    await query.message.reply_text(f"Currency: <b>{currency}</b>\n\nWhich category?", parse_mode='HTML', reply_markup=keyboard)
+    await update.message.reply_text(f"Currency: <b>{currency}</b>\n\nWhich category?", parse_mode='HTML', reply_markup=keyboard)
     return CATEGORY
 
 async def received_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    category = query.data.split('_')[1]
-    if category == 'other':
-        await query.message.reply_text("Please type your custom category name:")
+    category = update.message.text
+
+    # Remove emoji prefix if present
+    if ' ' in category:
+        category = category.split(' ', 1)[1]
+
+    if category == 'Other':
+        await update.message.reply_text("Please type your custom category name:", reply_markup=keyboards.HIDE_KEYBOARD)
         return CUSTOM_CATEGORY
     context.user_data['categoryId'] = category
-    await query.message.reply_text(f"Category: <b>{category}</b>\n\nAdd a remark/description?", parse_mode='HTML', reply_markup=keyboards.ask_remark_keyboard())
+    await update.message.reply_text(f"Category: <b>{category}</b>\n\nAdd a remark/description?", parse_mode='HTML', reply_markup=keyboards.ask_remark_keyboard())
     return ASK_REMARK
 
 async def received_custom_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -116,10 +119,9 @@ async def received_custom_category(update: Update, context: ContextTypes.DEFAULT
     return ASK_REMARK
 
 async def ask_remark(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if query.data == 'remark_yes':
-        await query.message.reply_text("Please type your remark.")
+    choice = update.message.text
+    if choice == '✅ Add Remark':
+        await update.message.reply_text("Please type your remark.", reply_markup=keyboards.HIDE_KEYBOARD)
         return REMARK
     context.user_data['description'] = ''
     return await save_transaction_and_end(update, context)
@@ -130,7 +132,7 @@ async def received_remark(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def save_transaction_and_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     response = api_client.add_transaction(context.user_data)
-    message = update.callback_query.message if update.callback_query else update.message
+    message = update.message
     base_text = "✅ Transaction recorded successfully!" if response else "❌ Failed to record transaction."
     summary_text = format_summary_message(api_client.get_detailed_summary())
     await message.reply_text(base_text + summary_text, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
@@ -140,15 +142,15 @@ async def save_transaction_and_end(update: Update, context: ContextTypes.DEFAULT
 # --- History & Management ---
 @restricted
 async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
     transactions = api_client.get_recent_transactions()
     text = "Recent transactions:"
+    # This MUST be an InlineKeyboard, so we hide the ReplyKeyboard
     keyboard = keyboards.history_keyboard(transactions)
     if not transactions:
         text = "No recent transactions found."
-        keyboard = keyboards.main_menu_keyboard()
-    await query.edit_message_text(text=text, reply_markup=keyboard)
+        await update.message.reply_text(text=text, reply_markup=keyboards.main_menu_keyboard())
+    else:
+        await update.message.reply_text(text=text, reply_markup=keyboard)
 
 @restricted
 async def manage_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -180,15 +182,15 @@ async def delete_transaction_confirm(update: Update, context: ContextTypes.DEFAU
     tx_id = query.data.split('_')[-1]
     if api_client.delete_transaction(tx_id):
         await query.edit_message_text("🗑️ Transaction successfully deleted.")
-        import asyncio
-        await asyncio.sleep(1.5)
-        await history_menu(update, context)
+        # We must send a new message with the main keyboard
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="History menu closed.", reply_markup=keyboards.main_menu_keyboard())
     else:
         await query.edit_message_text("❌ Error: Could not delete transaction.", reply_markup=keyboards.manage_tx_keyboard(tx_id))
 
 # --- Edit Transaction Conversation ---
 @restricted
 async def edit_transaction_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # This conversation starts from an INLINE button
     query = update.callback_query
     await query.answer()
     tx_id = query.data.split('_')[-1]
@@ -202,6 +204,7 @@ async def edit_transaction_start(update: Update, context: ContextTypes.DEFAULT_T
 
 async def edit_choose_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
+    # This is triggered by an INLINE button
     query = update.callback_query
     await query.answer()
 
@@ -212,21 +215,33 @@ async def edit_choose_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if field == 'categoryId':
         tx_type = context.user_data.get('edit_tx_type')
+        # We must reply with an INLINE keyboard here
         keyboard = keyboards.income_categories_keyboard() if tx_type == 'income' else keyboards.expense_categories_keyboard()
-        await query.edit_message_text("Please select the new category:", reply_markup=keyboard)
+        # But we change them to INLINE buttons
+        inline_keyboard = []
+        for row in keyboard.keyboard:
+            inline_row = []
+            for button in row:
+                text = button
+                # Create a callback_data, e.g., "cat_Food"
+                cat_name = text.split(' ', 1)[1] if ' ' in text else text
+                inline_row.append(InlineKeyboardButton(text, callback_data=f"cat_{cat_name}"))
+            inline_keyboard.append(inline_row)
+
+        await query.edit_message_text("Please select the new category:", reply_markup=InlineKeyboardMarkup(inline_keyboard))
         return EDIT_GET_NEW_CATEGORY
 
-    # --- FIX: Handle timestamp field ---
     if field == 'timestamp':
+        # We ask for text, so we can hide the inline keyboard
         await query.edit_message_text("Please enter the new date (YYYY-MM-DD):")
         return EDIT_GET_NEW_DATE
-    # --- End Fix ---
 
     prompts = {'amount': "Please enter the new amount:", 'description': "Please enter the new description:"}
     await query.edit_message_text(prompts[field])
     return EDIT_GET_NEW_VALUE
 
 async def edit_received_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # This is text input
     field = context.user_data.get('edit_tx_field')
     value = update.message.text
     if field == 'amount':
@@ -237,12 +252,10 @@ async def edit_received_new_value(update: Update, context: ContextTypes.DEFAULT_
     context.user_data['edit_tx_new_value'] = value
     return await _update_transaction_and_confirm(update, context)
 
-# --- FIX: Added new handler for receiving date ---
 async def edit_received_new_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles receiving and validating the new date."""
     try:
         custom_date = datetime.strptime(update.message.text, "%Y-%m-%d").date()
-        # Set to 12:00 PM Phnom Penh time, then convert to ISO string
         new_timestamp_iso = datetime.combine(custom_date, time(12, 0), tzinfo=PHNOM_PENH_TZ).isoformat()
 
         context.user_data['edit_tx_new_value'] = new_timestamp_iso
@@ -250,9 +263,9 @@ async def edit_received_new_date(update: Update, context: ContextTypes.DEFAULT_T
     except ValueError:
         await update.message.reply_text("Invalid date format. Please use YYYY-MM-DD.")
         return EDIT_GET_NEW_DATE
-# --- End Fix ---
 
 async def edit_received_new_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # This is an INLINE button press
     query = update.callback_query
     await query.answer()
     category = query.data.split('_')[1]
@@ -273,9 +286,15 @@ async def _update_transaction_and_confirm(update: Update, context: ContextTypes.
     tx_id = context.user_data.get('edit_tx_id')
     field = context.user_data.get('edit_tx_field')
     value = context.user_data.get('edit_tx_new_value')
-    message = update.message or update.callback_query.message
+
+    # Determine if update was from a query or message
+    if update.callback_query:
+        message = update.callback_query.message
+    else:
+        message = update.message
 
     response = api_client.update_transaction(tx_id, {field: value})
+
     if response and 'error' not in response:
         summary_text = format_summary_message(api_client.get_detailed_summary())
         await message.reply_text(f"✅ Transaction successfully updated!{summary_text}", parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
