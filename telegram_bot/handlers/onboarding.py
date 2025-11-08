@@ -11,7 +11,7 @@ from telegram.ext import (
 
 import api_client
 import keyboards
-from .common import start
+# from .common import start  <-- REMOVED TO FIX CIRCULAR IMPORT
 from utils.i18n import t  # <-- THIS IS THE FIX
 
 # Conversation states
@@ -102,6 +102,8 @@ async def received_usd_balance(update: Update, context: ContextTypes.DEFAULT_TYP
 async def received_khr_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles receiving the initial KHR balance and ends onboarding."""
     try:
+        from .common import start  # <-- LOCAL IMPORT TO FIX CIRCULAR DEPENDENCY
+
         amount = float(update.message.text)
         user_id = context.user_data['user_profile']['_id']
 
