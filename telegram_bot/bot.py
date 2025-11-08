@@ -49,8 +49,6 @@ async def on_error(update: object, context):
 def main():
     # Load translations into memory on boot
     load_translations()
-    print(f"MongoDB URI: {os.getenv("MONGODB_URI")}...")  # Print first 50 chars
-
 
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
