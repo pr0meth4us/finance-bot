@@ -17,7 +17,8 @@ FINANCIAL_TRANSACTION_CATEGORIES = [
     'Initial Balance'
 ]
 
-PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_PenH")
+# --- FIX: Corrected 'Phnom_PenH' to 'Phnom_Penh' ---
+PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 UTC_TZ = ZoneInfo("UTC")
 
 
