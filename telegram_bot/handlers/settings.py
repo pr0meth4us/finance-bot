@@ -6,14 +6,15 @@ from telegram.ext import (
     ConversationHandler,
     CallbackQueryHandler,
     MessageHandler,
-    filters
+    filters,
+    CommandHandler  # <-- THIS IS THE FIX
 )
 
 import api_client
 import keyboards
 from .common import start
 from decorators import authenticate_user
-from utils.i18n import t  # <-- THIS IS THE FIX
+from utils.i18n import t
 
 # Conversation states
 (
