@@ -1,9 +1,10 @@
 # --- Start of modified file: web_service/app/summary/routes.py ---
 
-from flask import Blueprint, jsonify, current_app
+from flask import Blueprint, jsonify
 # --- MODIFICATION START ---
 from datetime import datetime, time, date, timedelta
 from zoneinfo import ZoneInfo
+from app import get_db  # <-- IMPORT THE NEW FUNCTION
 # --- MODIFICATION END ---
 
 summary_bp = Blueprint('summary', __name__, url_prefix='/summary')
@@ -120,7 +121,7 @@ def calculate_period_summary(start_date, end_date, db):
 
 @summary_bp.route('/detailed', methods=['GET'])
 def get_detailed_summary():
-    db = current_app.db
+    db = get_db()  # <-- USE THE NEW FUNCTION
 
     # 1. Calculate Balances (All transactions included)
     khr_pipeline = [

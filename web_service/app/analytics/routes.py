@@ -1,11 +1,12 @@
 # --- Start of modified file: web_service/app/analytics/routes.py ---
 
 import io
-from flask import Blueprint, current_app, Response, request, jsonify
+from flask import Blueprint, Response, request, jsonify
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 import matplotlib.pyplot as plt
 import re
+from app import get_db  # <-- IMPORT THE NEW FUNCTION
 
 analytics_bp = Blueprint('analytics', __name__, url_prefix='/analytics')
 
@@ -17,7 +18,6 @@ FINANCIAL_TRANSACTION_CATEGORIES = [
     'Initial Balance'
 ]
 
-# --- FIX: Corrected 'Phnom_PenH' to 'Phnom_Penh' ---
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 UTC_TZ = ZoneInfo("UTC")
 
@@ -50,7 +50,7 @@ def search_transactions():
     """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     """Performs an advanced search and sums up matching transactions."""
     params = request.json
-    db = current_app.db
+    db = get_db()  # <-- USE THE NEW FUNCTION
 
     # 1. Build Match Stage (Same as before)
     match_stage = {}
@@ -104,7 +104,7 @@ def search_transactions():
         }
     })
 
-    results = list(db.transactions.aggregate(pipeline))
+    results = list(db.transactions.aggregate(pipeline))  # <-- USE db
 
     # 3. Format Response
     if not results:
@@ -152,6 +152,7 @@ def get_detailed_report():
     Generates a detailed report with income/expense summaries, breakdowns,
     and new analytics like spending over time and top transactions.
     """
+    db = get_db()  # <-- USE THE NEW FUNCTION
     start_date_str = request.args.get('start_date')
     end_date_str = request.args.get('end_date')
 
@@ -199,7 +200,7 @@ def get_detailed_report():
         add_fields_stage,
         {'$group': {'_id': '$type', 'totalUSD': {'$sum': '$amount_in_usd'}}}
     ]
-    start_balance_data = list(current_app.db.transactions.aggregate(start_balance_pipeline))
+    start_balance_data = list(db.transactions.aggregate(start_balance_pipeline))  # <-- USE db
     start_income = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'income'), 0)
     start_expense = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'expense'), 0)
     balance_at_start_usd = start_income - start_expense
@@ -275,12 +276,12 @@ def get_detailed_report():
     ]
 
     # --- Execute All Pipelines ---
-    operational_data = list(current_app.db.transactions.aggregate(operational_pipeline))
-    financial_data = list(current_app.db.transactions.aggregate(financial_pipeline))
-    total_flow_data = list(current_app.db.transactions.aggregate(total_flow_pipeline))
-    spending_over_time_data = list(current_app.db.transactions.aggregate(spending_over_time_pipeline))
-    daily_stats_data = list(current_app.db.transactions.aggregate(daily_stats_pipeline))
-    top_expense_data = list(current_app.db.transactions.aggregate(top_expense_pipeline))
+    operational_data = list(db.transactions.aggregate(operational_pipeline))
+    financial_data = list(db.transactions.aggregate(financial_pipeline))
+    total_flow_data = list(db.transactions.aggregate(total_flow_pipeline))
+    spending_over_time_data = list(db.transactions.aggregate(spending_over_time_pipeline))
+    daily_stats_data = list(db.transactions.aggregate(daily_stats_pipeline))
+    top_expense_data = list(db.transactions.aggregate(top_expense_pipeline))
 
     # --- Assemble Report ---
     report = {
@@ -335,6 +336,7 @@ def get_spending_habits():
     """
     Analyzes transaction data to provide insights into spending habits.
     """
+    db = get_db()  # <-- USE THE NEW FUNCTION
     start_date_str = request.args.get('start_date')
     end_date_str = request.args.get('end_date')
 
@@ -415,7 +417,7 @@ def get_spending_habits():
     ]
 
     habits = {
-        'byDayOfWeek': list(current_app.db.transactions.aggregate(day_of_week_pipeline)),
-        'keywordsByCategory': list(current_app.db.transactions.aggregate(keywords_pipeline))
+        'byDayOfWeek': list(db.transactions.aggregate(day_of_week_pipeline)),
+        'keywordsByCategory': list(db.transactions.aggregate(keywords_pipeline))
     }
     return jsonify(habits)

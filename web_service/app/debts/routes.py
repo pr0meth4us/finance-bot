@@ -1,10 +1,11 @@
 # --- Start of modified file: web_service/app/debts/routes.py ---
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify
 from datetime import datetime
 from bson import ObjectId
 import re
 from zoneinfo import ZoneInfo
-from app.utils.currency import get_live_usd_to_khr_rate  # <-- NEW IMPORT
+from app.utils.currency import get_live_usd_to_khr_rate
+from app import get_db  # <-- IMPORT THE NEW FUNCTION
 
 debts_bp = Blueprint('debts', __name__, url_prefix='/debts')
 UTC_TZ = ZoneInfo("UTC")
@@ -41,7 +42,7 @@ def get_db_rate(db):
 def add_debt():
     """Adds a new debt and a corresponding transaction to reflect the balance change."""
     data = request.json
-    db = current_app.db
+    db = get_db()  # <-- USE THE NEW FUNCTION
     if not all(k in data for k in ['type', 'person', 'amount', 'currency']):
         return jsonify({'error': 'Missing required fields'}), 400
 
@@ -82,6 +83,7 @@ def add_debt():
 @debts_bp.route('/', methods=['GET'])
 def get_open_debts():
     """Fetches and groups open debts by person, consolidating currencies."""
+    db = get_db()  # <-- USE THE NEW FUNCTION
     pipeline = [
         {'$match': {'status': 'open'}},
         {'$group': {
@@ -103,13 +105,14 @@ def get_open_debts():
         }},
         {'$sort': {'person': 1}}
     ]
-    grouped_debts = list(current_app.db.debts.aggregate(pipeline))
+    grouped_debts = list(db.debts.aggregate(pipeline))
     return jsonify(grouped_debts)
 
 
 @debts_bp.route('/list/settled', methods=['GET'])
 def get_settled_debts_grouped():
     """Fetches and groups settled OR canceled debts by person, consolidating currencies."""
+    db = get_db()  # <-- USE THE NEW FUNCTION
     pipeline = [
         {'$match': {'status': {'$in': ['settled', 'canceled']}}},
         {'$group': {
@@ -131,44 +134,48 @@ def get_settled_debts_grouped():
         }},
         {'$sort': {'person': 1}}
     ]
-    grouped_debts = list(current_app.db.debts.aggregate(pipeline))
+    grouped_debts = list(db.debts.aggregate(pipeline))
     return jsonify(grouped_debts)
 
 
 @debts_bp.route('/<debt_id>', methods=['GET'])
 def get_debt_details(debt_id):
-    debt = current_app.db.debts.find_one({'_id': ObjectId(debt_id)})
+    db = get_db()  # <-- USE THE NEW FUNCTION
+    debt = db.debts.find_one({'_id': ObjectId(debt_id)})
     if not debt: return jsonify({'error': 'Debt not found'}), 404
     return jsonify(serialize_debt(debt))
 
 
 @debts_bp.route('/person/<person_name>/<currency>', methods=['GET'])
 def get_debts_by_person_and_currency(person_name, currency):
+    db = get_db()  # <-- USE THE NEW FUNCTION
     query_filter = {
         'person': re.compile(f'^{re.escape(person_name)}$', re.IGNORECASE),
         'currency': currency, 'status': 'open'
     }
-    debts = list(current_app.db.debts.find(query_filter).sort('created_at', 1))
+    debts = list(db.debts.find(query_filter).sort('created_at', 1))
     return jsonify([serialize_debt(d) for d in debts])
 
 
 @debts_bp.route('/person/<person_name>/all', methods=['GET'])
 def get_all_debts_by_person(person_name):
+    db = get_db()  # <-- USE THE NEW FUNCTION
     query_filter = {
         'person': re.compile(f'^{re.escape(person_name)}$', re.IGNORECASE),
         'status': 'open'
     }
-    debts = list(current_app.db.debts.find(query_filter).sort('created_at', 1))
+    debts = list(db.debts.find(query_filter).sort('created_at', 1))
     return jsonify([serialize_debt(d) for d in debts])
 
 
 @debts_bp.route('/person/<person_name>/all/settled', methods=['GET'])
 def get_all_settled_debts_by_person(person_name):
+    db = get_db()  # <-- USE THE NEW FUNCTION
     query_filter = {
         'person': re.compile(f'^{re.escape(person_name)}$', re.IGNORECASE),
         'status': {'$in': ['settled', 'canceled']}
     }
-    debts = list(current_app.db.debts.find(query_filter).sort('created_at', 1))
+    debts = list(db.debts.find(query_filter).sort('created_at', 1))
     return jsonify([serialize_debt(d) for d in debts])
 
 
@@ -178,7 +185,7 @@ def record_lump_sum_repayment(payment_currency):
     Handles a lump-sum repayment, including cross-currency logic.
     """
     data = request.json
-    db = current_app.db
+    db = get_db()  # <-- USE THE NEW FUNCTION
     if 'amount' not in data or 'type' not in data:
         return jsonify({'error': 'Repayment amount and type are required'}), 400
 
@@ -314,7 +321,7 @@ def record_lump_sum_repayment(payment_currency):
 
 @debts_bp.route('/<debt_id>/cancel', methods=['POST'])
 def cancel_debt(debt_id):
-    db = current_app.db
+    db = get_db()  # <-- USE THE NEW FUNCTION
     try:
         debt = db.debts.find_one({'_id': ObjectId(debt_id)})
         if not debt:
@@ -362,7 +369,7 @@ def cancel_debt(debt_id):
 
 @debts_bp.route('/<debt_id>', methods=['PUT'])
 def update_debt(debt_id):
-    db = current_app.db
+    db = get_db()  # <-- USE THE NEW FUNCTION
     data = request.json
     if not data or not any(k in data for k in ['person', 'purpose']):
         return jsonify({'error': 'No valid fields (person, purpose) provided for update.'}), 400
@@ -387,7 +394,7 @@ def update_debt(debt_id):
 @debts_bp.route('/analysis', methods=['GET'])
 def get_debt_analysis():
     """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
-    db = current_app.db
+    db = get_db()  # <-- USE THE NEW FUNCTION
     now = datetime.now(UTC_TZ)
 
     # --- Pipeline 1: Concentration (Top people) ---

@@ -1,9 +1,12 @@
-from flask import Blueprint, request, jsonify, current_app
+# --- Start of modified file: web_service/app/transactions/routes.py ---
+
+from flask import Blueprint, request, jsonify
 from datetime import datetime, time, timedelta
 from bson import ObjectId
 from app.utils.currency import get_live_usd_to_khr_rate
 import re
 from zoneinfo import ZoneInfo
+from app import get_db  # <-- IMPORT THE NEW FUNCTION
 
 transactions_bp = Blueprint('transactions', __name__, url_prefix='/transactions')
 
@@ -49,6 +52,7 @@ def serialize_tx(tx):
 @transactions_bp.route('/', methods=['POST'])
 def add_transaction():
     data = request.json
+    db = get_db()  # <-- USE THE NEW FUNCTION
     if not all(k in data for k in ['type', 'amount', 'currency', 'categoryId', 'accountName']):
         return jsonify({'error': 'Missing required fields'}), 400
 
@@ -70,14 +74,15 @@ def add_transaction():
     if tx['currency'] == 'KHR':
         tx['exchangeRateAtTime'] = get_live_usd_to_khr_rate()
 
-    result = current_app.db.transactions.insert_one(tx)
+    result = db.transactions.insert_one(tx)
     return jsonify({'message': 'Transaction added', 'id': str(result.inserted_id)}), 201
 
 
 @transactions_bp.route('/recent', methods=['GET'])
 def get_recent_transactions():
+    db = get_db()  # <-- USE THE NEW FUNCTION
     limit = int(request.args.get('limit', 20))
-    txs = list(current_app.db.transactions.find().sort('timestamp', -1).limit(limit))
+    txs = list(db.transactions.find().sort('timestamp', -1).limit(limit))
     return jsonify([serialize_tx(tx) for tx in txs])
 
 
@@ -85,7 +90,7 @@ def get_recent_transactions():
 def search_transactions():
     """Performs an advanced search and returns a list of matching transactions."""
     params = request.json
-    db = current_app.db
+    db = get_db()  # <-- USE THE NEW FUNCTION
     match_stage = {}
 
     date_filter = {}
@@ -129,8 +134,9 @@ def search_transactions():
 
 @transactions_bp.route('/<tx_id>', methods=['GET'])
 def get_transaction(tx_id):
+    db = get_db()  # <-- USE THE NEW FUNCTION
     try:
-        transaction = current_app.db.transactions.find_one({'_id': ObjectId(tx_id)})
+        transaction = db.transactions.find_one({'_id': ObjectId(tx_id)})
         if transaction:
             return jsonify(serialize_tx(transaction))
         else:
@@ -143,6 +149,7 @@ def get_transaction(tx_id):
 def update_transaction(tx_id):
     """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     data = request.json
+    db = get_db()  # <-- USE THE NEW FUNCTION
     if not data:
         return jsonify({'error': 'No update data provided'}), 400
 
@@ -174,7 +181,7 @@ def update_transaction(tx_id):
         return jsonify({'error': 'No valid fields to update'}), 400
 
     try:
-        result = current_app.db.transactions.update_one(
+        result = db.transactions.update_one(
             {'_id': ObjectId(tx_id)},
             {'$set': update_fields}
         )
@@ -188,8 +195,9 @@ def update_transaction(tx_id):
 
 @transactions_bp.route('/<tx_id>', methods=['DELETE'])
 def delete_transaction(tx_id):
+    db = get_db()  # <-- USE THE NEW FUNCTION
     try:
-        result = current_app.db.transactions.delete_one({'_id': ObjectId(tx_id)})
+        result = db.transactions.delete_one({'_id': ObjectId(tx_id)})
         if result.deleted_count:
             return jsonify({'message': 'Transaction deleted'})
         else:

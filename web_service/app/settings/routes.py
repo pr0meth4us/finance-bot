@@ -1,5 +1,8 @@
-from flask import Blueprint, request, jsonify, current_app
-from app.utils.currency import get_live_usd_to_khr_rate  # <-- NEW IMPORT
+# --- Start of modified file: web_service/app/settings/routes.py ---
+
+from flask import Blueprint, request, jsonify
+from app.utils.currency import get_live_usd_to_khr_rate
+from app import get_db  # <-- IMPORT THE NEW FUNCTION
 
 settings_bp = Blueprint('settings', __name__, url_prefix='/settings')
 
@@ -15,7 +18,8 @@ def update_khr_rate():
     except ValueError:
         return jsonify({'error': 'Rate must be a number'}), 400
 
-    current_app.db.settings.update_one(
+    db = get_db()  # <-- USE THE NEW FUNCTION
+    db.settings.update_one(
         {'_id': 'config'},
         {'$set': {'khr_to_usd_rate': new_rate}},
         upsert=True

@@ -4,7 +4,7 @@ import certifi
 import io
 import requests
 import matplotlib.pyplot as plt
-from flask import Flask, jsonify
+from flask import Flask, jsonify, g, current_app
 from pymongo import MongoClient
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -20,7 +20,7 @@ FINANCIAL_TRANSACTION_CATEGORIES = [
 ]
 
 
-# --- HELPER FUNCTIONS FOR SCHEDULED JOBS ---
+# --- HELPER FUNCTIONS FOR SCHEDULED JOBS (No changes here) ---
 
 def send_telegram_message(chat_id, text, token, parse_mode='HTML'):
     """A simple function to send a message via the Telegram API."""
@@ -169,7 +169,7 @@ def create_pie_chart_from_data(data, start_date, end_date):
     return buf.getvalue()
 
 
-# --- SCHEDULED JOB DEFINITIONS ---
+# --- SCHEDULED JOB DEFINITIONS (No changes here) ---
 def _send_report_job(period_name, start_date, end_date, db, token, chat_id):
     """Generic helper to generate and send a report."""
     report_data = get_report_data(start_date, end_date, db)
@@ -242,19 +242,52 @@ def send_daily_reminder_job():
     client.close()
 
 
-# --- APP CREATION ---
+# --- NEW DB CONNECTION FUNCTIONS ---
+
+def get_db():
+    """
+    Connects to the MongoDB database for the current application context.
+    """
+    if 'db_client' not in g:
+        g.db_client = MongoClient(
+            current_app.config['MONGODB_URI'],
+            tls=True,
+            tlsCAFile=certifi.where()
+        )
+        g.db = g.db_client[current_app.config['DB_NAME']]
+        print("✅ New MongoDB connection opened for this context.")
+    return g.db
+
+
+def close_db(e=None):
+    """Closes the database connection on app context teardown."""
+    client = g.pop('db_client', None)
+    if client is not None:
+        client.close()
+        g.pop('db', None)
+        print("MongoDB connection closed for this context.")
+
+
+# --- APP CREATION (Modified) ---
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    client = MongoClient(Config.MONGODB_URI, tls=True, tlsCAFile=certifi.where())
-    app.db = client[Config.DB_NAME]
-    print("✅ MongoDB connection successful.")
+    # --- THIS IS THE FIX ---
+    # We no longer create the client here.
+    # We just copy the config values into Flask's app.config
+    # so get_db() can use them later via current_app.config
+    app.config['MONGODB_URI'] = Config.MONGODB_URI
+    app.config['DB_NAME'] = Config.DB_NAME
+
+    # Register the close_db function to be called on teardown
+    app.teardown_appcontext(close_db)
+    # --- END FIX ---
 
     scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Phnom_Penh')
 
-    # Schedule all jobs
+    # Schedule all jobs (No change here)
     scheduler.add_job(send_daily_reminder_job, trigger=CronTrigger(hour=21, minute=0), id='daily_reminder',
                       replace_existing=True)
     scheduler.add_job(run_scheduled_report, args=['weekly'], trigger=CronTrigger(day_of_week='mon', hour=8, minute=0),
@@ -271,14 +304,14 @@ def create_app():
     app.scheduler = scheduler
     print("⏰ Scheduler started with daily, weekly, monthly, semesterly, and yearly jobs.")
 
-    # Register Blueprints
+    # Register Blueprints (No change here)
     from .settings.routes import settings_bp
     from .analytics.routes import analytics_bp
     from .transactions.routes import transactions_bp
     from .debts.routes import debts_bp
     from .summary.routes import summary_bp
     from .reminders.routes import reminders_bp
-    from .auth.routes import auth_bp # <-- IMPORT NEW AUTH BLUEPRINT
+    from .auth.routes import auth_bp
 
     app.register_blueprint(settings_bp)
     app.register_blueprint(analytics_bp)
@@ -286,7 +319,7 @@ def create_app():
     app.register_blueprint(debts_bp)
     app.register_blueprint(summary_bp)
     app.register_blueprint(reminders_bp)
-    app.register_blueprint(auth_bp) # <-- REGISTER NEW AUTH BLUEPRINT
+    app.register_blueprint(auth_bp)
 
     @app.route("/health")
     def health_check():
