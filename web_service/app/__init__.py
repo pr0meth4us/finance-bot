@@ -5,7 +5,7 @@ import io
 import os
 import requests
 import matplotlib.pyplot as plt
-from flask import Flask, jsonify, current_app
+from flask import Flask, jsonify, g, current_app
 from pymongo import MongoClient
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -19,6 +19,19 @@ UTC_TZ = ZoneInfo("UTC")
 FINANCIAL_TRANSACTION_CATEGORIES = [
     'Loan Lent', 'Debt Repayment', 'Loan Received', 'Debt Settled', 'Initial Balance'
 ]
+
+# --- Default Connection Arguments ---
+# Use these for ALL client instances
+MONGO_CONNECTION_ARGS = {
+    "tls": True,
+    "tlsDisableOCSPEndpointCheck": True,
+    "serverSelectionTimeoutMS": 8000,
+    "connectTimeoutMS": 5000,
+    "socketTimeoutMS": 10000,
+    "tlsCAFile": certifi.where(),      # <-- ADD THIS LINE
+}
+
+
 
 # --- HELPER FUNCTIONS FOR SCHEDULED JOBS (No changes here) ---
 
@@ -189,13 +202,8 @@ def run_scheduled_report(period):
     print(f"Running {period} scheduled report job...")
 
     # --- THIS IS THE FIX ---
-    # Create a new client *inside the job* using the same args as the app
-    # This ensures jobs that run in separate threads/processes connect correctly
-    client = MongoClient(
-        Config.MONGODB_URI,
-        tls=True,
-        tlsCAFile=certifi.where()
-    )
+    # Use the robust connection arguments for the background job
+    client = MongoClient(Config.MONGODB_URI, **MONGO_CONNECTION_ARGS)
     # --- END FIX ---
 
     db = client[Config.DB_NAME]
@@ -251,12 +259,8 @@ def send_daily_reminder_job():
     # This job is different, so it keeps its own logic
 
     # --- THIS IS THE FIX ---
-    # Create a new client *inside the job*
-    client = MongoClient(
-        Config.MONGODB_URI,
-        tls=True,
-        tlsCAFile=certifi.where()
-    )
+    # Use the robust connection arguments for the background job
+    client = MongoClient(Config.MONGODB_URI, **MONGO_CONNECTION_ARGS)
     # --- END FIX ---
 
     db = client[Config.DB_NAME]
@@ -273,7 +277,7 @@ def send_daily_reminder_job():
     today_start_local_aware = datetime.combine(now_in_phnom_penh.date(), time.min, tzinfo=PHNOM_PENH_TZ)
     today_start_utc = today_start_local_aware.astimezone(ZoneInfo("UTC"))
 
-    # This query is NOT user-specific yet.
+    # This query is NOT user-specific yet. We will fix this in a later part.
     count = db.transactions.count_documents({'timestamp': {'$gte': today_start_utc}})
 
     if count == 0:
@@ -285,29 +289,38 @@ def send_daily_reminder_job():
     client.close()
 
 
+# --- NEW DB CONNECTION FUNCTIONS (Modified) ---
+
+def get_db():
+    if 'db_client' not in g:
+        uri = current_app.config['MONGODB_URI']
+        g.db_client = MongoClient(uri, **MONGO_CONNECTION_ARGS)
+        g.db = g.db_client[current_app.config['DB_NAME']]
+    return g.db
+
+
+def close_db(e=None):
+    """Closes the database connection on app context teardown."""
+    client = g.pop('db_client', None)
+    if client is not None:
+        client.close()
+        g.pop('db', None)
+        print("MongoDB connection closed for this context.")
+
+
 # --- APP CREATION (Modified) ---
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
-    print(f"MongoDB URI: {Config.MONGODB_URI[:50]}...")  # Print first 50 chars
 
-
-# --- REVERTED DB LOGIC ---
-    # Create a single, global client, just like v1
-    client = MongoClient(
-        Config.MONGODB_URI,
-        tls=True,
-        tlsCAFile=certifi.where() # Use certifi for TLS
-    )
-    app.db = client[Config.DB_NAME]
-    print("✅ MongoDB connection successful (global client).")
-    # --- END REVERT ---
-
-    # Pass config to app.config
+    # Pass config to app.config (used by get_db)
     app.config['MONGODB_URI'] = Config.MONGODB_URI
     app.config['DB_NAME'] = Config.DB_NAME
     app.config['TELEGRAM_TOKEN'] = Config.TELEGRAM_TOKEN
+
+    # Close DB on teardown
+    app.teardown_appcontext(close_db)
 
     # ----- Scheduler (unchanged) -----
     scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Phnom_Penh')
@@ -361,6 +374,7 @@ def create_app():
                 if mode == "json":
                     data = r.json()
                     val = data.get(key, "")
+                    # httpbin 'origin' can be "ip, ip" when passing proxies
                     ip = val.split(",")[0].strip() if isinstance(val, str) else val
                     if ip:
                         return jsonify({"ip": ip, "source": url.split("//")[1].split("/")[0]})
@@ -375,15 +389,25 @@ def create_app():
     @app.route("/__db_ping")
     def db_ping():
         """
-        Pings MongoDB using the app's global client.
+        Pings MongoDB using the same connection args the app uses.
+        Returns admin ping, current DB ping, and a light stats snapshot.
         """
-        try:
-            # Use the global db client attached to the app
-            admin_ok = current_app.db.client.admin.command("ping").get("ok", 0) == 1
-            db_ok = current_app.db.command("ping").get("ok", 0) == 1
+        uri = current_app.config.get("MONGODB_URI")
+        dbname = current_app.config.get("DB_NAME")
+        if not uri or not dbname:
+            return jsonify({"ok": False, "error": "DB config missing"}), 500
 
+        try:
+            # Fresh short-lived client to avoid depending on request context state
+            client = MongoClient(uri, **MONGO_CONNECTION_ARGS)
+            admin_ok = client.admin.command("ping").get("ok", 0) == 1
+
+            db = client[dbname]
+            db_ok = db.command("ping").get("ok", 0) == 1
+
+            # Light info (avoid heavy ops):
             try:
-                colls = current_app.db.list_collection_names()
+                colls = db.list_collection_names()
             except Exception:
                 colls = []
 
@@ -391,10 +415,11 @@ def create_app():
                 "ok": admin_ok and db_ok,
                 "admin_ping": admin_ok,
                 "db_ping": db_ok,
-                "db_name": current_app.db.name,
+                "db_name": dbname,
                 "collections_count": len(colls),
-                "collections": sorted(colls)[:25],
+                "collections": sorted(colls)[:25],  # cap the list
             }
+            client.close()
             status = 200 if payload["ok"] else 500
             return jsonify(payload), status
         except Exception as e:

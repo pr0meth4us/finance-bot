@@ -1,9 +1,9 @@
 # --- Start of file: web_service/app/auth/routes.py ---
 
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify
 from datetime import datetime
 from bson import ObjectId
-# --- MODIFICATION: Import current_app, remove get_db ---
+from app import get_db
 from zoneinfo import ZoneInfo
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
@@ -88,7 +88,7 @@ def find_or_create_user():
     This is the primary authentication endpoint for the bot.
     It finds a user by their telegram_id or creates them if they don't exist.
     """
-    db = current_app.db # <-- MODIFICATION
+    db = get_db()
     data = request.json
     telegram_user_id = data.get('telegram_user_id')
 
