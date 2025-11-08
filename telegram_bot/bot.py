@@ -1,7 +1,7 @@
 # --- telegram_bot/bot.py (FULL) ---
 import os
 import logging
-import asyncio  # <-- NEW IMPORT
+import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from dotenv import load_dotenv
@@ -70,7 +70,22 @@ async def on_error(update: object, context):
         logger.error(f"User Data: {context.user_data}")
 
 
-async def main():  # <-- MODIFIED: Changed to async
+# --- NEW: post_init function ---
+async def post_init(app: Application):
+    """
+    Runs after the Application is built, but before polling starts.
+    Used to delete any existing webhook to prevent 409 Conflict errors.
+    """
+    try:
+        logger.info("Running post_init: Attempting to delete webhook...")
+        await app.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("post_init: Webhook deleted successfully.")
+    except Exception as e:
+        logger.error(f"post_init: Error deleting webhook: {e}", exc_info=True)
+# --- END NEW FUNCTION ---
+
+
+def main():  # <-- MODIFICATION: Changed back to synchronous
     # Load translations into memory on boot
     load_translations()
 
@@ -85,7 +100,9 @@ async def main():  # <-- MODIFIED: Changed to async
         logger.critical("❌ TELEGRAM_TOKEN not found. Bot cannot start.")
         return
 
-    app = Application.builder().token(token).build()
+    # --- MODIFICATION: Added post_init hook ---
+    app = Application.builder().token(token).post_init(post_init).build()
+
     app.add_error_handler(on_error)
 
     # System commands
@@ -133,33 +150,21 @@ async def main():  # <-- MODIFIED: Changed to async
     app.add_handler(CallbackQueryHandler(download_debt_analysis_csv, pattern="^debt_analysis_csv$"))
     # --- END NEW HANDLERS ---
 
-    # --- MODIFICATION: Force delete webhook before polling ---
-    # This is critical to prevent the '409 Conflict' error if a
-    # previous instance of the bot crashed without shutting down.
-    try:
-        logger.info("Attempting to delete webhook...")
-        await app.bot.delete_webhook(drop_pending_updates=True)
-        logger.info("Webhook deleted successfully.")
-    except Exception as e:
-        logger.error(f"Error deleting webhook: {e}", exc_info=True)
-    # --- END MODIFICATION ---
-
     logger.info("🚀 Bot is starting polling...")
 
-    # We pass 'stop_signals=None' so that the container orchestrator
-    # (like Docker or Kubernetes) can send SIGTERM and the bot
-    # will shut down gracefully on its own.
-    await app.run_polling(
-        drop_pending_updates=True,  # Drop old updates on start
+    # --- MODIFICATION: This is now a blocking, synchronous call ---
+    # It will run forever until a stop signal is received.
+    app.run_polling(
+        drop_pending_updates=True,
         allowed_updates=Update.ALL_TYPES,
-        stop_signals=None,
+        stop_signals=None,  # Let container orchestrator send SIGTERM
     )
 
 
 if __name__ == "__main__":
-    # --- MODIFICATION: Use asyncio.run to start the async main() ---
+    # --- MODIFICATION: Call the synchronous main() function directly ---
     try:
-        asyncio.run(main())
+        main()
     except (KeyboardInterrupt, SystemExit):
         logger.info("Bot shutting down...")
     except Exception as e:
