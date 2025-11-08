@@ -23,6 +23,9 @@ from .helpers import (
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
+# --- FIX: Define REGEX for this handler ---
+REPORT_PERIOD_REGEX = '^(Today|This Week|Last Week|This Month|Last Month|Custom Range)$'
+
 
 # --- Report Generation ---
 @restricted
