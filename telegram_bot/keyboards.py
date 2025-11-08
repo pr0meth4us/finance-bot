@@ -1,46 +1,81 @@
 # --- Start of modified file: telegram_bot/keyboards.py ---
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from datetime import datetime
+from telegram.ext import ContextTypes
+from ..utils.i18n import t
 
 
-def main_menu_keyboard():
+def main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
-            InlineKeyboardButton("💸 Add Expense", callback_data='add_expense'),
-            InlineKeyboardButton("💰 Add Income", callback_data='add_income')
+            InlineKeyboardButton(
+                t("keyboards.add_expense", context),
+                callback_data='add_expense'
+            ),
+            InlineKeyboardButton(
+                t("keyboards.add_income", context),
+                callback_data='add_income'
+            )
         ],
         [
-            InlineKeyboardButton("🤔 Forgot to Log?",
-                                 callback_data='forgot_log_start'),
-            InlineKeyboardButton("🔍 Quick Check", callback_data='quick_check'),
+            InlineKeyboardButton(
+                t("keyboards.forgot_log", context),
+                callback_data='forgot_log_start'
+            ),
+            InlineKeyboardButton(
+                t("keyboards.quick_check", context),
+                callback_data='quick_check'
+            ),
         ],
         [
-            InlineKeyboardButton("🔔 Set Reminder",
-                                 callback_data='set_reminder_start'),
-            InlineKeyboardButton("🤝 IOU / Debts", callback_data='iou_menu')
+            InlineKeyboardButton(
+                t("keyboards.set_reminder", context),
+                callback_data='set_reminder_start'
+            ),
+            InlineKeyboardButton(
+                t("keyboards.iou_menu", context),
+                callback_data='iou_menu'
+            )
         ],
         [
-            InlineKeyboardButton("📖 History", callback_data='history'),
-            InlineKeyboardButton("🔎 Search & Analyze",
-                                 callback_data='search_menu')
+            InlineKeyboardButton(
+                t("keyboards.history", context),
+                callback_data='history'
+            ),
+            InlineKeyboardButton(
+                t("keyboards.search", context),
+                callback_data='search_menu'
+            )
         ],
         [
-            InlineKeyboardButton("📈 Report", callback_data='report_menu'),
-            InlineKeyboardButton("🧠 Habits", callback_data='habits_menu')
+            InlineKeyboardButton(
+                t("keyboards.report", context),
+                callback_data='report_menu'
+            ),
+            InlineKeyboardButton(
+                t("keyboards.habits", context),
+                callback_data='habits_menu'
+            )
         ],
         [
-            InlineKeyboardButton("📊 Get Live Rate",
-                                 callback_data='get_live_rate'),
-            InlineKeyboardButton("⚙️ Settings", callback_data='settings_menu')
+            InlineKeyboardButton(
+                t("keyboards.get_live_rate", context),
+                callback_data='get_live_rate'
+            ),
+            InlineKeyboardButton(
+                t("keyboards.settings", context),
+                callback_data='settings_menu'
+            )
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
-def search_menu_keyboard():
+def search_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton(
-            "✍️ Find & Manage Transactions", callback_data='start_search_manage'
+            "✍️ Find & Manage Transactions",
+            callback_data='start_search_manage'
         )],
         [InlineKeyboardButton(
             "📈 Calculate Totals", callback_data='start_search_sum'
@@ -50,7 +85,7 @@ def search_menu_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-def reminder_date_keyboard():
+def reminder_date_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("Tomorrow", callback_data='remind_date_1'),
@@ -65,7 +100,7 @@ def reminder_date_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-def forgot_day_keyboard():
+def forgot_day_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("Yesterday", callback_data='forgot_day_1'),
@@ -79,7 +114,7 @@ def forgot_day_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-def iou_date_keyboard():
+def iou_date_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("Today", callback_data='iou_date_today'),
@@ -94,7 +129,7 @@ def iou_date_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-def forgot_type_keyboard():
+def forgot_type_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("💸 Expense",
@@ -106,7 +141,7 @@ def forgot_type_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-def report_period_keyboard(is_search=False):
+def report_period_keyboard(context: ContextTypes.DEFAULT_TYPE, is_search=False):
     keyboard = [
         [
             InlineKeyboardButton("🗓️ Today",
@@ -136,7 +171,7 @@ def report_period_keyboard(is_search=False):
     return InlineKeyboardMarkup(keyboard)
 
 
-def search_type_keyboard():
+def search_type_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("💸 Expense",
@@ -149,14 +184,14 @@ def search_type_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-def skip_keyboard(callback_data):
+def skip_keyboard(context: ContextTypes.DEFAULT_TYPE, callback_data):
     keyboard = [
         [InlineKeyboardButton("⏩ Skip", callback_data=callback_data)],
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
-def search_keyword_logic_keyboard():
+def search_keyword_logic_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("Must contain ALL (AND)",
@@ -168,9 +203,7 @@ def search_keyword_logic_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-# --- NEW/MODIFIED SETTINGS KEYBOARDS ---
-
-def settings_menu_keyboard():
+def settings_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton(
@@ -194,7 +227,7 @@ def settings_menu_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-def set_balance_account_keyboard():
+def set_balance_account_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("💵 USD Account",
@@ -208,7 +241,7 @@ def set_balance_account_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-def manage_categories_keyboard():
+def manage_categories_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("➕ Add Category",
@@ -222,7 +255,7 @@ def manage_categories_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-def category_type_keyboard(action):
+def category_type_keyboard(context: ContextTypes.DEFAULT_TYPE, action: str):
     """Generates a keyboard to select category type (expense/income)."""
     keyboard = [
         [
@@ -242,10 +275,7 @@ def category_type_keyboard(action):
     return InlineKeyboardMarkup(keyboard)
 
 
-# --- END SETTINGS KEYBOARDS ---
-
-
-def iou_menu_keyboard():
+def iou_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("➡️ I Lent Money", callback_data='iou_lent')],
         [InlineKeyboardButton("⬅️ I Borrowed Money",
@@ -260,7 +290,8 @@ def iou_menu_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-def iou_list_keyboard(grouped_debts, is_settled=False):
+def iou_list_keyboard(grouped_debts, context: ContextTypes.DEFAULT_TYPE,
+                      is_settled=False):
     """Shows a consolidated list of debts grouped by person."""
     keyboard = []
     status_str = "settled" if is_settled else "open"
@@ -269,7 +300,6 @@ def iou_list_keyboard(grouped_debts, is_settled=False):
     borrowed = [d for d in grouped_debts if d['type'] == 'borrowed']
 
     def format_totals(totals):
-        """Helper to format totals, e.g., '60.00 USD (2), 20000 KHR (1)'"""
         parts = []
         for t in totals:
             amount_format = ",.0f" if t['currency'] == 'KHR' else ",.2f"
@@ -301,7 +331,9 @@ def iou_list_keyboard(grouped_debts, is_settled=False):
     return InlineKeyboardMarkup(keyboard)
 
 
-def iou_person_actions_keyboard(person_name, debt_type, is_settled=False):
+def iou_person_actions_keyboard(person_name, debt_type,
+                                context: ContextTypes.DEFAULT_TYPE,
+                                is_settled=False):
     """Shows action buttons for the unified person ledger screen."""
     keyboard = []
 
@@ -325,12 +357,15 @@ def iou_person_actions_keyboard(person_name, debt_type, is_settled=False):
 
 
 def iou_manage_list_keyboard(person_debts, person_name,
-                             debt_type, is_settled):
+                             debt_type, is_settled,
+                             context: ContextTypes.DEFAULT_TYPE):
     """Displays a list of individual debts for management (Edit/Cancel)."""
     keyboard = []
 
     for debt in person_debts:
-        created_date = datetime.fromisoformat(debt['created_at']).strftime('%d %b')
+        created_date = datetime.fromisoformat(
+            debt['created_at']
+        ).strftime('%d %b')
         purpose = debt.get('purpose') or 'No purpose'
         amount_key = 'remainingAmount' if not is_settled else 'originalAmount'
         amount = debt.get(amount_key, 0)
@@ -354,7 +389,8 @@ def iou_manage_list_keyboard(person_debts, person_name,
 
 
 def iou_detail_actions_keyboard(debt_id, person_name, debt_type,
-                                is_settled, status):
+                                is_settled, status,
+                                context: ContextTypes.DEFAULT_TYPE):
     """Shows actions for a single, specific debt."""
     keyboard = []
 
@@ -374,7 +410,8 @@ def iou_detail_actions_keyboard(debt_id, person_name, debt_type,
     return InlineKeyboardMarkup(keyboard)
 
 
-def iou_manage_keyboard(debt_id, person, is_settled_str):
+def iou_manage_keyboard(debt_id, person, is_settled_str,
+                        context: ContextTypes.DEFAULT_TYPE):
     """Keyboard for editing or canceling a debt."""
     keyboard = [
         [
@@ -402,7 +439,8 @@ def iou_manage_keyboard(debt_id, person, is_settled_str):
     return InlineKeyboardMarkup(keyboard)
 
 
-def iou_cancel_confirm_keyboard(debt_id, person, is_settled_str):
+def iou_cancel_confirm_keyboard(debt_id, person, is_settled_str,
+                                context: ContextTypes.DEFAULT_TYPE):
     """Confirmation keyboard for canceling a debt."""
     keyboard = [
         [
@@ -422,7 +460,7 @@ def iou_cancel_confirm_keyboard(debt_id, person, is_settled_str):
     return InlineKeyboardMarkup(keyboard)
 
 
-def currency_keyboard():
+def currency_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("💵 USD", callback_data='curr_USD'),
@@ -432,77 +470,57 @@ def currency_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-def expense_categories_keyboard():
-    """
-    This keyboard is now dynamic and should be fetched from user settings.
-    For v2, we will keep it static, but in v3 we will refactor this
-    to be built from context.user_data['user_profile']['settings'].
-    """
-    keyboard = [
-        [
-            InlineKeyboardButton("🍔 Food", callback_data='cat_Food'),
-            InlineKeyboardButton("🍹 Drink", callback_data='cat_Drink')
-        ],
-        [
-            InlineKeyboardButton("🚗 Transport", callback_data='cat_Transport'),
-            InlineKeyboardButton("🛍️ Shopping", callback_data='cat_Shopping')
-        ],
-        [
-            InlineKeyboardButton("🧾 Bills", callback_data='cat_Bills'),
-            InlineKeyboardButton("💡 Utilities", callback_data='cat_Utilities')
-        ],
-        [
-            InlineKeyboardButton("🎬 Entertainment",
-                                 callback_data='cat_Entertainment'),
-            InlineKeyboardButton("🧴 Personal Care",
-                                 callback_data='cat_Personal Care')
-        ],
-        [
-            InlineKeyboardButton("💼 Work", callback_data='cat_Work'),
-            InlineKeyboardButton("🍺 Alcohol", callback_data='cat_Alcohol')
-        ],
-        [
-            InlineKeyboardButton("🤝 For Others",
-                                 callback_data='cat_For Others'),
-            InlineKeyboardButton("💊 Health", callback_data='cat_Health')
-        ],
-        [
-            InlineKeyboardButton("📈 Investment",
-                                 callback_data='cat_Investment'),
-            InlineKeyboardButton("❓ Forgot", callback_data='cat_Forgot'),
-        ],
-        [
-            InlineKeyboardButton("📝 Other", callback_data='cat_other')
-        ],
-    ]
+def expense_categories_keyboard(categories: list,
+                                context: ContextTypes.DEFAULT_TYPE):
+    """Builds a dynamic keyboard from the user's category list."""
+    keyboard = []
+    row = []
+    for category in categories:
+        row.append(
+            InlineKeyboardButton(category, callback_data=f'cat_{category}')
+        )
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+
+    if row:  # Add any remaining buttons
+        keyboard.append(row)
+
+    # Add the static "Other" button
+    keyboard.append([
+        InlineKeyboardButton(
+            t("keyboards.other", context), callback_data='cat_other'
+        )
+    ])
     return InlineKeyboardMarkup(keyboard)
 
 
-def income_categories_keyboard():
-    keyboard = [
-        [
-            InlineKeyboardButton("💼 Salary", callback_data='cat_Salary'),
-            InlineKeyboardButton("📈 Bonus", callback_data='cat_Bonus')
-        ],
-        [
-            InlineKeyboardButton("💻 Freelance", callback_data='cat_Freelance'),
-            InlineKeyboardButton("📊 Commission",
-                                 callback_data='cat_Commission')
-        ],
-        [
-            InlineKeyboardButton("💸 Allowance", callback_data='cat_Allowance'),
-            InlineKeyboardButton("🎁 Gift", callback_data='cat_Gift')
-        ],
-        [
-            InlineKeyboardButton("📈 Investment",
-                                 callback_data='cat_Investment'),
-            InlineKeyboardButton("📝 Other", callback_data='cat_other')
-        ],
-    ]
+def income_categories_keyboard(categories: list,
+                               context: ContextTypes.DEFAULT_TYPE):
+    """Builds a dynamic keyboard from the user's category list."""
+    keyboard = []
+    row = []
+    for category in categories:
+        row.append(
+            InlineKeyboardButton(category, callback_data=f'cat_{category}')
+        )
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+
+    if row:  # Add any remaining buttons
+        keyboard.append(row)
+
+    # Add the static "Other" button
+    keyboard.append([
+        InlineKeyboardButton(
+            t("keyboards.other", context), callback_data='cat_other'
+        )
+    ])
     return InlineKeyboardMarkup(keyboard)
 
 
-def ask_remark_keyboard():
+def ask_remark_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("✅ Add Remark", callback_data='remark_yes'),
@@ -512,11 +530,12 @@ def ask_remark_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-def history_keyboard(transactions, is_search_result=False):
+def history_keyboard(transactions, context: ContextTypes.DEFAULT_TYPE,
+                     is_search_result=False):
     keyboard = []
     if not is_search_result:
         keyboard.append([InlineKeyboardButton(
-            "🔎 Search History", callback_data='search_menu'
+            t("keyboards.search", context), callback_data='search_menu'
         )])
 
     for tx in transactions:
@@ -537,7 +556,7 @@ def history_keyboard(transactions, is_search_result=False):
     return InlineKeyboardMarkup(keyboard)
 
 
-def manage_tx_keyboard(tx_id):
+def manage_tx_keyboard(tx_id, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("✏️ Edit", callback_data=f'edit_tx_{tx_id}'),
@@ -549,7 +568,7 @@ def manage_tx_keyboard(tx_id):
     return InlineKeyboardMarkup(keyboard)
 
 
-def edit_tx_options_keyboard(tx_id):
+def edit_tx_options_keyboard(tx_id, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton(
@@ -575,7 +594,7 @@ def edit_tx_options_keyboard(tx_id):
     return InlineKeyboardMarkup(keyboard)
 
 
-def confirm_delete_keyboard(tx_id):
+def confirm_delete_keyboard(tx_id, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("✅ Yes, Delete",

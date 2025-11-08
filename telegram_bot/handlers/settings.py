@@ -1,4 +1,4 @@
-# --- Start of new file: telegram_bot/handlers/settings.py ---
+# --- Start of modified file: telegram_bot/handlers/settings.py ---
 
 from telegram import Update
 from telegram.ext import (
@@ -13,17 +13,14 @@ import api_client
 import keyboards
 from .common import start
 from decorators import authenticate_user
+from ..utils.i18n import t
 
 # Conversation states
 (
-    # Main menu
     SETTINGS_MENU,
-    # Set Balance flow
     SETBALANCE_ACCOUNT,
     SETBALANCE_AMOUNT,
-    # Set Rate flow
     NEW_RATE,
-    # Manage Categories flow
     CATEGORIES_MENU,
     CATEGORY_ADD_START,
     CATEGORY_ADD_GET_NAME,
@@ -44,12 +41,11 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not settings or not rate_data:
         await query.edit_message_text(
-            "Error: Could not load your settings.",
-            reply_markup=keyboards.main_menu_keyboard()
+            t("common.error_generic", context, error="Could not load settings"),
+            reply_markup=keyboards.main_menu_keyboard(context)
         )
         return ConversationHandler.END
 
-    # Format settings for display
     balances = settings.get('initial_balances', {})
     usd_bal = balances.get('USD', 0)
     khr_bal = balances.get('KHR', 0)
@@ -63,19 +59,13 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else f"Live ({current_rate:,.0f})"
     )
 
-    text = (
-        "<b>⚙️ Bot Settings</b>\n\n"
-        "Here you can manage your preferences and initial data.\n\n"
-        "<b>Initial Balances:</b>\n"
-        f"  💵 ${usd_bal:,.2f} USD\n"
-        f"  ៛ {khr_bal:,.0f} KHR\n\n"
-        f"<b>Exchange Rate:</b> {rate_text}\n"
-    )
+    text = t("settings.menu_header", context,
+             usd_bal=usd_bal, khr_bal=khr_bal, rate_text=rate_text)
 
     await query.edit_message_text(
         text=text,
         parse_mode='HTML',
-        reply_markup=keyboards.settings_menu_keyboard()
+        reply_markup=keyboards.settings_menu_keyboard(context)
     )
     return SETTINGS_MENU
 
@@ -88,8 +78,8 @@ async def set_balance_start(update: Update,
     query = update.callback_query
     await query.answer()
     await query.edit_message_text(
-        "Which initial balance do you want to set/update?",
-        reply_markup=keyboards.set_balance_account_keyboard()
+        t("settings.ask_balance_account", context),
+        reply_markup=keyboards.set_balance_account_keyboard(context)
     )
     return SETBALANCE_ACCOUNT
 
@@ -102,9 +92,7 @@ async def received_balance_account(update: Update,
     currency = query.data.split('_')[-1]
     context.user_data['settings_currency'] = currency
     await query.edit_message_text(
-        f"Account: <b>{currency}</b>\n\n"
-        f"What is the new initial balance? (This will NOT create a "
-        f"transaction, but will update your starting point).",
+        t("settings.ask_balance_amount", context, currency=currency),
         parse_mode='HTML'
     )
     return SETBALANCE_AMOUNT
@@ -124,18 +112,18 @@ async def received_balance_amount(update: Update,
         api_client.update_initial_balance(user_id, currency, amount)
 
         await update.message.reply_text(
-            f"✅ Initial balance for {currency} updated to {amount:,.2f}."
+            t("settings.balance_set_success", context,
+              currency=currency, amount=amount)
         )
-        # Go back to the main menu
         return await start(update, context)
 
     except (ValueError, TypeError):
         await update.message.reply_text(
-            "Please enter a valid number for the balance."
+            t("tx.invalid_amount", context)
         )
         return SETBALANCE_AMOUNT
     except Exception as e:
-        await update.message.reply_text(f"An error occurred: {e}")
+        await update.message.reply_text(t("common.error_generic", context, error=e))
         return await start(update, context)
 
 
@@ -146,11 +134,7 @@ async def update_rate_start(update: Update,
     """Asks for a new fixed exchange rate."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text(
-        "Please enter your new **fixed** exchange rate for 1 USD to KHR "
-        "(e.g., 4100).\n\n"
-        "This will also set your preference to 'fixed'."
-    )
+    await query.edit_message_text(t("settings.ask_rate", context))
     return NEW_RATE
 
 
@@ -163,17 +147,15 @@ async def received_new_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         api_client.update_exchange_rate(new_rate, user_id)
 
         await update.message.reply_text(
-            f"✅ Your fixed exchange rate is now set to {new_rate}."
+            t("settings.rate_set_success", context, rate=new_rate)
         )
         return await start(update, context)
 
     except (ValueError, TypeError):
-        await update.message.reply_text(
-            "Invalid number. Please enter a valid rate."
-        )
+        await update.message.reply_text(t("settings.invalid_rate", context))
         return NEW_RATE
     except Exception as e:
-        await update.message.reply_text(f"An error occurred: {e}")
+        await update.message.reply_text(t("common.error_generic", context, error=e))
         return await start(update, context)
 
 
@@ -188,8 +170,8 @@ async def categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     settings = api_client.get_user_settings(user_id)
     if not settings:
         await query.edit_message_text(
-            "Error: Could not load categories.",
-            reply_markup=keyboards.settings_menu_keyboard()
+            t("common.error_generic", context, error="Could not load categories"),
+            reply_markup=keyboards.settings_menu_keyboard(context)
         )
         return SETTINGS_MENU
 
@@ -197,18 +179,14 @@ async def categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     expense_cats = categories.get('expense', [])
     income_cats = categories.get('income', [])
 
-    text = (
-        "<b>🏷️ Manage Categories</b>\n\n"
-        "<b>Expense:</b>\n"
-        f"  {', '.join(expense_cats)}\n\n"
-        "<b>Income:</b>\n"
-        f"  {', '.join(income_cats)}\n"
-    )
+    text = t("settings.categories_header", context,
+             expense_cats=', '.join(expense_cats),
+             income_cats=', '.join(income_cats))
 
     await query.edit_message_text(
         text=text,
         parse_mode='HTML',
-        reply_markup=keyboards.manage_categories_keyboard()
+        reply_markup=keyboards.manage_categories_keyboard(context)
     )
     return CATEGORIES_MENU
 
@@ -219,8 +197,8 @@ async def category_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     context.user_data['category_action'] = 'add'
     await query.edit_message_text(
-        "What type of category do you want to add?",
-        reply_markup=keyboards.category_type_keyboard('add')
+        t("settings.category_ask_add", context),
+        reply_markup=keyboards.category_type_keyboard(context, 'add')
     )
     return CATEGORY_ADD_START
 
@@ -232,8 +210,8 @@ async def category_remove_start(update: Update,
     await query.answer()
     context.user_data['category_action'] = 'remove'
     await query.edit_message_text(
-        "What type of category do you want to remove?",
-        reply_markup=keyboards.category_type_keyboard('remove')
+        t("settings.category_ask_remove", context),
+        reply_markup=keyboards.category_type_keyboard(context, 'remove')
     )
     return CATEGORY_REMOVE_START
 
@@ -249,13 +227,14 @@ async def received_category_type(update: Update,
     context.user_data['category_type'] = cat_type
 
     await query.edit_message_text(
-        f"Please type the name of the new **{cat_type}** category to {action}:"
+        t("settings.category_ask_name", context,
+          cat_type=cat_type, action=action)
     )
     if action == 'add':
         return CATEGORY_ADD_GET_NAME
     if action == 'remove':
         return CATEGORY_REMOVE_GET_NAME
-    return SETTINGS_MENU  # Fallback
+    return SETTINGS_MENU
 
 
 async def received_category_add_name(update: Update,
@@ -268,12 +247,13 @@ async def received_category_add_name(update: Update,
 
         api_client.add_category(user_id, cat_type, cat_name)
         await update.message.reply_text(
-            f"✅ Category '{cat_name}' added to {cat_type}."
+            t("settings.category_add_success", context,
+              name=cat_name, type=cat_type)
         )
         return await start(update, context)
 
     except Exception as e:
-        await update.message.reply_text(f"An error occurred: {e}")
+        await update.message.reply_text(t("common.error_generic", context, error=e))
         return await start(update, context)
 
 
@@ -287,16 +267,15 @@ async def received_category_remove_name(update: Update,
 
         api_client.remove_category(user_id, cat_type, cat_name)
         await update.message.reply_text(
-            f"✅ Category '{cat_name}' removed from {cat_type}."
+            t("settings.category_remove_success", context,
+              name=cat_name, type=cat_type)
         )
         return await start(update, context)
 
     except Exception as e:
-        await update.message.reply_text(f"An error occurred: {e}")
+        await update.message.reply_text(t("common.error_generic", context, error=e))
         return await start(update, context)
 
-
-# --- Conversation Handler ---
 
 settings_conversation_handler = ConversationHandler(
     entry_points=[
@@ -315,7 +294,6 @@ settings_conversation_handler = ConversationHandler(
             ),
             CallbackQueryHandler(start, pattern='^start$'),
         ],
-        # Balance Flow
         SETBALANCE_ACCOUNT: [
             CallbackQueryHandler(
                 received_balance_account, pattern='^set_balance_'
@@ -325,11 +303,9 @@ settings_conversation_handler = ConversationHandler(
             MessageHandler(filters.TEXT & ~filters.COMMAND,
                            received_balance_amount)
         ],
-        # Rate Flow
         NEW_RATE: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, received_new_rate)
         ],
-        # Categories Flow
         CATEGORIES_MENU: [
             CallbackQueryHandler(
                 category_add_start, pattern='^category_add$'
@@ -365,4 +341,4 @@ settings_conversation_handler = ConversationHandler(
     per_message=False
 )
 
-# --- End of new file ---
+# --- End of modified file ---

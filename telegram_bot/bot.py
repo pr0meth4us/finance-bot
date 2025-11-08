@@ -27,14 +27,17 @@ from handlers import (
     get_current_rate
 )
 from handlers.command_handler import unified_message_conversation_handler
-# New imports for settings and onboarding
 from handlers.onboarding import onboarding_conversation_handler
 from handlers.settings import settings_conversation_handler
+from utils.i18n import load_translations  # Import the loader
 
 load_dotenv()
 
 
 def main():
+    # Load translations into memory on boot
+    load_translations()
+
     TOKEN = os.getenv("TELEGRAM_TOKEN")
     if not TOKEN:
         print("❌ TELEGRAM_TOKEN not found in .env file.")
@@ -60,7 +63,7 @@ def main():
     app.add_handler(search_conversation_handler)
     app.add_handler(iou_edit_conversation_handler)
 
-    # 3. NEW: Add Onboarding and Settings handlers
+    # 3. Add Onboarding and Settings handlers
     app.add_handler(onboarding_conversation_handler)
     app.add_handler(settings_conversation_handler)
 

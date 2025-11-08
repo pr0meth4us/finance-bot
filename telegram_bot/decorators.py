@@ -69,31 +69,24 @@ def authenticate_user(func):
                 return ConversationHandler.END
 
         # --- Onboarding Check ---
-        # Check if the user is new AND not already in an onboarding flow
         if user_profile.get('is_new_user'):
-            # Determine if we are already in the onboarding conversation
-            in_onboarding = False
-            if 'active_conversation' in context.user_data:
-                # This is a basic check. A real implementation might need
-                # to check the conversation name or state.
-                pass  # Assuming dev manages state correctly for now
-
-            # If the function being called is NOT part of onboarding,
-            # and they are a new user, force them into it.
-            # We must allow 'cancel' to work.
+            # This logic assumes the onboarding handler is correctly
+            # registered and will catch the state.
             if func.__name__ not in [
                 'onboarding_start', 'received_language',
                 'received_usd_balance', 'received_khr_balance', 'cancel'
             ]:
+                # We need to *start* the conversation
                 if update.message:
                     return await onboarding_start(update, context)
                 if update.callback_query:
-                    # Can't start a message-based flow from a button press
-                    # easily. Send a message instead.
+                    # We can't easily transition from a callback to a
+                    # message handler. Send a new message to kick it off.
                     await context.bot.send_message(
                         chat_id=update.effective_chat.id,
                         text="Welcome! Let's start with some setup."
                     )
+                    # Use the query's message as the 'update'
                     return await onboarding_start(update.callback_query,
                                                   context)
 
