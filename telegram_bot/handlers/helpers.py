@@ -3,7 +3,9 @@
 from datetime import datetime
 import io
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from zoneinfo import ZoneInfo # <-- NEW IMPORT
+import pandas as pd
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh") # <-- NEW
 
@@ -125,6 +127,7 @@ def format_summation_results(params, results):
 
 
 def _format_report_summary_message(data):
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     """Formats the detailed report data into a readable string."""
     summary = data.get('summary', {})
     start_date = datetime.fromisoformat(data['startDate']).strftime('%b %d, %Y')
@@ -149,6 +152,27 @@ def _format_report_summary_message(data):
         f"⬇️ Total Expense: ${expense:,.2f}\n"
         f"<b>Net Savings: ${net:,.2f}</b> {'✅' if net >= 0 else '🔻'}\n\n"
     )
+
+    # --- NEW: Expense Insights (Most/Least Day, Top Item) ---
+    insights = data.get('expenseInsights', {})
+    insights_text = "<b>Expense Insights:</b>\n"
+
+    top_item = insights.get('topExpenseItem')
+    if top_item:
+        top_desc = top_item.get('description') or top_item.get('category', 'N/A')
+        insights_text += f"    - <b>Top Expense:</b> ${top_item['amount_usd']:,.2f} ({top_desc}) on {top_item['date']}\n"
+
+    most_day = insights.get('mostExpensiveDay')
+    if most_day:
+        insights_text += f"    - <b>Busiest Day:</b> {most_day['_id']} (${most_day['total_spent_usd']:,.2f})\n"
+
+    least_day = insights.get('leastExpensiveDay')
+    # Only show least day if it's different from most day
+    if least_day and (not most_day or least_day['_id'] != most_day['_id']):
+        insights_text += f"    - <b>Quietest Day:</b> {least_day['_id']} (${least_day['total_spent_usd']:,.2f})\n"
+
+    insights_text += "\n"
+    # --- END NEW ---
 
     expense_breakdown = data.get('expenseBreakdown', [])
     major_expenses = []
@@ -199,7 +223,7 @@ def _format_report_summary_message(data):
     active_lines = [line for line in financial_lines if line]
     financial_text += "\n".join(active_lines) if active_lines else "    - No loan or debt activity."
 
-    return header + balance_overview_text + summary_text + expense_text + other_text + income_text + financial_text
+    return header + balance_overview_text + summary_text + insights_text + expense_text + other_text + income_text + financial_text
 
 
 def _create_income_expense_chart(data, start_date, end_date):
@@ -227,6 +251,65 @@ def _create_income_expense_chart(data, start_date, end_date):
     for bar in bars:
         yval = bar.get_height()
         plt.text(bar.get_x() + bar.get_width() / 2.0, yval, f'${yval:,.2f}', va='bottom', ha='center')
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+# --- NEW FUNCTION ---
+def _create_spending_line_chart(data, start_date, end_date):
+    """Creates a line chart for spending over time."""
+    spending_data = data.get('spendingOverTime', [])
+    if not spending_data:
+        return None
+
+    # Convert to DataFrame and fill missing dates
+    df = pd.DataFrame(spending_data)
+    df['date'] = pd.to_datetime(df['date'])
+    df = df.set_index('date')
+
+    # Create a full date range and reindex to fill missing days with 0
+    full_date_range = pd.date_range(start=start_date, end=end_date)
+    df = df.reindex(full_date_range, fill_value=0)
+
+    # If all values are zero, don't generate the chart
+    if df['total_spent_usd'].sum() == 0:
+        return None
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    # Plot data
+    ax.plot(df.index, df['total_spent_usd'], marker='o', linestyle='-', markersize=4)
+    ax.fill_between(df.index, df['total_spent_usd'], color='skyblue', alpha=0.3)
+
+    # Format title and labels
+    date_range_str = f"{start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')}"
+    ax.set_title('Spending Over Time (USD)', pad=20)
+    plt.suptitle(date_range_str, y=0.93, fontsize=10)
+    ax.set_ylabel('Amount Spent (USD)')
+    ax.spines[['top', 'right']].set_visible(False)
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
+
+    # --- "Smart" X-axis Date Formatting ---
+    num_days = len(df)
+    if num_days <= 10:
+        # Show every day
+        date_fmt = mdates.DateFormatter('%b %d')
+        ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+    elif num_days <= 90:
+        # Show weekly ticks
+        date_fmt = mdates.DateFormatter('%b %d')
+        ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=1, byweekday=mdates.MO))
+    else:
+        # Show monthly ticks
+        date_fmt = mdates.DateFormatter('%b %Y')
+        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+
+    ax.xaxis.set_major_formatter(date_fmt)
+    fig.autofmt_xdate()
 
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight')
@@ -306,3 +389,118 @@ def _format_habits_message(data):
         keyword_text += "    - No descriptions found to analyze.\n"
 
     return day_text + keyword_text
+
+# --- NEW: Debt Analysis Helpers ---
+
+def _format_debt_analysis_message(analysis_data):
+    """Formats the text summary for the debt analysis."""
+    lent_by = [d for d in analysis_data.get('concentration', []) if d['type'] == 'lent']
+    borrow_from = [d for d in analysis_data.get('concentration', []) if d['type'] == 'borrowed']
+
+    lent_text = "\n<b>Top People You've Lent To:</b>\n"
+    lent_text += "\n".join(
+        [f"    - {item['person']}: ${item['total']:,.2f}" for item in lent_by[:3]]) or "    - No one owes you money.\n"
+
+    borrow_text = "\n<b>Top People You've Borrowed From:</b>\n"
+    borrow_text += "\n".join([f"    - {item['person']}: ${item['total']:,.2f}" for item in
+                              borrow_from[:3]]) or "    - You don't owe anyone money.\n"
+
+    aging_text = "\n<b>Oldest Outstanding Debts (Avg. Age):</b>\n"
+    aging_data = analysis_data.get('aging', [])
+    aging_text += "\n".join(
+        [f"    - {item['_id']}: {item['averageAgeDays']:.0f} days ({item['count']} loans)" for item in
+         aging_data[:3]]) or "    - No open debts to analyze.\n"
+
+    return "🔬 <b>Debt Analysis</b>\n" + lent_text + borrow_text + aging_text
+
+
+def _create_debt_overview_pie(analysis_data):
+    """Creates a pie chart for total owed vs. total lent in USD."""
+    overview = analysis_data.get('overview_usd', {})
+    lent_usd = overview.get('total_lent_usd', 0)
+    borrowed_usd = overview.get('total_borrowed_usd', 0)
+
+    if lent_usd == 0 and borrowed_usd == 0:
+        return None
+
+    labels = ['You Are Owed', 'You Owe']
+    sizes = [lent_usd, borrowed_usd]
+    colors = ['#4CAF50', '#F44336']
+    explode = (0.05, 0)
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    ax.set_title('Debt Overview (USD Equivalent)', pad=20)
+
+    wedges, texts, autotexts = ax.pie(
+        sizes,
+        labels=labels,
+        autopct=lambda p: f'${p * sum(sizes) / 100:,.2f}\n({p:.1f}%)',
+        startangle=90,
+        pctdistance=0.75,
+        explode=explode,
+        colors=colors
+    )
+    plt.setp(autotexts, size=10, weight="bold", color="white")
+    ax.axis('equal')
+    fig.gca().add_artist(plt.Circle((0, 0), 0.60, fc='white'))
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _create_debt_concentration_bar(analysis_data):
+    """Creates a horizontal bar chart for debt concentration by person."""
+    concentration = analysis_data.get('concentration', [])
+    if not concentration:
+        return None
+
+    # Get top 5 lent and top 5 borrowed
+    lent_data = sorted([d for d in concentration if d['type'] == 'lent'], key=lambda x: x['total'], reverse=True)[:5]
+    borrow_data = sorted([d for d in concentration if d['type'] == 'borrowed'], key=lambda x: x['total'], reverse=True)[:5]
+
+    if not lent_data and not borrow_data:
+        return None
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6), sharey=False)
+
+    # --- Plot 1: You Are Owed (Lent) ---
+    if lent_data:
+        people_lent = [d['person'] for d in lent_data]
+        amounts_lent = [d['total'] for d in lent_data]
+        ax1.barh(people_lent, amounts_lent, color='#4CAF50')
+        ax1.set_title('You Are Owed (Top 5)')
+        ax1.set_xlabel('Amount (USD Equivalent)')
+        ax1.invert_yaxis() # Show largest on top
+        for i, v in enumerate(amounts_lent):
+            ax1.text(v + 1, i, f' ${v:,.2f}', va='center', color='black')
+    else:
+        ax1.set_title('You Are Owed')
+        ax1.text(0.5, 0.5, 'No data', horizontalalignment='center', verticalalignment='center', transform=ax1.transAxes)
+    ax1.spines[['top', 'right']].set_visible(False)
+
+    # --- Plot 2: You Owe (Borrowed) ---
+    if borrow_data:
+        people_borrow = [d['person'] for d in borrow_data]
+        amounts_borrow = [d['total'] for d in borrow_data]
+        ax2.barh(people_borrow, amounts_borrow, color='#F44336')
+        ax2.set_title('You Owe (Top 5)')
+        ax2.set_xlabel('Amount (USD Equivalent)')
+        ax2.invert_yaxis()
+        for i, v in enumerate(amounts_borrow):
+            ax2.text(v + 1, i, f' ${v:,.2f}', va='center', color='black')
+    else:
+        ax2.set_title('You Owe')
+        ax2.text(0.5, 0.5, 'No data', horizontalalignment='center', verticalalignment='center', transform=ax2.transAxes)
+    ax2.spines[['top', 'right']].set_visible(False)
+
+    plt.suptitle('Debt Concentration', fontsize=16, y=1.02)
+    plt.tight_layout(pad=2.0)
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()

@@ -386,16 +386,23 @@ def update_debt(debt_id):
 
 @debts_bp.route('/analysis', methods=['GET'])
 def get_debt_analysis():
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
+    db = current_app.db
     now = datetime.now(UTC_TZ)
+
+    # --- Pipeline 1: Concentration (Top people) ---
     concentration_pipeline = [
         {'$match': {'status': 'open'}},
         {'$group': {
             '_id': {'person_normalized': {'$toLower': '$person'}, 'type': '$type'},
-            'person_display': {'$first': '$person'}, 'totalAmount': {'$sum': '$remainingAmount'}
+            'person_display': {'$first': '$person'},
+            'totalAmount': {'$sum': '$remainingAmount'}  # Uses remainingAmount
         }},
         {'$sort': {'totalAmount': -1}},
         {'$project': {'_id': 0, 'person': '$person_display', 'type': '$_id.type', 'total': '$totalAmount'}}
     ]
+
+    # --- Pipeline 2: Aging (Oldest debts) ---
     aging_pipeline = [
         {'$match': {'status': 'open'}},
         {'$project': {
@@ -409,8 +416,45 @@ def get_debt_analysis():
         {'$project': {'_id': '$person_display', 'averageAgeDays': '$averageAgeDays', 'count': '$count'}},
         {'$sort': {'averageAgeDays': -1}}
     ]
+
+    # --- NEW Pipeline 3: Overview (Total Owed vs. Total Lent in USD) ---
+    rate = get_live_usd_to_khr_rate()
+    overview_pipeline = [
+        {'$match': {'status': 'open'}},
+        {
+            '$addFields': {
+                'amount_in_usd': {
+                    '$cond': {
+                        'if': {'$eq': ['$currency', 'USD']},
+                        'then': '$remainingAmount',
+                        'else': {'$divide': ['$remainingAmount', rate]}
+                    }
+                }
+            }
+        },
+        {
+            '$group': {
+                '_id': '$type',
+                'total_usd': {'$sum': '$amount_in_usd'}
+            }
+        }
+    ]
+
+    # --- Execute Pipelines ---
+    concentration_data = list(db.debts.aggregate(concentration_pipeline))
+    aging_data = list(db.debts.aggregate(aging_pipeline))
+    overview_data = list(db.debts.aggregate(overview_pipeline))
+
+    # --- Format Response ---
+    total_lent_usd = next((item['total_usd'] for item in overview_data if item['_id'] == 'lent'), 0)
+    total_borrowed_usd = next((item['total_usd'] for item in overview_data if item['_id'] == 'borrowed'), 0)
+
     analysis = {
-        'concentration': list(current_app.db.debts.aggregate(concentration_pipeline)),
-        'aging': list(current_app.db.debts.aggregate(aging_pipeline))
+        'concentration': concentration_data,
+        'aging': aging_data,
+        'overview_usd': {
+            'total_lent_usd': total_lent_usd,
+            'total_borrowed_usd': total_borrowed_usd
+        }
     }
     return jsonify(analysis)

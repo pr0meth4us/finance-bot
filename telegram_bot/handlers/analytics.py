@@ -12,6 +12,7 @@ from .helpers import (
     _create_income_expense_chart,
     _create_expense_pie_chart,
     _format_habits_message,
+    _create_spending_line_chart  # <-- NEW IMPORT
 )
 
 # Conversation states
@@ -103,6 +104,7 @@ async def received_report_end_date(update: Update, context: ContextTypes.DEFAULT
 
 
 async def _generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE, start_date, end_date):
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     """Shared logic to generate and send report summary and charts."""
     chat_id = update.effective_chat.id
     loading_text = f"📈 Generating your report for {start_date:%b %d, %Y} to {end_date:%b %d, %Y}..."
@@ -120,6 +122,11 @@ async def _generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE, s
         # --- MODIFICATION: Pass dates to chart functions ---
         if bar_chart := _create_income_expense_chart(report_data, start_date, end_date):
             await context.bot.send_photo(chat_id=chat_id, photo=bar_chart)
+
+        # --- NEW: Generate and send line chart ---
+        if line_chart := _create_spending_line_chart(report_data, start_date, end_date):
+            await context.bot.send_photo(chat_id=chat_id, photo=line_chart)
+
         if pie_chart := _create_expense_pie_chart(report_data, start_date, end_date):
             await context.bot.send_photo(chat_id=chat_id, photo=pie_chart)
 

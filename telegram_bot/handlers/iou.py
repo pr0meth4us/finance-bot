@@ -7,7 +7,12 @@ import api_client
 from decorators import restricted
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
-from .helpers import format_summary_message
+from .helpers import (
+    format_summary_message,
+    _format_debt_analysis_message,
+    _create_debt_overview_pie,
+    _create_debt_concentration_bar
+)
 from .command_handler import parse_amount_and_currency
 
 # Conversation states
@@ -26,7 +31,7 @@ def _format_debt_details(debt):
     created_date = datetime.fromisoformat(debt['created_at'].replace('Z', '+00:00')).astimezone(PHNOM_PENH_TZ).strftime(
         '%d %b %Y, %I:%M %p')
     amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
-    
+
     text_lines = [
         f"<b>Debt Details (Status: {debt['status'].title()})</b>\n",
         f"<b>Person:</b> {debt['person']} ({direction})",
@@ -42,50 +47,50 @@ def _format_debt_details(debt):
         for rep in repayments:
             rep_date = datetime.fromisoformat(rep['date'].replace('Z', '+00:00')).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y')
             text_lines.append(f"  - {rep['amount']:{amount_format}} {debt['currency']} on {rep_date}")
-            
+
     return "\n".join(text_lines)
 
 # --- NEW HELPER ---
 def _format_person_ledger(person_debts, is_settled=False):
     """Formats all debts and repayments for one person into a single chronological list."""
-    
+
     if not person_debts:
         return "No debts found for this person."
-        
+
     ledger_items = [] # (datetime_obj, text_string, currency)
-    
+
     total_remaining_usd = 0
     total_remaining_khr = 0
-    
+
     for debt in person_debts:
         created_dt = datetime.fromisoformat(debt['created_at'].replace('Z', '+00:00'))
         amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
-        
+
         if debt['currency'] == 'USD':
             total_remaining_usd += debt['remainingAmount']
         else:
             total_remaining_khr += debt['remainingAmount']
-            
+
         purpose = debt.get('purpose') or "No purpose"
         amount = debt['originalAmount']
         status_icon = "✅" if debt['status'] == 'settled' else ("❌" if debt['status'] == 'canceled' else "🔹")
-        
+
         debt_text = f"{status_icon} <b>{amount:{amount_format}} {debt['currency']}</b> ({purpose})"
         ledger_items.append((created_dt, debt_text, debt['currency']))
-        
+
         for rep in debt.get('repayments', []):
             rep_dt = datetime.fromisoformat(rep['date'].replace('Z', '+00:00'))
             rep_text = f"  <i>- Repaid {rep['amount']:{amount_format}} {debt['currency']}</i>"
             ledger_items.append((rep_dt, rep_text, debt['currency']))
-            
+
     # Sort all items by date
     ledger_items.sort(key=lambda x: x[0])
-    
+
     # Format the final string
     date_format = '%d %b %Y'
     last_date = None
     ledger_lines = []
-    
+
     # Header
     if not is_settled:
         header_lines = ["<b>Total Remaining:</b>"]
@@ -94,9 +99,9 @@ def _format_person_ledger(person_debts, is_settled=False):
         if total_remaining_khr > 0:
             header_lines.append(f"  ៛ {total_remaining_khr:,.0f} KHR")
         if total_remaining_usd == 0 and total_remaining_khr == 0:
-             header_lines.append("  None")
+            header_lines.append("  None")
         ledger_lines.append("\n".join(header_lines) + "\n")
-        
+
     ledger_lines.append("<b>Full Ledger (Oldest First):</b>")
 
     for item_dt, item_text, item_currency in ledger_items:
@@ -105,7 +110,7 @@ def _format_person_ledger(person_debts, is_settled=False):
             ledger_lines.append(f"\n<u>{current_date_str}</u>")
             last_date = current_date_str
         ledger_lines.append(item_text)
-        
+
     return "\n".join(ledger_lines)
 
 
@@ -154,22 +159,22 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     # Callback format: iou:person:open:{person_name}
     _, _, _, person_name = query.data.split(':')
-    
+
     person_debts = api_client.get_all_debts_by_person(person_name)
-    
+
     if not person_debts:
         await query.edit_message_text(f"❌ Could not find any open debts for {person_name}.",
-                                       reply_markup=keyboards.iou_menu_keyboard())
+                                      reply_markup=keyboards.iou_menu_keyboard())
         return
 
-    debt_type = person_debts[0]['type'] 
+    debt_type = person_debts[0]['type']
     direction = "owes you" if debt_type == 'lent' else "you owe"
-    
+
     header = f"<b>Open Debts for {person_name}</b> ({direction})\n\n"
     ledger_text = _format_person_ledger(person_debts, is_settled=False)
-    
+
     await query.edit_message_text(
-        text=header + ledger_text, 
+        text=header + ledger_text,
         parse_mode='HTML',
         reply_markup=keyboards.iou_person_actions_keyboard(person_name, debt_type, is_settled=False)
     )
@@ -183,20 +188,20 @@ async def iou_person_detail_settled(update: Update, context: ContextTypes.DEFAUL
     # Callback format: iou:person:settled:{person_name}
     _, _, _, person_name = query.data.split(':')
     person_debts = api_client.get_all_settled_debts_by_person(person_name)
-    
+
     if not person_debts:
         await query.edit_message_text(f"❌ Could not find any settled debts for {person_name}.",
-                                       reply_markup=keyboards.iou_menu_keyboard())
+                                      reply_markup=keyboards.iou_menu_keyboard())
         return
 
-    debt_type = person_debts[0]['type'] 
+    debt_type = person_debts[0]['type']
     direction = "owed you" if debt_type == 'lent' else "you owed"
-    
+
     header = f"<b>Settled Debts for {person_name}</b> ({direction})\n\n"
     ledger_text = _format_person_ledger(person_debts, is_settled=True)
-    
+
     await query.edit_message_text(
-        text=header + ledger_text, 
+        text=header + ledger_text,
         parse_mode='HTML',
         reply_markup=keyboards.iou_person_actions_keyboard(person_name, debt_type, is_settled=True)
     )
@@ -210,7 +215,7 @@ async def iou_manage_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Callback: iou:manage:list:{person_name}:{debt_type}:{is_settled}
     _, _, _, person_name, debt_type, is_settled_str = query.data.split(':')
     is_settled = is_settled_str == 'True'
-    
+
     if is_settled:
         person_debts = api_client.get_all_settled_debts_by_person(person_name)
     else:
@@ -236,49 +241,45 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Callback format: iou:detail:{debt_id}:{person_name}:{is_settled}
     _, _, debt_id, person_name, is_settled_str = query.data.split(':')
     is_settled = is_settled_str == 'True'
-    
+
     debt = api_client.get_debt_details(debt_id)
     if not debt:
         await query.edit_message_text("❌ Error: Could not find this debt.", reply_markup=keyboards.iou_menu_keyboard())
         return
 
     text = _format_debt_details(debt)
-    
+
     # Show different keyboard based on whether the debt is open or settled
     keyboard = keyboards.iou_detail_actions_keyboard(debt_id, person_name, debt['type'], is_settled, debt['status'])
-    
+
     await query.edit_message_text(text=text, parse_mode='HTML', reply_markup=keyboard)
 
 
 @restricted
 async def debt_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Fetches and displays debt analysis."""
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
+    """Fetches, displays debt analysis text, and sends charts."""
     query = update.callback_query
     await query.answer("Analyzing debts...")
+    chat_id = update.effective_chat.id
+
     analysis_data = api_client.get_debt_analysis()
+
     if not analysis_data:
         await query.edit_message_text("Could not perform debt analysis.", reply_markup=keyboards.iou_menu_keyboard())
         return
 
-    lent_by = [d for d in analysis_data.get('concentration', []) if d['type'] == 'lent']
-    borrow_from = [d for d in analysis_data.get('concentration', []) if d['type'] == 'borrowed']
-
-    lent_text = "\n<b>Top People You've Lent To:</b>\n"
-    lent_text += "\n".join(
-        [f"    - {item['person']}: ${item['total']:,.2f}" for item in lent_by[:3]]) or "    - No one owes you money.\n"
-
-    borrow_text = "\n<b>Top People You've Borrowed From:</b>\n"
-    borrow_text += "\n".join([f"    - {item['person']}: ${item['total']:,.2f}" for item in
-                              borrow_from[:3]]) or "    - You don't owe anyone money.\n"
-
-    aging_text = "\n<b>Oldest Outstanding Debts (Avg. Age):</b>\n"
-    aging_data = analysis_data.get('aging', [])
-    aging_text += "\n".join(
-        [f"    - {item['_id']}: {item['averageAgeDays']:.0f} days ({item['count']} loans)" for item in
-         aging_data[:3]]) or "    - No open debts to analyze.\n"
-
-    final_text = "🔬 <b>Debt Analysis</b>\n" + lent_text + borrow_text + aging_text
+    # 1. Format text message
+    final_text = _format_debt_analysis_message(analysis_data)
     await query.edit_message_text(text=final_text, parse_mode='HTML', reply_markup=keyboards.iou_menu_keyboard())
+
+    # 2. Generate and send Overview Pie Chart
+    if overview_pie := _create_debt_overview_pie(analysis_data):
+        await context.bot.send_photo(chat_id=chat_id, photo=overview_pie)
+
+    # 3. Generate and send Concentration Bar Chart
+    if concentration_bar := _create_debt_concentration_bar(analysis_data):
+        await context.bot.send_photo(chat_id=chat_id, photo=concentration_bar)
 
 
 # --- IOU Add Conversation ---
@@ -336,9 +337,20 @@ async def iou_received_person(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def iou_received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        amount = float(update.message.text)
+        amount_str = update.message.text
+        amount, currency = parse_amount_and_currency(amount_str) # <-- Use helper
         context.user_data['iou_amount'] = amount
+        context.user_data['iou_currency'] = currency
 
+        # If currency was specified in amount, skip currency question
+        if currency in ['USD', 'KHR']:
+            amount_display = f"{amount:,.0f} {currency}" if currency == 'KHR' else f"${amount:,.2f}"
+            await update.message.reply_text(
+                f"Amount: <b>{amount_display}</b>\n\nWhat was this for? (e.g., Lunch, Deposit)",
+                parse_mode='HTML')
+            return IOU_PURPOSE
+
+        # Fallback for old logic (though helper should handle it)
         if amount < 100:
             currency = "USD"
             context.user_data['iou_currency'] = currency
@@ -350,7 +362,7 @@ async def iou_received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text("Which currency?", reply_markup=keyboards.currency_keyboard())
             return IOU_CURRENCY
     except ValueError:
-        await update.message.reply_text("Please enter a valid number for the amount.")
+        await update.message.reply_text("Please enter a valid number for the amount (e.g. 20.50 or 10000khr).")
         return IOU_AMOUNT
 
 
@@ -392,10 +404,10 @@ async def repay_lump_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- FIX: Parse new callback data format ---
     _, _, person, debt_type = query.data.split(':')
     context.user_data.update({
-        'lump_repay_person': person, 
+        'lump_repay_person': person,
         'lump_repay_debt_type': debt_type
     })
-    
+
     prompt = f"How much did {person} repay you (in USD or KHR)?" if debt_type == 'lent' else f"How much did you repay {person} (in USD or KHR)?"
     await query.message.reply_text(prompt)
     return REPAY_LUMP_AMOUNT
@@ -407,14 +419,14 @@ async def received_lump_repayment_amount(update: Update, context: ContextTypes.D
         # --- FIX: Parse amount and currency from text ---
         amount_str = update.message.text
         amount, currency = parse_amount_and_currency(amount_str)
-        
+
         person = context.user_data['lump_repay_person']
         debt_type = context.user_data['lump_repay_debt_type']
-        
+
         # --- FIX: Call api client with correct args ---
         # Note: We pass timestamp=None because the button flow doesn't ask for a date.
         response = api_client.record_lump_sum_repayment(person, currency, amount, debt_type, timestamp=None)
-        
+
         base_text = f"✅ {response['message']}" if 'message' in response else f"❌ Error: {response.get('error', 'Unknown error')}"
         summary_text = format_summary_message(api_client.get_detailed_summary())
         await update.message.reply_text(base_text + summary_text, parse_mode='HTML',
@@ -433,7 +445,7 @@ async def iou_manage_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     # iou:manage:detail:{debt_id}:{person}:{is_settled}
     _, _, _, debt_id, person, is_settled_str = query.data.split(':')
-    
+
     await query.edit_message_text(
         f"What would you like to do for this debt with {person}?",
         reply_markup=keyboards.iou_manage_keyboard(debt_id, person, is_settled_str)
@@ -461,9 +473,9 @@ async def iou_cancel_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer("Canceling...")
     # iou:cancel:confirm:{debt_id}
     debt_id = query.data.split(':')[-1]
-    
+
     response = api_client.cancel_debt(debt_id)
-    
+
     if 'message' in response:
         base_text = f"✅ {response['message']}"
     else:
@@ -471,7 +483,7 @@ async def iou_cancel_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     summary_text = format_summary_message(api_client.get_detailed_summary())
     await query.edit_message_text(
-        base_text + summary_text, 
+        base_text + summary_text,
         parse_mode='HTML',
         reply_markup=keyboards.main_menu_keyboard()
     )
@@ -486,15 +498,15 @@ async def iou_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     # iou:edit:{field}:{debt_id}
     _, _, field, debt_id = query.data.split(':')
-    
+
     context.user_data['iou_edit_debt_id'] = debt_id
     context.user_data['iou_edit_field'] = field
-    
+
     if field == 'person':
         await query.message.reply_text("Please enter the new person's name:")
     elif field == 'purpose':
         await query.message.reply_text("Please enter the new purpose:")
-        
+
     return IOU_EDIT_GET_VALUE
 
 async def iou_edit_received_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -502,13 +514,13 @@ async def iou_edit_received_value(update: Update, context: ContextTypes.DEFAULT_
     debt_id = context.user_data.get('iou_edit_debt_id')
     field = context.user_data.get('iou_edit_field')
     new_value = update.message.text
-    
+
     if not debt_id or not field:
         await update.message.reply_text("Error: Conversation context lost. Please try again.", reply_markup=keyboards.main_menu_keyboard())
         return ConversationHandler.END
 
     response = api_client.update_debt(debt_id, {field: new_value})
-    
+
     if 'message' in response:
         base_text = f"✅ {response['message']}"
     else:
@@ -516,7 +528,7 @@ async def iou_edit_received_value(update: Update, context: ContextTypes.DEFAULT_
 
     summary_text = format_summary_message(api_client.get_detailed_summary())
     await update.message.reply_text(
-        base_text + summary_text, 
+        base_text + summary_text,
         parse_mode='HTML',
         reply_markup=keyboards.main_menu_keyboard()
     )

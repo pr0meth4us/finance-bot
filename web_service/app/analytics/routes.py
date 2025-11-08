@@ -17,7 +17,7 @@ FINANCIAL_TRANSACTION_CATEGORIES = [
     'Initial Balance'
 ]
 
-PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
+PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_PenH")
 UTC_TZ = ZoneInfo("UTC")
 
 
@@ -146,8 +146,10 @@ def search_transactions():
 
 @analytics_bp.route('/report/detailed', methods=['GET'])
 def get_detailed_report():
+    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     """
-    Generates a detailed report with income/expense summaries and breakdowns.
+    Generates a detailed report with income/expense summaries, breakdowns,
+    and new analytics like spending over time and top transactions.
     """
     start_date_str = request.args.get('start_date')
     end_date_str = request.args.get('end_date')
@@ -163,7 +165,7 @@ def get_detailed_report():
             start_date_utc = aware_start_local.astimezone(UTC_TZ)
             end_date_utc = aware_end_local.astimezone(UTC_TZ)
         else:
-            # Default case if no dates are provided (not used by bot but good for API)
+            # Default case if no dates are provided
             end_date_utc = datetime.now(UTC_TZ)
             start_date_utc = end_date_utc - timedelta(days=30)
             start_date_local_obj = (end_date_utc - timedelta(days=30)).astimezone(PHNOM_PENH_TZ).date()
@@ -219,17 +221,65 @@ def get_detailed_report():
         {'$group': {'_id': '$categoryId', 'total': {'$sum': '$amount_in_usd'}}}
     ]
 
-    # --- MODIFICATION START: Calculate total cash flow for the period ---
+    # Total cash flow for the period (for ending balance)
     total_flow_pipeline = [
         {'$match': date_range_match},
         add_fields_stage,
         {'$group': {'_id': '$type', 'totalUSD': {'$sum': '$amount_in_usd'}}}
     ]
-    # --- MODIFICATION END ---
 
+    # --- NEW: Pipeline for Spending Over Time (Line Chart) ---
+    spending_over_time_pipeline = [
+        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}}},
+        add_fields_stage,
+        {
+            '$project': {
+                'date': {'$dateToString': {'format': '%Y-%m-%d', 'date': '$timestamp', 'timezone': 'Asia/Phnom_Penh'}},
+                'amount_in_usd': '$amount_in_usd'
+            }
+        },
+        {'$group': {'_id': '$date', 'total_spent_usd': {'$sum': '$amount_in_usd'}}},
+        {'$sort': {'_id': 1}},
+        {'$project': {'_id': 0, 'date': '$_id', 'total_spent_usd': '$total_spent_usd'}}
+    ]
+
+    # --- NEW: Pipeline for Daily Expense Stats (Most/Least) ---
+    daily_stats_pipeline = [
+        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}}},
+        add_fields_stage,
+        {
+            '$group': {
+                '_id': {'$dateToString': {'format': '%Y-%m-%d', 'date': '$timestamp', 'timezone': 'Asia/Phnom_Penh'}},
+                'total_spent_usd': {'$sum': '$amount_in_usd'}
+            }
+        },
+        {'$sort': {'total_spent_usd': -1}},
+    ]
+
+    # --- NEW: Pipeline for Top Expense Item ---
+    top_expense_pipeline = [
+        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}}},
+        add_fields_stage,
+        {'$sort': {'amount_in_usd': -1}},
+        {'$limit': 1},
+        {
+            '$project': {
+                '_id': 0,
+                'description': '$description',
+                'category': '$categoryId',
+                'amount_usd': '$amount_in_usd',
+                'date': {'$dateToString': {'format': '%Y-%m-%d', 'date': '$timestamp', 'timezone': 'Asia/Phnom_Penh'}}
+            }
+        }
+    ]
+
+    # --- Execute All Pipelines ---
     operational_data = list(current_app.db.transactions.aggregate(operational_pipeline))
     financial_data = list(current_app.db.transactions.aggregate(financial_pipeline))
     total_flow_data = list(current_app.db.transactions.aggregate(total_flow_pipeline))
+    spending_over_time_data = list(current_app.db.transactions.aggregate(spending_over_time_pipeline))
+    daily_stats_data = list(current_app.db.transactions.aggregate(daily_stats_pipeline))
+    top_expense_data = list(current_app.db.transactions.aggregate(top_expense_pipeline))
 
     # --- Assemble Report ---
     report = {
@@ -241,7 +291,15 @@ def get_detailed_report():
         },
         "financialSummary": {"totalLentUSD": 0, "totalBorrowedUSD": 0, "totalRepaidToYouUSD": 0,
                              "totalYouRepaidUSD": 0},
-        "incomeBreakdown": [], "expenseBreakdown": []
+        "incomeBreakdown": [],
+        "expenseBreakdown": [],
+        # --- NEW: Add new data keys ---
+        "spendingOverTime": spending_over_time_data,
+        "expenseInsights": {
+            "topExpenseItem": top_expense_data[0] if top_expense_data else None,
+            "mostExpensiveDay": daily_stats_data[0] if daily_stats_data else None,
+            "leastExpensiveDay": daily_stats_data[-1] if daily_stats_data and (len(daily_stats_data) > 1 or daily_stats_data[0]['total_spent_usd'] > 0) else None
+        }
     }
 
     # Populate Operational Summary
@@ -263,11 +321,10 @@ def get_detailed_report():
         if item['_id'] in category_map:
             report['financialSummary'][category_map[item['_id']]] += item['total']
 
-    # --- MODIFICATION START: Calculate correct Ending Balance ---
+    # Calculate correct Ending Balance
     total_income_in_period = next((item['totalUSD'] for item in total_flow_data if item['_id'] == 'income'), 0)
     total_expense_in_period = next((item['totalUSD'] for item in total_flow_data if item['_id'] == 'expense'), 0)
     report['summary']['balanceAtEndUSD'] = balance_at_start_usd + total_income_in_period - total_expense_in_period
-    # --- MODIFICATION END ---
 
     return jsonify(report)
 
