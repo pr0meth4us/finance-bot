@@ -25,12 +25,11 @@ FINANCIAL_TRANSACTION_CATEGORIES = [
 MONGO_CONNECTION_ARGS = {
     "tls": True,
     "tlsDisableOCSPEndpointCheck": True,
-    "serverSelectionTimeoutMS": 8000,
-    "connectTimeoutMS": 5000,
-    "socketTimeoutMS": 10000,
-    "tlsCAFile": certifi.where(),      # <-- ADD THIS LINE
+    "serverSelectionTimeoutMS": 30000,  # Increased from 8000
+    "connectTimeoutMS": 20000,          # Increased from 5000
+    "socketTimeoutMS": 20000,           # Increased from 10000
+    "tlsCAFile": certifi.where(),
 }
-
 
 
 # --- HELPER FUNCTIONS FOR SCHEDULED JOBS (No changes here) ---
