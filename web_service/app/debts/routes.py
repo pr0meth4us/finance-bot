@@ -3,14 +3,13 @@
 Handles all API endpoints related to IOU/Debt management.
 All endpoints are multi-tenant and require a valid user_id.
 """
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime
 from bson import ObjectId
 import re
 from zoneinfo import ZoneInfo
 from app.utils.currency import get_live_usd_to_khr_rate
-from app import get_db
-# --- MODIFICATION: Import the new auth helper ---
+# --- MODIFICATION: Import current_app, remove get_db ---
 from app.utils.auth import get_user_id_from_request
 
 debts_bp = Blueprint('debts', __name__, url_prefix='/debts')
@@ -52,7 +51,7 @@ def get_db_rate(db, user_id):
 @debts_bp.route('/', methods=['POST'])
 def add_debt():
     """Adds a new debt for the authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -110,7 +109,7 @@ def add_debt():
 @debts_bp.route('/', methods=['GET'])
 def get_open_debts():
     """Fetches and groups open debts for the authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -146,7 +145,7 @@ def get_open_debts():
 @debts_bp.route('/export/open', methods=['GET'])
 def get_open_debts_export_list():
     """Fetches a simple flat list of all open debts for export."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
     user_id, error = get_user_id_from_request()
     if error: return error
 
@@ -162,7 +161,7 @@ def get_open_debts_export_list():
 @debts_bp.route('/list/settled', methods=['GET'])
 def get_settled_debts_grouped():
     """Fetches and groups settled OR canceled debts for the authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -200,7 +199,7 @@ def get_settled_debts_grouped():
 @debts_bp.route('/<debt_id>', methods=['GET'])
 def get_debt_details(debt_id):
     """Fetches details for a single debt owned by the authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -220,7 +219,7 @@ def get_debt_details(debt_id):
 @debts_bp.route('/person/<person_name>/<currency>', methods=['GET'])
 def get_debts_by_person_and_currency(person_name, currency):
     """Fetches debts by person/currency for the authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -240,7 +239,7 @@ def get_debts_by_person_and_currency(person_name, currency):
 @debts_bp.route('/person/<person_name>/all', methods=['GET'])
 def get_all_debts_by_person(person_name):
     """Fetches all open debts for a person, for the authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -259,7 +258,7 @@ def get_all_debts_by_person(person_name):
 @debts_bp.route('/person/<person_name>/all/settled', methods=['GET'])
 def get_all_settled_debts_by_person(person_name):
     """Fetches all settled debts for a person, for the authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -279,7 +278,7 @@ def get_all_settled_debts_by_person(person_name):
 def record_lump_sum_repayment(payment_currency):
     """Handles a lump-sum repayment for the authenticated user."""
     data = request.json
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -417,7 +416,7 @@ def record_lump_sum_repayment(payment_currency):
 @debts_bp.route('/<debt_id>/cancel', methods=['POST'])
 def cancel_debt(debt_id):
     """Cancels a debt and reverses the initial transaction for the authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -474,7 +473,7 @@ def cancel_debt(debt_id):
 @debts_bp.route('/<debt_id>', methods=['PUT'])
 def update_debt(debt_id):
     """Updates the person or purpose of a debt for the authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -505,7 +504,7 @@ def update_debt(debt_id):
 @debts_bp.route('/analysis', methods=['GET'])
 def get_debt_analysis():
     """Generates a debt analysis for the authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -544,7 +543,7 @@ def get_debt_analysis():
         {'$sort': {'averageAgeDays': -1}}
     ]
 
-    # --- Pipeline 3: Overview (Total Owed vs. Total Lent in USD) ---
+    # --- Pipeline 3: Overview (Total Owed vs. Total Lent in USD)
     # TODO: This should use the user's rate preference
     rate = get_live_usd_to_khr_rate()
     overview_pipeline = [

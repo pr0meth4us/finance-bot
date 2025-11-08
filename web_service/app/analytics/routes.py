@@ -4,13 +4,12 @@ Handles all analytics and report generation endpoints.
 All endpoints are multi-tenant and require a valid user_id.
 """
 import io
-from flask import Blueprint, Response, request, jsonify
+from flask import Blueprint, Response, request, jsonify, current_app
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 import matplotlib.pyplot as plt
 import re
-from app import get_db
-# --- MODIFICATION: Import the new auth helper ---
+# --- MODIFICATION: Import current_app, remove get_db ---
 from app.utils.auth import get_user_id_from_request
 
 analytics_bp = Blueprint('analytics', __name__, url_prefix='/analytics')
@@ -54,7 +53,7 @@ def get_date_ranges_for_search():
 def search_transactions():
     """Performs an advanced search and sums up matching transactions for a user."""
     params = request.json
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -155,7 +154,7 @@ def search_transactions():
 @analytics_bp.route('/report/detailed', methods=['GET'])
 def get_detailed_report():
     """Generates a detailed report for the authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -341,7 +340,7 @@ def get_detailed_report():
 @analytics_bp.route('/habits', methods=['GET'])
 def get_spending_habits():
     """Analyzes spending habits for the authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()

@@ -3,9 +3,9 @@
 Handles user-specific settings.
 All endpoints are multi-tenant and require a valid user_id.
 """
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from app.utils.currency import get_live_usd_to_khr_rate
-from app import get_db
+# --- MODIFICATION: Import current_app, remove get_db ---
 from app.utils.auth import get_user_id_from_request
 
 settings_bp = Blueprint('settings', __name__, url_prefix='/settings')
@@ -14,7 +14,7 @@ settings_bp = Blueprint('settings', __name__, url_prefix='/settings')
 @settings_bp.route('/', methods=['GET'])
 def get_user_settings():
     """Fetches all settings for the authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
     user_id, error = get_user_id_from_request()
     if error:
         return error
@@ -29,7 +29,7 @@ def get_user_settings():
 @settings_bp.route('/balance', methods=['POST'])
 def update_initial_balance():
     """Updates the initial balance for a specific currency for a user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
     user_id, error = get_user_id_from_request()
     if error:
         return error
@@ -63,7 +63,7 @@ def update_initial_balance():
 @settings_bp.route('/category', methods=['POST'])
 def add_user_category():
     """Adds a new custom category for a user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
     user_id, error = get_user_id_from_request()
     if error:
         return error
@@ -97,7 +97,7 @@ def add_user_category():
 @settings_bp.route('/category', methods=['DELETE'])
 def remove_user_category():
     """Removes a custom category for a user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
     user_id, error = get_user_id_from_request()
     if error:
         return error
@@ -133,7 +133,7 @@ def remove_user_category():
 def update_khr_rate():
     """Updates the user-specific fixed exchange rate."""
     data = request.json
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     user_id, error = get_user_id_from_request()
     if error:
@@ -165,7 +165,7 @@ def get_khr_rate():
     """
     Fetches the KHR exchange rate based on the user's preference.
     """
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
     user_id, error = get_user_id_from_request()
     if error:
         return error
@@ -189,7 +189,7 @@ def get_khr_rate():
 @settings_bp.route('/complete_onboarding', methods=['POST'])
 def complete_onboarding():
     """Marks the user's onboarding as complete."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
     user_id, error = get_user_id_from_request()
     if error:
         return error

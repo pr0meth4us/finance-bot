@@ -5,8 +5,8 @@ All endpoints are multi-tenant and require a valid user_id.
 """
 from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime
-from app import send_telegram_message, get_db
-# --- MODIFICATION: Import the new auth helper ---
+# --- MODIFICATION: Import current_app, remove get_db ---
+from app import send_telegram_message
 from app.utils.auth import get_user_id_from_request
 
 reminders_bp = Blueprint('reminders', __name__, url_prefix='/reminders')
@@ -15,7 +15,7 @@ reminders_bp = Blueprint('reminders', __name__, url_prefix='/reminders')
 @reminders_bp.route('/', methods=['POST'])
 def add_reminder():
     """Schedules a new reminder for the authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
     data = request.json
 
     # --- MODIFICATION: Authenticate user ---
@@ -46,7 +46,6 @@ def add_reminder():
     )
 
     # --- MODIFICATION: Log the reminder in the database ---
-    # This isn't strictly necessary for scheduling, but good for tracking.
     db.reminders.insert_one({
         "user_id": user_id,
         "purpose": data['purpose'],

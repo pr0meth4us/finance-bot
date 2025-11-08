@@ -1,12 +1,12 @@
 # --- Start of modified file: web_service/app/transactions/routes.py ---
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime, time, timedelta
 from bson import ObjectId
 from app.utils.currency import get_live_usd_to_khr_rate
 import re
 from zoneinfo import ZoneInfo
-from app import get_db  # <-- IMPORT THE NEW FUNCTION
+from app.utils.auth import get_user_id_from_request # <-- MODIFICATION
 
 transactions_bp = Blueprint('transactions', __name__, url_prefix='/transactions')
 
@@ -14,27 +14,7 @@ PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 UTC_TZ = ZoneInfo("UTC")
 
 
-# --- NEW: Helper to get user_id and check for it ---
-def get_user_id_from_request():
-    """
-    Gets user_id from request.json or request.args.
-    Returns (user_id, error_response)
-    """
-    user_id = None
-    if request.is_json:
-        user_id = request.json.get('user_id')
-
-    if not user_id:
-        user_id = request.args.get('user_id')
-
-    if not user_id:
-        return None, (jsonify({'error': 'user_id is required'}), 401) # 401 Unauthorized
-
-    try:
-        # Validate that it's a proper ObjectId
-        return ObjectId(user_id), None
-    except Exception:
-        return None, (jsonify({'error': 'Invalid user_id format'}), 400)
+# --- REMOVED get_user_id_from_request (now imported) ---
 
 
 def get_date_ranges_for_search():
@@ -80,7 +60,7 @@ def serialize_tx(tx):
 @transactions_bp.route('/', methods=['POST'])
 def add_transaction():
     """Adds a transaction for an authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -115,7 +95,7 @@ def add_transaction():
 @transactions_bp.route('/recent', methods=['GET'])
 def get_recent_transactions():
     """Fetches recent transactions for an authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -135,7 +115,7 @@ def get_recent_transactions():
 def search_transactions():
     """Performs an advanced search for an authenticated user."""
     params = request.json
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -188,7 +168,7 @@ def search_transactions():
 @transactions_bp.route('/<tx_id>', methods=['GET'])
 def get_transaction(tx_id):
     """Fetches a single transaction for an authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -212,7 +192,7 @@ def get_transaction(tx_id):
 def update_transaction(tx_id):
     """Updates a transaction for an authenticated user."""
     data = request.json
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
@@ -264,7 +244,7 @@ def update_transaction(tx_id):
 @transactions_bp.route('/<tx_id>', methods=['DELETE'])
 def delete_transaction(tx_id):
     """Deletes a transaction for an authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
 
     # --- MODIFICATION: Authenticate user ---
     # Note: user_id for DELETE comes from JSON body, not query param

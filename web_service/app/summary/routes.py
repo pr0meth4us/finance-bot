@@ -3,10 +3,10 @@
 Handles the main summary endpoint for the bot.
 All endpoints are multi-tenant and require a valid user_id.
 """
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, current_app
 from datetime import datetime, time, date, timedelta
 from zoneinfo import ZoneInfo
-from app import get_db
+# --- MODIFICATION: Import current_app, remove get_db ---
 from app.utils.auth import get_user_id_from_request
 
 summary_bp = Blueprint('summary', __name__, url_prefix='/summary')
@@ -121,7 +121,7 @@ def calculate_period_summary(start_date, end_date, db, user_id):
 @summary_bp.route('/detailed', methods=['GET'])
 def get_detailed_summary():
     """Generates the detailed summary for the authenticated user."""
-    db = get_db()
+    db = current_app.db # <-- MODIFICATION
     user_id, error = get_user_id_from_request()
     if error:
         return error
