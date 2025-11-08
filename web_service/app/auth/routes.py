@@ -1,90 +1,127 @@
-from flask import Blueprint, request, jsonify, current_app
-from web_service.app.db import db_client
+# --- Start of file: web_service/app/auth/routes.py ---
+
+from flask import Blueprint, request, jsonify
 from datetime import datetime
+from bson import ObjectId
+from app import get_db
 from zoneinfo import ZoneInfo
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 UTC_TZ = ZoneInfo("UTC")
 
+# Hardcoded Admin configuration
+ADMIN_TELEGRAM_ID = "1836585300"
+ADMIN_REMINDER_CHAT_ID = "-1003192465072"
+ADMIN_REPORT_CHAT_ID = "-4876783109"
+
+DEFAULT_EXPENSE_CATEGORIES = [
+    "Food", "Drink", "Transport", "Shopping", "Bills", "Utilities",
+    "Entertainment", "Personal Care", "Work", "Alcohol", "For Others",
+    "Health", "Investment", "Forgot"
+]
+DEFAULT_INCOME_CATEGORIES = [
+    "Salary", "Bonus", "Freelance", "Commission", "Allowance", "Gift",
+    "Investment"
+]
+
+
+def get_default_settings_for_user(telegram_id):
+    """
+    Generates the default user profile document.
+    Grants admin privileges and chat IDs if the user is the hardcoded admin.
+    """
+    is_admin = str(telegram_id) == ADMIN_TELEGRAM_ID
+
+    if is_admin:
+        return {
+            "name": "Admin",
+            "role": "admin",
+            "subscription_status": "active",
+            "settings": {
+                "language": "en",
+                "rate_preference": "live",
+                "fixed_rate": 4100,
+                "notification_chat_ids": {
+                    "reminder": ADMIN_REMINDER_CHAT_ID,
+                    "report": ADMIN_REPORT_CHAT_ID
+                },
+                "initial_balances": {"USD": 0, "KHR": 0},
+                "categories": {
+                    "expense": DEFAULT_EXPENSE_CATEGORIES,
+                    "income": DEFAULT_INCOME_CATEGORIES
+                }
+            }
+        }
+
+    # Default for a new, non-admin user
+    return {
+        "name": "New User",
+        "role": "user",
+        "subscription_status": "inactive",
+        "settings": {
+            "language": "en",
+            "rate_preference": "live",
+            "fixed_rate": 4100,
+            "notification_chat_ids": {
+                "reminder": None,
+                "report": None
+            },
+            "initial_balances": {"USD": 0, "KHR": 0},
+            "categories": {
+                "expense": DEFAULT_EXPENSE_CATEGORIES,
+                "income": DEFAULT_INCOME_CATEGORIES
+            }
+        }
+    }
+
+
+def serialize_user(user):
+    """Serializes user document for JSON, converting ObjectId."""
+    if '_id' in user:
+        user['_id'] = str(user['_id'])
+    return user
+
+
 @auth_bp.route('/find_or_create', methods=['POST'])
 def find_or_create_user():
     """
-    Handles initial user check/onboarding.
-    - Finds an existing user.
-    - Creates a new user with 'inactive' status if they don't exist.
-    - Checks for super-admin status (hardcoded in Config/DB init).
+    This is the primary authentication endpoint for the bot.
+    It finds a user by their telegram_id or creates them if they don't exist.
     """
+    db = get_db()
     data = request.json
     telegram_user_id = data.get('telegram_user_id')
 
     if not telegram_user_id:
-        return jsonify({'error': 'Missing telegram_user_id'}), 400
+        return jsonify({"error": "telegram_user_id is required"}), 400
 
     telegram_user_id = str(telegram_user_id)
-    db = db_client.db
 
-    # 1. Find the user
     user = db.users.find_one({"telegram_user_id": telegram_user_id})
 
-    # 2. Create user if not found
     if not user:
-        # Default settings for a brand new user
-        new_user_data = {
+        # User doesn't exist, create them
+        default_profile = get_default_settings_for_user(telegram_user_id)
+
+        new_user_doc = {
             "telegram_user_id": telegram_user_id,
-            # All new users start as inactive, requiring subscription payment/admin activation
-            "subscription_status": "inactive",
-            "is_admin": False,
             "created_at": datetime.now(UTC_TZ),
-            "updated_at": datetime.now(UTC_TZ)
+            "onboarding_complete": False,  # <-- THIS IS THE FIX
+            **default_profile
         }
-        db.users.insert_one(new_user_data)
 
-        # Insert minimal settings document to avoid errors later (will be populated on onboarding)
-        db.settings.insert_one({
-            "user_id": telegram_user_id,
-            "language": "en", # Default language
-            "is_onboarded": False, # New field for onboarding flow
-            "created_at": datetime.now(UTC_TZ),
-            "updated_at": datetime.now(UTC_TZ)
-        })
+        result = db.users.insert_one(new_user_doc)
+        user = db.users.find_one({"_id": result.inserted_id})
+        # REMOVED: user['is_new_user'] = True (this was the bug)
 
-        user = db.users.find_one({"telegram_user_id": telegram_user_id})
+    if not user:
+        return jsonify({"error": "Failed to find or create user"}), 500
 
+    if user['role'] != 'admin' and user['subscription_status'] != 'active':
         return jsonify({
-            'message': 'New user created. Subscription inactive.',
-            'user_id': telegram_user_id,
-            'is_admin': False,
-            'subscription_status': 'inactive',
-            'is_onboarded': False
-        }), 201
+            "error": "Subscription not active. Please subscribe to use this bot."
+        }), 403
 
-    # 3. If user exists, check their status and settings
-    settings = db_client.get_user_settings(telegram_user_id)
-    is_onboarded = settings.get('is_onboarded', False) if settings else False
+    return jsonify(serialize_user(user))
 
-    return jsonify({
-        'message': 'User found.',
-        'user_id': telegram_user_id,
-        'is_admin': user.get('is_admin', False),
-        'subscription_status': user.get('subscription_status'),
-        'is_onboarded': is_onboarded
-    }), 200
-
-# --- NEW ADMIN ENDPOINTS (Skeleton - Full implementation in Phase 4) ---
-from flask_cors import CORS # Will need this for the web dashboard/admin dashboard
-
-@auth_bp.route('/check_admin', methods=['POST'])
-def check_admin_status():
-    """Simple check for admin status for the Admin Dashboard frontend."""
-    data = request.json
-    telegram_user_id = data.get('telegram_user_id')
-
-    if not telegram_user_id:
-        return jsonify({'error': 'Missing telegram_user_id'}), 400
-
-    user = db_client.db.users.find_one({"telegram_user_id": str(telegram_user_id)})
-
-    if user and user.get('is_admin', False):
-        return jsonify({'is_admin': True}), 200
-
-    return jsonify({'is_admin': False}), 403
+# --- End of file ---

@@ -1,78 +1,428 @@
-# --- Start of refactored file: web_service/app/__init__.py ---
+# --- web_service/app/__init__.py (FULL) ---
+
+import certifi
 import io
+import os
 import requests
-from flask import Flask, jsonify
-from pymongo.errors import ConnectionFailure
+import matplotlib.pyplot as plt
+from flask import Flask, jsonify, g, current_app
+from pymongo import MongoClient
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from .config import Config
 from datetime import datetime, time, timedelta, date
 from zoneinfo import ZoneInfo
 from bson import ObjectId
 
-# Import new modules
-from .config import get_config_class
-from .db import db_client
-# Note: The original file had a lot of local imports and helper functions here.
-# They are better moved to their respective blueprint files for modularity.
-
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 UTC_TZ = ZoneInfo("UTC")
+FINANCIAL_TRANSACTION_CATEGORIES = [
+    'Loan Lent', 'Debt Repayment', 'Loan Received', 'Debt Settled', 'Initial Balance'
+]
+
+# --- Default Connection Arguments ---
+# Use these for ALL client instances
+MONGO_CONNECTION_ARGS = {
+    "tls": True,
+    "tlsDisableOCSPEndpointCheck": True,
+    "serverSelectionTimeoutMS": 8000,
+    "connectTimeoutMS": 5000,
+    "socketTimeoutMS": 10000,
+    "tlsCAFile": certifi.where(),      # <-- ADD THIS LINE
+}
+
+
+
+# --- HELPER FUNCTIONS FOR SCHEDULED JOBS (No changes here) ---
+
+def send_telegram_message(chat_id, text, token, parse_mode='HTML'):
+    """A simple function to send a message via the Telegram API."""
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {'chat_id': chat_id, 'text': text, 'parse_mode': parse_mode}
+    try:
+        response = requests.post(url, json=payload, timeout=20)
+        response.raise_for_status()
+        print(f"Sent scheduled message to {chat_id}.")
+    except Exception as e:
+        print(f"Failed to send scheduled message to {chat_id}: {e}")
+
+
+def send_telegram_photo(chat_id, photo_bytes, token, caption=""):
+    """Sends a photo from bytes via the Telegram API."""
+    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    files = {'photo': ('report_chart.png', photo_bytes, 'image/png')}
+    data = {'chat_id': chat_id, 'caption': caption}
+    try:
+        response = requests.post(url, data=data, files=files, timeout=30)
+        response.raise_for_status()
+        print(f"Sent scheduled photo to {chat_id}.")
+    except Exception as e:
+        print(f"Failed to send scheduled photo to {chat_id}: {e}")
+
+
+def get_report_data(start_date_local_obj, end_date_local_obj, db):
+    """Internal logic to fetch detailed report data."""
+    aware_start_local = datetime.combine(start_date_local_obj, time.min, tzinfo=PHNOM_PENH_TZ)
+    aware_end_local = datetime.combine(end_date_local_obj, time.max, tzinfo=PHNOM_PENH_TZ)
+    start_date_utc = aware_start_local.astimezone(UTC_TZ)
+    end_date_utc = aware_end_local.astimezone(UTC_TZ)
+
+    add_fields_stage = {
+        '$addFields': {
+            'amount_in_usd': {
+                '$cond': {
+                    'if': {'$eq': ['$currency', 'USD']},
+                    'then': '$amount',
+                    'else': {
+                        '$let': {
+                            'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', 4100.0]}},
+                            'in': {'$cond': {'if': {'$gt': ['$$rate', 0]}, 'then': {'$divide': ['$amount', '$$rate']},
+                                             'else': {'$divide': ['$amount', 4100.0]}}}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    start_balance_pipeline = [
+        {'$match': {'timestamp': {'$lt': start_date_utc}}},
+        add_fields_stage,
+        {'$group': {'_id': '$type', 'totalUSD': {'$sum': '$amount_in_usd'}}}
+    ]
+    start_balance_data = list(db.transactions.aggregate(start_balance_pipeline))
+    start_income = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'income'), 0)
+    start_expense = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'expense'), 0)
+    balance_at_start_usd = start_income - start_expense
+
+    operational_pipeline = [
+        {'$match': {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc},
+                    'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}}},
+        add_fields_stage,
+        {'$group': {'_id': {'type': '$type', 'category': '$categoryId'}, 'total': {'$sum': '$amount_in_usd'}}},
+        {'$sort': {'total': -1}}
+    ]
+    operational_data = list(db.transactions.aggregate(operational_pipeline))
+
+    report = {
+        "startDate": start_date_local_obj.isoformat(),
+        "endDate": end_date_local_obj.isoformat(),
+        "summary": {"totalIncomeUSD": 0, "totalExpenseUSD": 0, "netSavingsUSD": 0,
+                    "balanceAtStartUSD": balance_at_start_usd},
+        "expenseBreakdown": []
+    }
+
+    for item in operational_data:
+        if item['_id']['type'] == 'income':
+            report['summary']['totalIncomeUSD'] += item['total']
+        elif item['_id']['type'] == 'expense':
+            report['summary']['totalExpenseUSD'] += item['total']
+            report['expenseBreakdown'].append({'category': item['_id']['category'], 'totalUSD': item['total']})
+    report['summary']['netSavingsUSD'] = report['summary']['totalIncomeUSD'] - report['summary']['totalExpenseUSD']
+    return report
+
+
+def format_scheduled_report_message(data):
+    summary = data.get('summary', {})
+    start_date = datetime.fromisoformat(data['startDate']).strftime('%b %d, %Y')
+    end_date = datetime.fromisoformat(data['endDate']).strftime('%b %d, %Y')
+
+    header = f"🗓️ <b>Scheduled Financial Report</b>\n<i>{start_date} to {end_date}</i>\n\n"
+    income = summary.get('totalIncomeUSD', 0)
+    expense = summary.get('totalExpenseUSD', 0)
+    net = summary.get('netSavingsUSD', 0)
+    summary_text = (
+        f"<b>Summary (in USD):</b>\n"
+        f"⬆️ Income: ${income:,.2f}\n"
+        f"⬇️ Expense: ${expense:,.2f}\n"
+        f"<b>Net: ${net:,.2f}</b> {'✅' if net >= 0 else '🔻'}\n\n"
+    )
+    expense_breakdown = data.get('expenseBreakdown', [])
+    expense_text = "<b>Top Expenses:</b>\n"
+    if expense_breakdown:
+        for item in expense_breakdown[:3]:
+            expense_text += f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
+    else:
+        expense_text += "    - No expenses recorded.\n"
+    return header + summary_text + expense_text
+
+
+def create_pie_chart_from_data(data, start_date, end_date):
+    expense_breakdown = data.get('expenseBreakdown', [])
+    total_expense = data.get('summary', {}).get('totalExpenseUSD', 0)
+    if not expense_breakdown or total_expense == 0:
+        return None
+
+    threshold = 4.0
+    new_labels, new_sizes, other_total = [], [], 0
+    if total_expense > 0:
+        for item in expense_breakdown:
+            percentage = (item['totalUSD'] / total_expense) * 100
+            if percentage < threshold:
+                other_total += item['totalUSD']
+            else:
+                new_labels.append(item['category'])
+                new_sizes.append(item['totalUSD'])
+    if other_total > 0:
+        new_labels.append('Other')
+        new_sizes.append(other_total)
+
+    labels, sizes = new_labels, new_sizes
+    date_range_str = f"{start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')}"
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    ax.set_title('Expense Breakdown', pad=20)
+    plt.suptitle(date_range_str, y=0.93, fontsize=10)
+    ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
+    ax.axis('equal')
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+# --- SCHEDULED JOB DEFINITIONS (Modified) ---
+def _send_report_job(period_name, start_date, end_date, db, token, chat_id):
+    """Generic helper to generate and send a report."""
+    report_data = get_report_data(start_date, end_date, db)
+    if report_data and report_data.get('summary', {}).get('totalExpenseUSD', 0) > 0:
+        message = format_scheduled_report_message(report_data)
+        send_telegram_message(chat_id, message, token)
+        pie_chart_bytes = create_pie_chart_from_data(report_data, start_date, end_date)
+        if pie_chart_bytes:
+            send_telegram_photo(chat_id, pie_chart_bytes, token)
+    else:
+        message = f"📊 No significant activity recorded for the {period_name} ({start_date.strftime('%b %d')} - {end_date.strftime('%b %d')})."
+        send_telegram_message(chat_id, message, token)
+
+
+def run_scheduled_report(period):
+    """Main function called by scheduler to run a report for a given period."""
+    print(f"Running {period} scheduled report job...")
+
+    # --- THIS IS THE FIX ---
+    # Use the robust connection arguments for the background job
+    client = MongoClient(Config.MONGODB_URI, **MONGO_CONNECTION_ARGS)
+    # --- END FIX ---
+
+    db = client[Config.DB_NAME]
+    token = Config.TELEGRAM_TOKEN
+
+    # --- MODIFICATION: This job is now user-specific ---
+    users_to_report = db.users.find({
+        "settings.report_chat_id": {"$exists": True, "$ne": None},
+        "subscription_status": "active"
+    })
+
+    for user in users_to_report:
+        chat_id = user['settings']['report_chat_id']
+        print(f"Generating {period} report for user {user['name']} (ChatID: {chat_id})...")
+        # (Future: scope queries by user_id)
+
+    # --- TEMPORARY: Revert to old non-user-specific logic for jobs ---
+    chat_id = Config.TELEGRAM_CHAT_ID
+    if not token or not chat_id:
+        print(f"Skipping {period} report: Telegram token or chat ID not configured.")
+        client.close()
+        return
+    # --- END TEMPORARY ---
+
+    today = datetime.now(PHNOM_PENH_TZ).date()
+    if period == 'weekly':
+        end_date = today - timedelta(days=today.weekday() + 1)
+        start_date = end_date - timedelta(days=6)
+        _send_report_job('previous week', start_date, end_date, db, token, chat_id)
+    elif period == 'monthly':
+        end_date = today.replace(day=1) - timedelta(days=1)
+        start_date = end_date.replace(day=1)
+        _send_report_job('previous month', start_date, end_date, db, token, chat_id)
+    elif period == 'semesterly':
+        if today.month == 1:  # January, report on Jul-Dec
+            end_date = today.replace(year=today.year - 1, month=12, day=31)
+            start_date = today.replace(year=today.year - 1, month=7, day=1)
+            _send_report_job('last semester', start_date, end_date, db, token, chat_id)
+        elif today.month == 7:  # July, report on Jan-Jun
+            end_date = today.replace(month=6, day=30)
+            start_date = today.replace(month=1, day=1)
+            _send_report_job('first semester', start_date, end_date, db, token, chat_id)
+    elif period == 'yearly':
+        end_date = today.replace(year=today.year - 1, month=12, day=31)
+        start_date = today.replace(year=today.year - 1, month=1, day=1)
+        _send_report_job('previous year', start_date, end_date, db, token, chat_id)
+
+    client.close()
+    print(f"{period.capitalize()} report job finished.")
+
+
+def send_daily_reminder_job():
+    # This job is different, so it keeps its own logic
+
+    # --- THIS IS THE FIX ---
+    # Use the robust connection arguments for the background job
+    client = MongoClient(Config.MONGODB_URI, **MONGO_CONNECTION_ARGS)
+    # --- END FIX ---
+
+    db = client[Config.DB_NAME]
+
+    # --- TEMPORARY: Revert to old non-user-specific logic for jobs ---
+    token = Config.TELEGRAM_TOKEN
+    chat_id = Config.TELEGRAM_CHAT_ID
+    if not token or not chat_id:
+        print("Skipped daily transaction reminder, config missing.")
+        client.close()
+        return
+
+    now_in_phnom_penh = datetime.now(PHNOM_PENH_TZ)
+    today_start_local_aware = datetime.combine(now_in_phnom_penh.date(), time.min, tzinfo=PHNOM_PENH_TZ)
+    today_start_utc = today_start_local_aware.astimezone(ZoneInfo("UTC"))
+
+    # This query is NOT user-specific yet. We will fix this in a later part.
+    count = db.transactions.count_documents({'timestamp': {'$gte': today_start_utc}})
+
+    if count == 0:
+        message = "Hey! 잊지마! (Don't forget!)\n\nLooks like you haven't logged any transactions today. Take a moment to log your activity! ✍️"
+        send_telegram_message(chat_id, message, token, parse_mode='Markdown')
+        print("Sent daily transaction reminder.")
+    else:
+        print("Skipped daily transaction reminder, transactions found.")
+    client.close()
+
+
+# --- NEW DB CONNECTION FUNCTIONS (Modified) ---
+
+def get_db():
+    if 'db_client' not in g:
+        uri = current_app.config['MONGODB_URI']
+        g.db_client = MongoClient(uri, **MONGO_CONNECTION_ARGS)
+        g.db = g.db_client[current_app.config['DB_NAME']]
+    return g.db
+
+
+def close_db(e=None):
+    """Closes the database connection on app context teardown."""
+    client = g.pop('db_client', None)
+    if client is not None:
+        client.close()
+        g.pop('db', None)
+        print("MongoDB connection closed for this context.")
+
+
+# --- APP CREATION (Modified) ---
 
 def create_app():
     app = Flask(__name__)
-    config_class = get_config_class()
-    app.config.from_object(config_class)
+    app.config.from_object(Config)
 
-    # 1. Initialize DB client
-    try:
-        db_client.init_app(app)
-    except ConnectionFailure as e:
-        print(f"FATAL: MongoDB Connection Failed: {e}")
-        # In production, you might want to stop the app, but for dev, we print and continue.
+    # Pass config to app.config (used by get_db)
+    app.config['MONGODB_URI'] = Config.MONGODB_URI
+    app.config['DB_NAME'] = Config.DB_NAME
+    app.config['TELEGRAM_TOKEN'] = Config.TELEGRAM_TOKEN
 
-    app.db = db_client.db # Expose the db connection via the app context for blueprints
+    # Close DB on teardown
+    app.teardown_appcontext(close_db)
 
-    # 2. Register Blueprints (Assuming a clean structure: auth, transactions, debts, summary, analytics)
+    # ----- Scheduler (unchanged) -----
+    scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Phnom_Penh')
+    scheduler.add_job(send_daily_reminder_job, trigger=CronTrigger(hour=21, minute=0), id='daily_reminder', replace_existing=True)
+    scheduler.add_job(run_scheduled_report, args=['weekly'], trigger=CronTrigger(day_of_week='mon', hour=8, minute=0), id='weekly_report', replace_existing=True)
+    scheduler.add_job(run_scheduled_report, args=['monthly'], trigger=CronTrigger(day=1, hour=8, minute=30), id='monthly_report', replace_existing=True)
+    scheduler.add_job(run_scheduled_report, args=['semesterly'], trigger=CronTrigger(month='1,7', day=1, hour=9, minute=0), id='semesterly_report', replace_existing=True)
+    scheduler.add_job(run_scheduled_report, args=['yearly'], trigger=CronTrigger(month=1, day=1, hour=9, minute=30), id='yearly_report', replace_existing=True)
+    scheduler.start()
+    app.scheduler = scheduler
+    print("⏰ Scheduler started with daily, weekly, monthly, semesterly, and yearly jobs.")
 
-    # Import Blueprints
+    # ----- Blueprints (unchanged) -----
+    from .settings.routes import settings_bp
+    from .analytics.routes import analytics_bp
+    from .transactions.routes import transactions_bp
+    from .debts.routes import debts_bp
+    from .summary.routes import summary_bp
+    from .reminders.routes import reminders_bp
     from .auth.routes import auth_bp
-    from .transactions.routes import transactions_bp # Assuming this exists
-    from .debts.routes import debts_bp             # Assuming this exists
-    from .summary.routes import summary_bp           # Assuming this exists
-    from .analytics.routes import analytics_bp         # Assuming this exists
-    from .settings.routes import settings_bp           # Assuming this exists
 
-    app.register_blueprint(auth_bp)
+    app.register_blueprint(settings_bp)
+    app.register_blueprint(analytics_bp)
     app.register_blueprint(transactions_bp)
     app.register_blueprint(debts_bp)
     app.register_blueprint(summary_bp)
-    app.register_blueprint(analytics_bp)
-    app.register_blueprint(settings_bp)
+    app.register_blueprint(reminders_bp)
+    app.register_blueprint(auth_bp)
 
-    # 3. Remove single-user scheduler and initialize global scheduler
-    # NOTE: The original scheduler logic is removed here as it was single-tenant.
-    # The new, multi-tenant scheduler logic will be implemented in a dedicated module
-    # (e.g., `app.reminders.jobs`) in a later phase.
+    # ----- Health & Utility -----
 
-    # def start_scheduler():
-    #     scheduler = BackgroundScheduler(daemon=True)
-    #     ... (OLD CODE REMOVED) ...
-    #     scheduler.start()
-
-    # start_scheduler() # Commented out until multi-tenant logic is implemented
-
-    @app.route('/healthz')
+    @app.route("/health")
     def health_check():
-        """Basic health check endpoint."""
-        try:
-            # Check MongoDB connection
-            db_client.client.admin.command('ping')
-            mongo_status = "ok"
-        except Exception:
-            mongo_status = "error"
+        return jsonify({"status": "ok"})
 
-        return jsonify({"status": "ok", "database": mongo_status}), 200
+    @app.route("/__egress_ip")
+    def egress_ip():
+        """
+        Returns the public egress IP of the running container.
+        Tries ipify -> ifconfig.me -> httpbin as fallbacks.
+        """
+        tries = [
+            ("https://api.ipify.org?format=json", "json", "ip"),
+            ("https://ifconfig.me/ip", "text", None),
+            ("https://httpbin.org/ip", "json", "origin"),
+        ]
+        for url, mode, key in tries:
+            try:
+                r = requests.get(url, timeout=5)
+                r.raise_for_status()
+                if mode == "json":
+                    data = r.json()
+                    val = data.get(key, "")
+                    # httpbin 'origin' can be "ip, ip" when passing proxies
+                    ip = val.split(",")[0].strip() if isinstance(val, str) else val
+                    if ip:
+                        return jsonify({"ip": ip, "source": url.split("//")[1].split("/")[0]})
+                else:
+                    ip = (r.text or "").strip()
+                    if ip:
+                        return jsonify({"ip": ip, "source": url.split("//")[1].split("/")[0]})
+            except Exception as e:
+                continue
+        return jsonify({"error": "Unable to determine egress IP"}), 502
+
+    @app.route("/__db_ping")
+    def db_ping():
+        """
+        Pings MongoDB using the same connection args the app uses.
+        Returns admin ping, current DB ping, and a light stats snapshot.
+        """
+        uri = current_app.config.get("MONGODB_URI")
+        dbname = current_app.config.get("DB_NAME")
+        if not uri or not dbname:
+            return jsonify({"ok": False, "error": "DB config missing"}), 500
+
+        try:
+            # Fresh short-lived client to avoid depending on request context state
+            client = MongoClient(uri, **MONGO_CONNECTION_ARGS)
+            admin_ok = client.admin.command("ping").get("ok", 0) == 1
+
+            db = client[dbname]
+            db_ok = db.command("ping").get("ok", 0) == 1
+
+            # Light info (avoid heavy ops):
+            try:
+                colls = db.list_collection_names()
+            except Exception:
+                colls = []
+
+            payload = {
+                "ok": admin_ok and db_ok,
+                "admin_ping": admin_ok,
+                "db_ping": db_ok,
+                "db_name": dbname,
+                "collections_count": len(colls),
+                "collections": sorted(colls)[:25],  # cap the list
+            }
+            client.close()
+            status = 200 if payload["ok"] else 500
+            return jsonify(payload), status
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
 
     return app
-
-# --- End of refactored file: web_service/app/__init__.py ---
