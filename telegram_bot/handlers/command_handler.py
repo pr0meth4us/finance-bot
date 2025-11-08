@@ -27,6 +27,7 @@ aeval = Interpreter()
 COMMAND_MAP = {
     'coffee': {'categoryId': 'Drink', 'description': 'Coffee', 'type': 'expense'}, 'lunch': {'categoryId': 'Food', 'description': 'Lunch', 'type': 'expense'}, 'dinner': {'categoryId': 'Food', 'description': 'Dinner', 'type': 'expense'}, 'gas': {'categoryId': 'Transport', 'description': 'Gas', 'type': 'expense'}, 'parking': {'categoryId': 'Transport', 'description': 'Parking', 'type': 'expense'}, 'taxi': {'categoryId': 'Transport', 'description': 'Taxi/Tuktuk', 'type': 'expense'}, 'movie': {'categoryId': 'Entertainment', 'description': 'Movie', 'type': 'expense'}, 'groceries': {'categoryId': 'Shopping', 'description': 'Groceries', 'type': 'expense'}, 'shopping': {'categoryId': 'Shopping', 'description': 'Shopping', 'type': 'expense'}, 'bills': {'categoryId': 'Bills', 'description': 'Bills', 'type': 'expense'}, 'pizza': {'categoryId': 'Food', 'description': 'Pizza', 'type': 'expense'}, 'others': {'categoryId': 'For Others', 'description': 'For Others', 'type': 'expense'},
     'alcohol': {'categoryId': 'Alcohol', 'description': 'Alcohol', 'type': 'expense'},
+    'investment': {'categoryId': 'Investment', 'description': 'Investment', 'type': 'expense'}, # <-- NEW
     'salary': {'categoryId': 'Salary', 'description': 'Salary', 'type': 'income'}, 'bonus': {'categoryId': 'Bonus', 'description': 'Bonus', 'type': 'income'}, 'commission': {'categoryId': 'Commission', 'description': 'Commission', 'type': 'income'}, 'allowance': {'categoryId': 'Allowance', 'description': 'Allowance', 'type': 'income'}, 'gift': {'categoryId': 'Gift', 'description': 'Gift', 'type': 'income'},
 }
 
@@ -40,11 +41,11 @@ def parse_amount_and_currency(amount_str: str):
 def parse_date_from_args(args):
     """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     if not args: return None, args
-    
+
     date_str = args[-1]
     parsed_date = None
     today = datetime.now(PHNOM_PENH_TZ)
-    
+
     try:
         # Try MM-DD format first
         parsed_date = datetime.strptime(date_str, '%m-%d')
@@ -96,13 +97,16 @@ def _format_success_message(data):
 
 async def handle_generic_transaction(update: Update, command, args):
     """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
-    error_message = f"⚠️ Invalid format. Use:\n`{command} <Category> [\"Description\"] <Amount>[khr] [MM-DD]`\n\n(Tip: Use quotes for multi-word descriptions)"
+    # --- FIX: Updated error message format to include ! prefix ---
+    error_message = f"⚠️ Invalid format.\n`!{command} <Category> [\"Description\"] <Amount>[khr] [MM-DD]`\n\n(Tip: Use quotes for multi-word descriptions)"
     try:
         if len(args) < 2:
             await update.message.reply_text(error_message, parse_mode='Markdown')
             return None, None
-        args_str_fixed = " ".join(args).replace('“', '"').replace('”', '"')
-        parsed_args = shlex.split(args_str_fixed)
+
+        # --- FIX: Removed shlex.split, as args are now pre-parsed by the router ---
+        parsed_args = args
+
         tx_date, remaining_args = parse_date_from_args(parsed_args)
         amount_str = remaining_args[-1]
         amount, currency = parse_amount_and_currency(amount_str)
@@ -117,13 +121,16 @@ async def handle_generic_transaction(update: Update, command, args):
 
 async def handle_generic_debt(update: Update, command, args):
     """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
-    error_message = f"⚠️ Invalid format. Use:\n`{command} <Person> <Amount>[khr] [\"Purpose\"] [MM-DD]`\n\n(Tip: Use quotes for multi-word names or purposes)"
+    # --- FIX: Updated error message format to include ! prefix ---
+    error_message = f"⚠️ Invalid format.\n`!{command} <Person> <Amount>[khr] [\"Purpose\"] [MM-DD]`\n\n(Tip: Use quotes for multi-word names or purposes)"
     try:
         if len(args) < 2:
             await update.message.reply_text(error_message, parse_mode='Markdown')
             return None, None
-        args_str_fixed = " ".join(args).replace('“', '"').replace('”', '"')
-        parsed_args = shlex.split(args_str_fixed)
+
+        # --- FIX: Removed shlex.split, as args are now pre-parsed by the router ---
+        parsed_args = args
+
         tx_date, remaining_args = parse_date_from_args(parsed_args)
         person = remaining_args[0]
         amount_str = remaining_args[1]
@@ -139,8 +146,8 @@ async def handle_generic_debt(update: Update, command, args):
 async def handle_quick_command(update: Update, command, args):
     """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     try:
-        args_str_fixed = " ".join(args).replace('“', '"').replace('”', '"')
-        parsed_args = shlex.split(args_str_fixed)
+        # --- FIX: Removed shlex.split, as args are now pre-parsed by the router ---
+        parsed_args = args
 
         tx_date, remaining_args = parse_date_from_args(parsed_args)
 
@@ -171,17 +178,18 @@ async def handle_quick_command(update: Update, command, args):
 async def handle_repayment(update: Update, args, debt_type: str):
     """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     try:
-        command_example = "`repaid by <Person> <Amount>[khr] [MM-DD]`" if debt_type == 'lent' else "`paid <Person> <Amount>[khr] [MM-DD]`"
-        
-        args_str_fixed = " ".join(args).replace('“', '"').replace('”', '"')
-        parsed_args = shlex.split(args_str_fixed)
+        # --- FIX: Updated error message format to include ! prefix ---
+        command_example = "`!repaid by <Person> <Amount>[khr] [MM-DD]`" if debt_type == 'lent' else "`!paid <Person> <Amount>[khr] [MM-DD]`"
+
+        # --- FIX: Removed shlex.split, as args are now pre-parsed by the router ---
+        parsed_args = args
 
         tx_date, remaining_args = parse_date_from_args(parsed_args)
-        
+
         if len(remaining_args) < 2:
             await update.message.reply_text(f"⚠️ Format: {command_example}", parse_mode='Markdown')
             return
-            
+
         person = remaining_args[0]
         amount_str = remaining_args[1]
         amount, currency = parse_amount_and_currency(amount_str)
@@ -190,7 +198,7 @@ async def handle_repayment(update: Update, args, debt_type: str):
         response = api_client.record_lump_sum_repayment(person, currency, amount, debt_type, tx_date)
         base_text = response.get('message', '❌ An error occurred.')
         if response.get('error'):
-             base_text = f"❌ Error: {response.get('error')}"
+            base_text = f"❌ Error: {response.get('error')}"
 
     except Exception as e:
         logger.error(f"Error in handle_repayment: {e}", exc_info=True)
@@ -207,22 +215,42 @@ async def unified_message_router(update: Update, context: ContextTypes.DEFAULT_T
     full_text = update.message.text
     logger.info(f"--- Message router received text: '{full_text}' ---")
 
-    if '=' in full_text:
-        expression = full_text.split('=')[0].strip()
-        try:
-            result = aeval.eval(expression)
-            await update.message.reply_text(f"🧮 Result: `{result}`", parse_mode='Markdown')
-        except Exception as e:
-            logger.error(f"Calculator error for expression '{expression}': {e}")
-            await update.message.reply_text("Couldn't calculate that. Please check the expression.")
+    # --- FIX: Check for ! prefix ---
+    if not full_text.startswith('!'):
+        # If no prefix, check for calculator, otherwise ignore
+        if '=' in full_text:
+            expression = full_text.split('=')[0].strip()
+            try:
+                result = aeval.eval(expression)
+                await update.message.reply_text(f"🧮 Result: `{result}`", parse_mode='Markdown')
+            except Exception as e:
+                logger.error(f"Calculator error for expression '{expression}': {e}")
+                await update.message.reply_text("Couldn't calculate that. Please check the expression.")
+        else:
+            logger.info("Ignoring message, no '!' prefix or '=' found.")
         return ConversationHandler.END
 
-    parts = full_text.split()
-    command = parts[0].lower()
-    args = parts[1:]
+    # --- FIX: Strip prefix and parse with shlex ---
+    full_text = full_text[1:].strip() # Get text after !
+    # Fix smart quotes and single quotes
+    full_text_fixed = full_text.replace('“', '"').replace('”', '"').replace("‘", "'").replace("’", "'")
 
     try:
-        # --- FIX: Reroute repayment commands ---
+        parts = shlex.split(full_text_fixed)
+    except ValueError as e:
+        logger.warning(f"Shlex parsing error: {e}. Likely an unclosed quote.")
+        await update.message.reply_text(f"⚠️ Parsing error. Check your quotes: {e}")
+        return ConversationHandler.END
+
+    if not parts:
+        return ConversationHandler.END # Just an "!" was sent
+
+    command = parts[0].lower()
+    args = parts[1:]
+    # --- End Fix ---
+
+    try:
+        # --- FIX: Reroute repayment commands (must check full_text, not parts) ---
         if full_text.lower().startswith("repaid by") or full_text.lower().startswith("paid by"):
             args = parts[2:] # Get args after "repaid by" or "paid by"
             await handle_repayment(update, args, debt_type='lent') # 'lent' = someone is paying me
@@ -273,33 +301,35 @@ async def unknown_command_entry_point(update: Update, context: ContextTypes.DEFA
 
         if not args_without_date:
             await update.message.reply_text(
-                "I'm not sure what you mean. If you're trying to log an expense, please provide an amount (e.g., 'coffee 2.50').")
+                "I'm not sure what you mean. If you're trying to log an expense, please provide an amount (e.g., '!coffee 2.50').")
             return ConversationHandler.END
 
         # --- FIX: Amount is the LAST arg, description is everything before it ---
         amount_str = args_without_date[-1]
         description_parts = args_without_date[:-1]
-        
+
         try:
             amount, currency = parse_amount_and_currency(amount_str)
         except ValueError:
-             await update.message.reply_text(
-                "I'm not sure what you mean. Please provide an amount (e.g., 'coffee 2.50').")
-             return ConversationHandler.END
-        
+            await update.message.reply_text(
+                "I'm not sure what you mean. Please provide an amount (e.g., '!coffee 2.50').")
+            return ConversationHandler.END
+
         # Combine command and description parts
         description = command.replace('_', ' ').title()
         if description_parts:
             description += f" {' '.join(description_parts)}"
-            
+
         context.user_data['new_tx'] = {
-            "type": "expense", "amount": amount, "currency": currency, 
-            "accountName": f"{currency} Account", "description": description, 
+            "type": "expense", "amount": amount, "currency": currency,
+            "accountName": f"{currency} Account", "description": description,
             "timestamp": tx_date
         }
-        
+
         amount_display = f"{amount:,.0f} {currency}" if currency == 'KHR' else f"${amount:,.2f}"
-        await update.message.reply_text(f"New expense '{command.title()}' for {amount_display}. Which category?", reply_markup=keyboards.expense_categories_keyboard())
+
+        # --- FIX: Use the full 'description' in the reply, not just 'command.title()' ---
+        await update.message.reply_text(f"New expense '{description}' for {amount_display}. Which category?", reply_markup=keyboards.expense_categories_keyboard())
         return SELECT_CATEGORY
     except Exception as e:
         logger.error(f"Error starting unknown command flow: {e}", exc_info=True)
@@ -340,7 +370,7 @@ unified_message_conversation_handler = ConversationHandler(
         SELECT_CATEGORY: [CallbackQueryHandler(received_category_for_unknown, pattern='^cat_')],
         GET_CUSTOM_CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_text_for_custom_category)],
     },
-    fallbacks=[CommandHandler('cancel', cancel)],
+    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start), CallbackQueryHandler(start, pattern='^start$')],
     per_message=False,
     conversation_timeout=60
 )

@@ -331,7 +331,11 @@ def expense_categories_keyboard():
             InlineKeyboardButton("💊 Health", callback_data='cat_Health')
         ],
         [
+            # --- NEW: Added Investment ---
+            InlineKeyboardButton("📈 Investment", callback_data='cat_Investment'),
             InlineKeyboardButton("❓ Forgot", callback_data='cat_Forgot'),
+        ],
+        [
             InlineKeyboardButton("📝 Other", callback_data='cat_other')
         ],
     ]
