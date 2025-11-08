@@ -290,8 +290,10 @@ def send_daily_reminder_job():
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+    print(f"MongoDB URI: {Config.MONGODB_URI[:50]}...")  # Print first 50 chars
 
-    # --- REVERTED DB LOGIC ---
+
+# --- REVERTED DB LOGIC ---
     # Create a single, global client, just like v1
     client = MongoClient(
         Config.MONGODB_URI,
