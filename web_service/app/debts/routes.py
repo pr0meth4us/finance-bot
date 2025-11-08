@@ -142,6 +142,23 @@ def get_open_debts():
     return jsonify(grouped_debts)
 
 
+# --- NEW EXPORT ENDPOINT ---
+@debts_bp.route('/export/open', methods=['GET'])
+def get_open_debts_export_list():
+    """Fetches a simple flat list of all open debts for export."""
+    db = get_db()
+    user_id, error = get_user_id_from_request()
+    if error: return error
+
+    query_filter = {
+        'status': 'open',
+        'user_id': user_id
+    }
+    debts = list(db.debts.find(query_filter).sort('created_at', 1))
+    return jsonify([serialize_debt(d) for d in debts])
+# --- END NEW ENDPOINT ---
+
+
 @debts_bp.route('/list/settled', methods=['GET'])
 def get_settled_debts_grouped():
     """Fetches and groups settled OR canceled debts for the authenticated user."""

@@ -78,6 +78,23 @@ def get_open_debts(user_id):
         return []
 
 
+# --- NEW FUNCTION FOR DEBT EXPORT ---
+def get_open_debts_export(user_id):
+    """Fetches a flat list of all open debts for export."""
+    try:
+        res = requests.get(
+            f"{BASE_URL}/debts/export/open",
+            params={'user_id': user_id},
+            timeout=15
+        )
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error fetching debts for export: {e}")
+        return []
+# --- END NEW FUNCTION ---
+
+
 def get_settled_debts_grouped(user_id):
     """Fetches settled debts for a specific user."""
     try:

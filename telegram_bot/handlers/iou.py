@@ -4,14 +4,15 @@ from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 import keyboards
 import api_client
-from decorators import authenticate_user # <-- MODIFIED: Import new decorator
+from decorators import authenticate_user
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 from .helpers import (
     format_summary_message,
     _format_debt_analysis_message,
     _create_debt_overview_pie,
-    _create_debt_concentration_bar
+    _create_debt_concentration_bar,
+    _create_csv_from_debts  # <-- NEW IMPORT
 )
 from .command_handler import parse_amount_and_currency
 from utils.i18n import t
@@ -24,6 +25,7 @@ from utils.i18n import t
 ) = range(8)
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
+
 
 def _format_debt_details(debt, context: ContextTypes.DEFAULT_TYPE):
     """Helper to format the full details of a debt, including repayments."""
@@ -56,9 +58,9 @@ def _format_person_ledger(person_debts, context: ContextTypes.DEFAULT_TYPE, is_s
     """Formats all debts and repayments for one person into a single chronological list."""
 
     if not person_debts:
-        return t("iou.person_fail", context, person="this person") # Fallback text
+        return t("iou.person_fail", context, person="this person")  # Fallback text
 
-    ledger_items = [] # (datetime_obj, text_string, currency)
+    ledger_items = []  # (datetime_obj, text_string, currency)
     total_remaining_usd = 0
     total_remaining_khr = 0
 
@@ -112,7 +114,7 @@ def _format_person_ledger(person_debts, context: ContextTypes.DEFAULT_TYPE, is_s
 
 
 # --- IOU Menu & Standalone Handlers ---
-@authenticate_user # <-- MODIFIED
+@authenticate_user
 async def iou_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the IOU management menu."""
     query = update.callback_query
@@ -123,7 +125,7 @@ async def iou_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-@authenticate_user # <-- MODIFIED
+@authenticate_user
 async def iou_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows a summary list of all open debts, grouped by person."""
     query = update.callback_query
@@ -142,7 +144,7 @@ async def iou_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text=text, reply_markup=keyboard, parse_mode='Markdown')
 
 
-@authenticate_user # <-- MODIFIED
+@authenticate_user
 async def iou_view_settled(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows a summary list of all settled debts, grouped by person."""
     query = update.callback_query
@@ -161,7 +163,7 @@ async def iou_view_settled(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text=text, reply_markup=keyboard, parse_mode='Markdown')
 
 
-@authenticate_user # <-- MODIFIED
+@authenticate_user
 async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows a unified ledger of all open debts for a specific person."""
     query = update.callback_query
@@ -193,7 +195,7 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-@authenticate_user # <-- MODIFIED
+@authenticate_user
 async def iou_person_detail_settled(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows a unified ledger of all settled debts for a specific person."""
     query = update.callback_query
@@ -225,7 +227,7 @@ async def iou_person_detail_settled(update: Update, context: ContextTypes.DEFAUL
     )
 
 
-@authenticate_user # <-- MODIFIED
+@authenticate_user
 async def iou_manage_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays a list of individual debts for management (Edit/Cancel)."""
     query = update.callback_query
@@ -254,7 +256,7 @@ async def iou_manage_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-@authenticate_user # <-- MODIFIED
+@authenticate_user
 async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows details for a single debt, open or settled."""
     query = update.callback_query
@@ -279,7 +281,7 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text=text, parse_mode='HTML', reply_markup=keyboard)
 
 
-@authenticate_user # <-- MODIFIED
+@authenticate_user
 async def debt_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Fetches, displays debt analysis text, and sends charts."""
     query = update.callback_query
@@ -302,7 +304,8 @@ async def debt_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(
         text=final_text,
         parse_mode='HTML',
-        reply_markup=keyboards.iou_menu_keyboard(context)
+        # --- MODIFICATION: Use new keyboard ---
+        reply_markup=keyboards.debt_analysis_actions_keyboard(context)
     )
 
     if overview_pie := _create_debt_overview_pie(analysis_data):
@@ -311,8 +314,42 @@ async def debt_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_photo(chat_id=chat_id, photo=concentration_bar)
 
 
+# --- NEW HANDLER FOR DEBT CSV EXPORT ---
+@authenticate_user
+async def download_debt_analysis_csv(update: Update,
+                                     context: ContextTypes.DEFAULT_TYPE):
+    """Handles the 'Download Open Debts CSV' button press."""
+    query = update.callback_query
+    await query.answer(t("search.searching", context))
+
+    try:
+        user_id = context.user_data['user_profile']['_id']
+
+        # Use the new export API
+        debts = api_client.get_open_debts_export(user_id)
+
+        if not debts:
+            await query.message.reply_text(t("iou.view_no_open", context))
+            return
+
+        # Generate CSV
+        csv_buffer = _create_csv_from_debts(debts)
+        file_name = f"open_debts_export_{datetime.now(PHNOM_PENH_TZ).strftime('%Y%m%d')}.csv"
+
+        await context.bot.send_document(
+            chat_id=update.effective_chat.id,
+            document=csv_buffer,
+            filename=file_name,
+            caption="Here is your export of all open debts."
+        )
+
+    except Exception as e:
+        print(f"Error generating debt CSV: {e}")
+        await query.message.reply_text(t("common.error_generic", context, error=str(e)))
+
+
 # --- IOU Add Conversation ---
-@authenticate_user # <-- MODIFIED
+@authenticate_user
 async def iou_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Starts the IOU conversation by asking for the date."""
     query = update.callback_query
@@ -330,6 +367,7 @@ async def iou_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=keyboards.iou_date_keyboard(context)
     )
     return IOU_ASK_DATE
+
 
 async def iou_received_date_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the date choice for an IOU."""
@@ -442,7 +480,7 @@ async def iou_received_purpose(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 # --- Lump-Sum Repayment Conversation (from button) ---
-@authenticate_user # <-- MODIFIED
+@authenticate_user
 async def repay_lump_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Starts the lump-sum repayment conversation."""
     query = update.callback_query
@@ -501,7 +539,7 @@ async def received_lump_repayment_amount(update: Update, context: ContextTypes.D
 
 # --- NEW: Debt Edit/Cancel Handlers ---
 
-@authenticate_user # <-- MODIFIED
+@authenticate_user
 async def iou_manage_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows the edit/cancel menu for a specific debt."""
     query = update.callback_query
@@ -513,7 +551,7 @@ async def iou_manage_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-@authenticate_user # <-- MODIFIED
+@authenticate_user
 async def iou_cancel_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Asks for confirmation before canceling a debt."""
     query = update.callback_query
@@ -526,7 +564,7 @@ async def iou_cancel_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-@authenticate_user # <-- MODIFIED
+@authenticate_user
 async def iou_cancel_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Confirms and cancels the debt."""
     query = update.callback_query
@@ -555,7 +593,7 @@ async def iou_cancel_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # --- NEW: Debt Edit Conversation ---
 
-@authenticate_user # <-- MODIFIED
+@authenticate_user
 async def iou_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Starts the conversation to edit a debt's field."""
     query = update.callback_query

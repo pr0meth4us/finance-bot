@@ -12,9 +12,10 @@ from .helpers import (
     _create_income_expense_chart,
     _create_expense_pie_chart,
     _format_habits_message,
-    _create_spending_line_chart
+    _create_spending_line_chart,
+    _create_csv_from_transactions  # <-- NEW IMPORT
 )
-from utils.i18n import t  # <-- THIS IS THE FIX
+from utils.i18n import t
 
 (
     CHOOSE_REPORT_PERIOD, REPORT_ASK_START_DATE, REPORT_ASK_END_DATE,
@@ -166,7 +167,10 @@ async def _generate_report(update: Update,
         await context.bot.send_message(
             chat_id=chat_id,
             text=t("analytics.report_success", context),
-            reply_markup=keyboards.main_menu_keyboard(context)
+            # --- MODIFICATION: Use new keyboard ---
+            reply_markup=keyboards.report_actions_keyboard(
+                start_date, end_date, context
+            )
         )
     else:
         await context.bot.send_message(
@@ -259,4 +263,49 @@ async def process_habits_choice(update: Update,
         )
 
     return ConversationHandler.END
+
+
+# --- NEW HANDLER FOR CSV EXPORT ---
+@authenticate_user
+async def download_report_csv(update: Update,
+                              context: ContextTypes.DEFAULT_TYPE):
+    """Handles the 'Download Report CSV' button press."""
+    query = update.callback_query
+    await query.answer(t("search.searching", context))
+
+    try:
+        user_id = context.user_data['user_profile']['_id']
+        _, start_date_str, end_date_str = query.data.split(':')
+        start_date = datetime.fromisoformat(start_date_str).date()
+        end_date = datetime.fromisoformat(end_date_str).date()
+
+        search_params = {
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat()
+        }
+
+        # Use the existing search API to get all raw transactions
+        transactions = api_client.search_transactions_for_management(
+            search_params, user_id
+        )
+
+        if not transactions:
+            await query.message.reply_text(t("search.no_results", context))
+            return
+
+        # Generate CSV
+        csv_buffer = _create_csv_from_transactions(transactions)
+        file_name = f"report_{start_date.isoformat()}_to_{end_date.isoformat()}.csv"
+
+        await context.bot.send_document(
+            chat_id=update.effective_chat.id,
+            document=csv_buffer,
+            filename=file_name,
+            caption=f"Here is your transaction export for {start_date} to {end_date}."
+        )
+
+    except Exception as e:
+        print(f"Error generating report CSV: {e}")
+        await query.message.reply_text(t("common.error_generic", context, error=str(e)))
+
 # --- End of modified file ---

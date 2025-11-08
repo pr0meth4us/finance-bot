@@ -24,6 +24,10 @@ from handlers import (
     iou_edit_conversation_handler,
     get_current_rate
 )
+# --- NEW IMPORTS ---
+from handlers.analytics import download_report_csv
+from handlers.iou import download_debt_analysis_csv
+# --- END NEW IMPORTS ---
 from handlers.command_handler import unified_message_conversation_handler
 from handlers.onboarding import onboarding_conversation_handler
 from handlers.settings import settings_conversation_handler
@@ -94,6 +98,11 @@ def main():
     app.add_handler(CallbackQueryHandler(iou_cancel_confirm, pattern="^iou:cancel:confirm:"))
     app.add_handler(CallbackQueryHandler(debt_analysis, pattern="^debt_analysis$"))
 
+    # --- NEW CSV EXPORT HANDLERS ---
+    app.add_handler(CallbackQueryHandler(download_report_csv, pattern="^report_csv:"))
+    app.add_handler(CallbackQueryHandler(download_debt_analysis_csv, pattern="^debt_analysis_csv$"))
+    # --- END NEW HANDLERS ---
+
     print("🚀 Bot is running...")
     # Important for reducing stale-update storms when the bot restarts:
     # - drop_pending_updates clears backlog that can cause many parallel getUpdates consumers to race.
@@ -107,3 +116,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

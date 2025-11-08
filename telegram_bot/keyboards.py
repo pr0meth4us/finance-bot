@@ -2,7 +2,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from datetime import datetime
 from telegram.ext import ContextTypes
-from utils.i18n import t  # <-- THIS IS THE FIX
+from utils.i18n import t
 
 
 def main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
@@ -67,6 +67,36 @@ def main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
                 callback_data='settings_menu'
             )
         ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+# --- NEW KEYBOARD ---
+def report_actions_keyboard(start_date, end_date,
+                            context: ContextTypes.DEFAULT_TYPE):
+    """Keyboard shown after a report is generated."""
+    callback_data = f"report_csv:{start_date.isoformat()}:{end_date.isoformat()}"
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "📄 Download Report CSV", callback_data=callback_data
+            )
+        ],
+        [InlineKeyboardButton("‹ Back to Main Menu", callback_data='start')],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+# --- NEW KEYBOARD ---
+def debt_analysis_actions_keyboard(context: ContextTypes.DEFAULT_TYPE):
+    """Keyboard shown after debt analysis is generated."""
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "📄 Download Open Debts CSV", callback_data="debt_analysis_csv"
+            )
+        ],
+        [InlineKeyboardButton("‹ Back to IOU Menu", callback_data='iou_menu')],
     ]
     return InlineKeyboardMarkup(keyboard)
 

@@ -2,12 +2,13 @@
 
 from datetime import datetime
 import io
+import csv  # <-- NEW IMPORT
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from zoneinfo import ZoneInfo
 import pandas as pd
 from telegram.ext import ContextTypes
-from utils.i18n import t  # <-- THIS IS THE FIX
+from utils.i18n import t
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
@@ -617,5 +618,77 @@ def _create_debt_concentration_bar(analysis_data):
     plt.close(fig)
     buf.seek(0)
     return buf.getvalue()
+
+
+# --- NEW CSV EXPORT HELPERS ---
+
+def _create_csv_from_transactions(transactions_data: list) -> io.BytesIO:
+    """Converts a list of transaction dicts into an in-memory CSV file."""
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Write Header
+    headers = [
+        "Date (Local)", "Type", "Amount", "Currency",
+        "Category", "Description", "Transaction ID"
+    ]
+    writer.writerow(headers)
+
+    # Write Data
+    for tx in transactions_data:
+        dt_utc = datetime.fromisoformat(tx['timestamp'])
+        dt_local = dt_utc.astimezone(PHNOM_PENH_TZ)
+        writer.writerow([
+            dt_local.strftime('%Y-%m-%d %H:%M:%S'),
+            tx.get('type'),
+            tx.get('amount'),
+            tx.get('currency'),
+            tx.get('categoryId'),
+            tx.get('description', ''),
+            tx.get('_id')
+        ])
+
+    # Convert to BytesIO
+    buffer = io.BytesIO()
+    buffer.write(output.getvalue().encode('utf-8'))
+    buffer.seek(0)
+    output.close()
+    return buffer
+
+
+def _create_csv_from_debts(debts_data: list) -> io.BytesIO:
+    """Converts a list of debt dicts into an in-memory CSV file."""
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Write Header
+    headers = [
+        "Date Created (Local)", "Type", "Person", "Original Amount",
+        "Remaining Amount", "Currency", "Status", "Purpose", "Debt ID"
+    ]
+    writer.writerow(headers)
+
+    # Write Data
+    for debt in debts_data:
+        dt_utc = datetime.fromisoformat(debt['created_at'])
+        dt_local = dt_utc.astimezone(PHNOM_PENH_TZ)
+        writer.writerow([
+            dt_local.strftime('%Y-%m-%d %H:%M:%S'),
+            debt.get('type'),
+            debt.get('person'),
+            debt.get('originalAmount'),
+            debt.get('remainingAmount'),
+            debt.get('currency'),
+            debt.get('status'),
+            debt.get('purpose', ''),
+            debt.get('_id')
+        ])
+
+    # Convert to BytesIO
+    buffer = io.BytesIO()
+    buffer.write(output.getvalue().encode('utf-8'))
+    buffer.seek(0)
+    output.close()
+    return buffer
 
 # --- End of modified file ---
