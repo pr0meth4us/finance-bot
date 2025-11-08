@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 import logging
 import shlex
 from asteval import Interpreter
-from ..utils.i18n import t
+from utils.i18n import t  # <-- THIS IS THE FIX
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',

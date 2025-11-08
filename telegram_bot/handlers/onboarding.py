@@ -12,7 +12,7 @@ from telegram.ext import (
 import api_client
 import keyboards
 from .common import start
-from ..utils.i18n import t
+from utils.i18n import t  # <-- THIS IS THE FIX
 
 # Conversation states
 (

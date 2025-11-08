@@ -6,7 +6,7 @@ import keyboards
 import api_client
 from decorators import authenticate_user
 from .helpers import format_summary_message
-from ..utils.i18n import t
+from utils.i18n import t  # <-- THIS IS THE FIX
 
 
 @authenticate_user

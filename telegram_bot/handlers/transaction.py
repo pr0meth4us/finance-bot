@@ -15,7 +15,7 @@ import api_client
 import keyboards
 from .common import start, cancel
 from decorators import authenticate_user
-from ..utils.i18n import t
+from utils.i18n import t  # <-- THIS IS THE FIX
 from .command_handler import parse_amount_and_currency
 
 # Conversation states

@@ -13,7 +13,7 @@ import api_client
 import keyboards
 from .common import start
 from decorators import authenticate_user
-from ..utils.i18n import t
+from utils.i18n import t  # <-- THIS IS THE FIX
 
 # Conversation states
 (

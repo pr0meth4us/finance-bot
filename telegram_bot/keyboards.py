@@ -2,7 +2,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from datetime import datetime
 from telegram.ext import ContextTypes
-from ..utils.i18n import t
+from utils.i18n import t  # <-- THIS IS THE FIX
 
 
 def main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):

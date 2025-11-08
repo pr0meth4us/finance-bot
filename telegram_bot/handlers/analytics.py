@@ -14,7 +14,7 @@ from .helpers import (
     _format_habits_message,
     _create_spending_line_chart
 )
-from ..utils.i18n import t
+from utils.i18n import t  # <-- THIS IS THE FIX
 
 (
     CHOOSE_REPORT_PERIOD, REPORT_ASK_START_DATE, REPORT_ASK_END_DATE,

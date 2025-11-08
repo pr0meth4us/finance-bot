@@ -7,7 +7,7 @@ import matplotlib.dates as mdates
 from zoneinfo import ZoneInfo
 import pandas as pd
 from telegram.ext import ContextTypes
-from ..utils.i18n import t
+from utils.i18n import t  # <-- THIS IS THE FIX
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
@@ -461,7 +461,6 @@ def _format_habits_message(data):
     """Formats the spending habits data into a readable string."""
     if not data:
         return "Could not analyze spending habits."
-
     day_text = "\n<b>📅 Spending by Day of Week:</b>\n"
     by_day = sorted(data.get('byDayOfWeek', []),
                     key=lambda x: x.get('total', 0), reverse=True)
