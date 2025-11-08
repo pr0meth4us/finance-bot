@@ -1,0 +1,368 @@
+# --- Start of new file: telegram_bot/handlers/settings.py ---
+
+from telegram import Update
+from telegram.ext import (
+    ContextTypes,
+    ConversationHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters
+)
+
+import api_client
+import keyboards
+from .common import start
+from decorators import authenticate_user
+
+# Conversation states
+(
+    # Main menu
+    SETTINGS_MENU,
+    # Set Balance flow
+    SETBALANCE_ACCOUNT,
+    SETBALANCE_AMOUNT,
+    # Set Rate flow
+    NEW_RATE,
+    # Manage Categories flow
+    CATEGORIES_MENU,
+    CATEGORY_ADD_START,
+    CATEGORY_ADD_GET_NAME,
+    CATEGORY_REMOVE_START,
+    CATEGORY_REMOVE_GET_NAME
+) = range(9)
+
+
+@authenticate_user
+async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Displays the main settings menu."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = context.user_data['user_profile']['_id']
+    settings = api_client.get_user_settings(user_id)
+    rate_data = api_client.get_exchange_rate(user_id)
+
+    if not settings or not rate_data:
+        await query.edit_message_text(
+            "Error: Could not load your settings.",
+            reply_markup=keyboards.main_menu_keyboard()
+        )
+        return ConversationHandler.END
+
+    # Format settings for display
+    balances = settings.get('initial_balances', {})
+    usd_bal = balances.get('USD', 0)
+    khr_bal = balances.get('KHR', 0)
+    rate_pref = settings.get('rate_preference', 'live')
+    fixed_rate = settings.get('fixed_rate', 4100)
+    current_rate = rate_data.get('rate', 4100)
+
+    rate_text = (
+        f"Fixed ({fixed_rate:,.0f})"
+        if rate_pref == 'fixed'
+        else f"Live ({current_rate:,.0f})"
+    )
+
+    text = (
+        "<b>⚙️ Bot Settings</b>\n\n"
+        "Here you can manage your preferences and initial data.\n\n"
+        "<b>Initial Balances:</b>\n"
+        f"  💵 ${usd_bal:,.2f} USD\n"
+        f"  ៛ {khr_bal:,.0f} KHR\n\n"
+        f"<b>Exchange Rate:</b> {rate_text}\n"
+    )
+
+    await query.edit_message_text(
+        text=text,
+        parse_mode='HTML',
+        reply_markup=keyboards.settings_menu_keyboard()
+    )
+    return SETTINGS_MENU
+
+
+# --- Set Balance Flow ---
+
+async def set_balance_start(update: Update,
+                            context: ContextTypes.DEFAULT_TYPE):
+    """Asks which account balance to set."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "Which initial balance do you want to set/update?",
+        reply_markup=keyboards.set_balance_account_keyboard()
+    )
+    return SETBALANCE_ACCOUNT
+
+
+async def received_balance_account(update: Update,
+                                   context: ContextTypes.DEFAULT_TYPE):
+    """Asks for the new amount for the selected account."""
+    query = update.callback_query
+    await query.answer()
+    currency = query.data.split('_')[-1]
+    context.user_data['settings_currency'] = currency
+    await query.edit_message_text(
+        f"Account: <b>{currency}</b>\n\n"
+        f"What is the new initial balance? (This will NOT create a "
+        f"transaction, but will update your starting point).",
+        parse_mode='HTML'
+    )
+    return SETBALANCE_AMOUNT
+
+
+async def received_balance_amount(update: Update,
+                                  context: ContextTypes.DEFAULT_TYPE):
+    """Saves the new initial balance to the API."""
+    try:
+        user_id = context.user_data['user_profile']['_id']
+        amount = float(update.message.text)
+        currency = context.user_data.get('settings_currency')
+
+        if not currency:
+            raise ValueError("Context lost")
+
+        api_client.update_initial_balance(user_id, currency, amount)
+
+        await update.message.reply_text(
+            f"✅ Initial balance for {currency} updated to {amount:,.2f}."
+        )
+        # Go back to the main menu
+        return await start(update, context)
+
+    except (ValueError, TypeError):
+        await update.message.reply_text(
+            "Please enter a valid number for the balance."
+        )
+        return SETBALANCE_AMOUNT
+    except Exception as e:
+        await update.message.reply_text(f"An error occurred: {e}")
+        return await start(update, context)
+
+
+# --- Set Rate Flow ---
+
+async def update_rate_start(update: Update,
+                            context: ContextTypes.DEFAULT_TYPE):
+    """Asks for a new fixed exchange rate."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "Please enter your new **fixed** exchange rate for 1 USD to KHR "
+        "(e.g., 4100).\n\n"
+        "This will also set your preference to 'fixed'."
+    )
+    return NEW_RATE
+
+
+async def received_new_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Saves the new fixed rate via the API."""
+    try:
+        user_id = context.user_data['user_profile']['_id']
+        new_rate = float(update.message.text)
+
+        api_client.update_exchange_rate(new_rate, user_id)
+
+        await update.message.reply_text(
+            f"✅ Your fixed exchange rate is now set to {new_rate}."
+        )
+        return await start(update, context)
+
+    except (ValueError, TypeError):
+        await update.message.reply_text(
+            "Invalid number. Please enter a valid rate."
+        )
+        return NEW_RATE
+    except Exception as e:
+        await update.message.reply_text(f"An error occurred: {e}")
+        return await start(update, context)
+
+
+# --- Manage Categories Flow ---
+
+async def categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Displays the category management menu."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = context.user_data['user_profile']['_id']
+    settings = api_client.get_user_settings(user_id)
+    if not settings:
+        await query.edit_message_text(
+            "Error: Could not load categories.",
+            reply_markup=keyboards.settings_menu_keyboard()
+        )
+        return SETTINGS_MENU
+
+    categories = settings.get('categories', {})
+    expense_cats = categories.get('expense', [])
+    income_cats = categories.get('income', [])
+
+    text = (
+        "<b>🏷️ Manage Categories</b>\n\n"
+        "<b>Expense:</b>\n"
+        f"  {', '.join(expense_cats)}\n\n"
+        "<b>Income:</b>\n"
+        f"  {', '.join(income_cats)}\n"
+    )
+
+    await query.edit_message_text(
+        text=text,
+        parse_mode='HTML',
+        reply_markup=keyboards.manage_categories_keyboard()
+    )
+    return CATEGORIES_MENU
+
+
+async def category_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Asks for the type of category to add."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data['category_action'] = 'add'
+    await query.edit_message_text(
+        "What type of category do you want to add?",
+        reply_markup=keyboards.category_type_keyboard('add')
+    )
+    return CATEGORY_ADD_START
+
+
+async def category_remove_start(update: Update,
+                                context: ContextTypes.DEFAULT_TYPE):
+    """Asks for the type of category to remove."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data['category_action'] = 'remove'
+    await query.edit_message_text(
+        "What type of category do you want to remove?",
+        reply_markup=keyboards.category_type_keyboard('remove')
+    )
+    return CATEGORY_REMOVE_START
+
+
+async def received_category_type(update: Update,
+                                 context: ContextTypes.DEFAULT_TYPE):
+    """Receives category type and asks for the name."""
+    query = update.callback_query
+    await query.answer()
+
+    action = context.user_data['category_action']
+    cat_type = query.data.split(':')[-1]
+    context.user_data['category_type'] = cat_type
+
+    await query.edit_message_text(
+        f"Please type the name of the new **{cat_type}** category to {action}:"
+    )
+    if action == 'add':
+        return CATEGORY_ADD_GET_NAME
+    if action == 'remove':
+        return CATEGORY_REMOVE_GET_NAME
+    return SETTINGS_MENU  # Fallback
+
+
+async def received_category_add_name(update: Update,
+                                     context: ContextTypes.DEFAULT_TYPE):
+    """Receives and saves the new category name."""
+    try:
+        user_id = context.user_data['user_profile']['_id']
+        cat_type = context.user_data['category_type']
+        cat_name = update.message.text.strip().title()
+
+        api_client.add_category(user_id, cat_type, cat_name)
+        await update.message.reply_text(
+            f"✅ Category '{cat_name}' added to {cat_type}."
+        )
+        return await start(update, context)
+
+    except Exception as e:
+        await update.message.reply_text(f"An error occurred: {e}")
+        return await start(update, context)
+
+
+async def received_category_remove_name(update: Update,
+                                        context: ContextTypes.DEFAULT_TYPE):
+    """Receives and removes the category name."""
+    try:
+        user_id = context.user_data['user_profile']['_id']
+        cat_type = context.user_data['category_type']
+        cat_name = update.message.text.strip().title()
+
+        api_client.remove_category(user_id, cat_type, cat_name)
+        await update.message.reply_text(
+            f"✅ Category '{cat_name}' removed from {cat_type}."
+        )
+        return await start(update, context)
+
+    except Exception as e:
+        await update.message.reply_text(f"An error occurred: {e}")
+        return await start(update, context)
+
+
+# --- Conversation Handler ---
+
+settings_conversation_handler = ConversationHandler(
+    entry_points=[
+        CallbackQueryHandler(settings_menu, pattern='^settings_menu$')
+    ],
+    states={
+        SETTINGS_MENU: [
+            CallbackQueryHandler(
+                set_balance_start, pattern='^settings_set_balance$'
+            ),
+            CallbackQueryHandler(
+                update_rate_start, pattern='^settings_set_rate$'
+            ),
+            CallbackQueryHandler(
+                categories_menu, pattern='^settings_manage_categories$'
+            ),
+            CallbackQueryHandler(start, pattern='^start$'),
+        ],
+        # Balance Flow
+        SETBALANCE_ACCOUNT: [
+            CallbackQueryHandler(
+                received_balance_account, pattern='^set_balance_'
+            )
+        ],
+        SETBALANCE_AMOUNT: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND,
+                           received_balance_amount)
+        ],
+        # Rate Flow
+        NEW_RATE: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, received_new_rate)
+        ],
+        # Categories Flow
+        CATEGORIES_MENU: [
+            CallbackQueryHandler(
+                category_add_start, pattern='^category_add$'
+            ),
+            CallbackQueryHandler(
+                category_remove_start, pattern='^category_remove$'
+            ),
+            CallbackQueryHandler(settings_menu, pattern='^settings_menu$'),
+        ],
+        CATEGORY_ADD_START: [
+            CallbackQueryHandler(
+                received_category_type, pattern='^cat_type:add:'
+            )
+        ],
+        CATEGORY_REMOVE_START: [
+            CallbackQueryHandler(
+                received_category_type, pattern='^cat_type:remove:'
+            )
+        ],
+        CATEGORY_ADD_GET_NAME: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND,
+                           received_category_add_name)
+        ],
+        CATEGORY_REMOVE_GET_NAME: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND,
+                           received_category_remove_name)
+        ],
+    },
+    fallbacks=[
+        CommandHandler('start', start),
+        CallbackQueryHandler(start, pattern='^start$')
+    ],
+    per_message=False
+)
+
+# --- End of new file ---

@@ -1,4 +1,4 @@
-# --- Start of modified file: web_service/app/summary/routes.py ---
+# --- Start of file: web_service/app/summary/routes.py ---
 """
 Handles the main summary endpoint for the bot.
 All endpoints are multi-tenant and require a valid user_id.
@@ -7,26 +7,30 @@ from flask import Blueprint, jsonify
 from datetime import datetime, time, date, timedelta
 from zoneinfo import ZoneInfo
 from app import get_db
-# --- MODIFICATION: Import the new auth helper ---
 from app.utils.auth import get_user_id_from_request
 
 summary_bp = Blueprint('summary', __name__, url_prefix='/summary')
 
+# "Initial Balance" is removed. It's no longer an operational transaction.
 FINANCIAL_TRANSACTION_CATEGORIES = [
     'Loan Lent',
     'Debt Repayment',
     'Loan Received',
-    'Debt Settled',
-    'Initial Balance'
+    'Debt Settled'
 ]
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 UTC_TZ = ZoneInfo("UTC")
 
+
 def create_utc_range(start_date_local, end_date_local):
-    """Converts local start/end dates into a timezone-aware UTC range for querying."""
-    aware_start_dt = datetime.combine(start_date_local, time.min, tzinfo=PHNOM_PENH_TZ)
-    aware_end_dt = datetime.combine(end_date_local, time.max, tzinfo=PHNOM_PENH_TZ)
+    """Converts local start/end dates into a timezone-aware UTC range."""
+    aware_start_dt = datetime.combine(
+        start_date_local, time.min, tzinfo=PHNOM_PENH_TZ
+    )
+    aware_end_dt = datetime.combine(
+        end_date_local, time.max, tzinfo=PHNOM_PENH_TZ
+    )
     return aware_start_dt.astimezone(UTC_TZ), aware_end_dt.astimezone(UTC_TZ)
 
 
@@ -54,12 +58,12 @@ def get_date_ranges():
 
 
 def calculate_period_summary(start_date, end_date, db, user_id):
-    """Helper to run aggregation for a specific time period for a specific user."""
+    """Helper to run aggregation for a specific time period for a user."""
     pipeline = [
         {'$match': {
             'timestamp': {'$gte': start_date, '$lte': end_date},
             'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES},
-            'user_id': user_id # <-- MODIFICATION
+            'user_id': user_id
         }},
         {
             '$addFields': {
@@ -69,8 +73,14 @@ def calculate_period_summary(start_date, end_date, db, user_id):
                         'then': '$amount',
                         'else': {
                             '$let': {
-                                'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', 4100.0]}},
-                                'in': {'$cond': {'if': {'$gt': ['$$rate', 0]}, 'then': {'$divide': ['$amount', '$$rate']}, 'else': {'$divide': ['$amount', 4100.0]}}}
+                                'vars': {'rate': {'$ifNull': [
+                                    '$exchangeRateAtTime', 4100.0
+                                ]}},
+                                'in': {'$cond': {
+                                    'if': {'$gt': ['$$rate', 0]},
+                                    'then': {'$divide': ['$amount', '$$rate']},
+                                    'else': {'$divide': ['$amount', 4100.0]}
+                                }}
                             }
                         }
                     }
@@ -112,34 +122,44 @@ def calculate_period_summary(start_date, end_date, db, user_id):
 def get_detailed_summary():
     """Generates the detailed summary for the authenticated user."""
     db = get_db()
-
-    # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
-    if error: return error
-    # ---
+    if error:
+        return error
 
-    # 1. Calculate Balances
+    # 1. Get User's Initial Balances
+    user = db.users.find_one(
+        {'_id': user_id},
+        {'settings.initial_balances': 1}
+    )
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    initial_balances = user.get('settings', {}).get('initial_balances', {})
+    initial_khr = initial_balances.get('KHR', 0)
+    initial_usd = initial_balances.get('USD', 0)
+
+    # 2. Calculate Total Operational Cash Flow
     khr_pipeline = [
-        {'$match': {'accountName': 'KHR Account', 'user_id': user_id}}, # <-- MODIFICATION
+        {'$match': {'accountName': 'KHR Account', 'user_id': user_id}},
         {'$group': {'_id': '$type', 'total': {'$sum': '$amount'}}}
     ]
     khr_results = list(db.transactions.aggregate(khr_pipeline))
-    khr_income = next((item['total'] for item in khr_results if item['_id'] == 'income'), 0)
-    khr_expense = next((item['total'] for item in khr_results if item['_id'] == 'expense'), 0)
-    khr_balance = khr_income - khr_expense
+    khr_income = next((r['total'] for r in khr_results if r['_id'] == 'income'), 0)
+    khr_expense = next((r['total'] for r in khr_results if r['_id'] == 'expense'), 0)
+    khr_balance = initial_khr + khr_income - khr_expense
 
     usd_pipeline = [
-        {'$match': {'accountName': 'USD Account', 'user_id': user_id}}, # <-- MODIFICATION
+        {'$match': {'accountName': 'USD Account', 'user_id': user_id}},
         {'$group': {'_id': '$type', 'total': {'$sum': '$amount'}}}
     ]
     usd_results = list(db.transactions.aggregate(usd_pipeline))
-    usd_income = next((item['total'] for item in usd_results if item['_id'] == 'income'), 0)
-    usd_expense = next((item['total'] for item in usd_results if item['_id'] == 'expense'), 0)
-    usd_balance = usd_income - usd_expense
+    usd_income = next((r['total'] for r in usd_results if r['_id'] == 'income'), 0)
+    usd_expense = next((r['total'] for r in usd_results if r['_id'] == 'expense'), 0)
+    usd_balance = initial_usd + usd_income - usd_expense
 
-    # 2. Calculate Debts
+    # 3. Calculate Debts
     pipeline_debts = [
-        {'$match': {'status': 'open', 'user_id': user_id}}, # <-- MODIFICATION
+        {'$match': {'status': 'open', 'user_id': user_id}},
         {'$group': {
             '_id': {'type': '$type', 'currency': '$currency'},
             'totalAmount': {'$sum': '$remainingAmount'}
@@ -149,16 +169,24 @@ def get_detailed_summary():
     debts_owed_to_you = [d for d in debt_results if d['_id']['type'] == 'lent']
     debts_owed_by_you = [d for d in debt_results if d['_id']['type'] == 'borrowed']
 
-    formatted_debts_to_you = [{'total': d['totalAmount'], '_id': d['_id']['currency']} for d in debts_owed_to_you]
-    formatted_debts_by_you = [{'total': d['totalAmount'], '_id': d['_id']['currency']} for d in debts_owed_by_you]
+    formatted_debts_to_you = [
+        {'total': d['totalAmount'], '_id': d['_id']['currency']}
+        for d in debts_owed_to_you
+    ]
+    formatted_debts_by_you = [
+        {'total': d['totalAmount'], '_id': d['_id']['currency']}
+        for d in debts_owed_by_you
+    ]
 
-    # 3. Calculate Period Summaries
+    # 4. Calculate Period Summaries
     date_ranges = get_date_ranges()
     period_summaries = {}
     for period, (start_utc, end_utc) in date_ranges.items():
-        period_summaries[period] = calculate_period_summary(start_utc, end_utc, db, user_id) # <-- MODIFICATION
+        period_summaries[period] = calculate_period_summary(
+            start_utc, end_utc, db, user_id
+        )
 
-    # 4. Combine all data
+    # 5. Combine all data
     summary = {
         'balances': {'KHR': khr_balance, 'USD': usd_balance},
         'debts_owed_by_you': formatted_debts_by_you,
@@ -167,4 +195,5 @@ def get_detailed_summary():
     }
 
     return jsonify(summary)
-# --- End of modified file ---
+
+# --- End of file ---
