@@ -4,7 +4,7 @@ from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 import keyboards
 import api_client
-from decorators import restricted
+from decorators import authenticate_user # <-- MODIFICATION: Fix import
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from .helpers import (
@@ -12,7 +12,7 @@ from .helpers import (
     _create_income_expense_chart,
     _create_expense_pie_chart,
     _format_habits_message,
-    _create_spending_line_chart  # <-- NEW IMPORT
+    _create_spending_line_chart
 )
 
 # Conversation states
@@ -22,17 +22,21 @@ from .helpers import (
 ) = range(4)
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
-
-# --- FIX: Define REGEX for this handler ---
 REPORT_PERIOD_REGEX = '^(Today|This Week|Last Week|This Month|Last Month|Custom Range)$'
 
 
 # --- Report Generation ---
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the menu for selecting a report period."""
     query = update.callback_query
     await query.answer()
+
+    # --- MODIFICATION: Re-cache user_profile after clear() ---
+    context.user_data.clear()
+    context.user_data['user_profile'] = context.application.user_data[update.effective_user.id]['user_profile']
+    # ---
+
     await query.edit_message_text(
         "What period would you like a report for?",
         reply_markup=keyboards.report_period_keyboard()
@@ -40,7 +44,7 @@ async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CHOOSE_REPORT_PERIOD
 
 
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def process_report_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles standard period selection or transitions to custom date entry."""
     query = update.callback_query
@@ -74,7 +78,7 @@ async def process_report_choice(update: Update, context: ContextTypes.DEFAULT_TY
     return ConversationHandler.END
 
 
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def received_report_start_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives and validates the custom start date."""
     try:
@@ -88,7 +92,7 @@ async def received_report_start_date(update: Update, context: ContextTypes.DEFAU
         return REPORT_ASK_START_DATE
 
 
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def received_report_end_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives, validates end date, and generates the report."""
     try:
@@ -107,29 +111,29 @@ async def received_report_end_date(update: Update, context: ContextTypes.DEFAULT
 
 
 async def _generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE, start_date, end_date):
-    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
     """Shared logic to generate and send report summary and charts."""
     chat_id = update.effective_chat.id
+
+    # --- MODIFICATION: Get user_id ---
+    user_id = context.user_data['user_profile']['_id']
+    # ---
+
     loading_text = f"📈 Generating your report for {start_date:%b %d, %Y} to {end_date:%b %d, %Y}..."
     loading_message = await context.bot.send_message(chat_id=chat_id, text=loading_text)
     if update.callback_query:
         await update.callback_query.message.delete()
 
-    report_data = api_client.get_detailed_report(start_date, end_date)
+    report_data = api_client.get_detailed_report(user_id, start_date, end_date) # <-- MODIFICATION
     await loading_message.delete()
 
     if report_data:
         summary_message = _format_report_summary_message(report_data)
         await context.bot.send_message(chat_id=chat_id, text=summary_message, parse_mode='HTML')
 
-        # --- MODIFICATION: Pass dates to chart functions ---
         if bar_chart := _create_income_expense_chart(report_data, start_date, end_date):
             await context.bot.send_photo(chat_id=chat_id, photo=bar_chart)
-
-        # --- NEW: Generate and send line chart ---
         if line_chart := _create_spending_line_chart(report_data, start_date, end_date):
             await context.bot.send_photo(chat_id=chat_id, photo=line_chart)
-
         if pie_chart := _create_expense_pie_chart(report_data, start_date, end_date):
             await context.bot.send_photo(chat_id=chat_id, photo=pie_chart)
 
@@ -142,11 +146,17 @@ async def _generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE, s
 
 
 # --- Habits Analysis ---
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def habits_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays menu to choose a period for habits analysis."""
     query = update.callback_query
     await query.answer()
+
+    # --- MODIFICATION: Re-cache user_profile after clear() ---
+    context.user_data.clear()
+    context.user_data['user_profile'] = context.application.user_data[update.effective_user.id]['user_profile']
+    # ---
+
     await query.edit_message_text(
         "🧠 For which period would you like to analyze your spending habits?",
         reply_markup=keyboards.report_period_keyboard()
@@ -154,6 +164,7 @@ async def habits_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CHOOSE_HABITS_PERIOD
 
 
+@authenticate_user # <-- MODIFICATION
 async def process_habits_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Generates and sends the habits report for the selected period."""
     query = update.callback_query
@@ -183,7 +194,11 @@ async def process_habits_choice(update: Update, context: ContextTypes.DEFAULT_TY
     if date_pair:
         start_date, end_date = date_pair
         await query.edit_message_text("🧠 Analyzing your habits...")
-        habits_data = api_client.get_spending_habits(start_date, end_date)
+
+        # --- MODIFICATION: Get user_id ---
+        user_id = context.user_data['user_profile']['_id']
+        habits_data = api_client.get_spending_habits(user_id, start_date, end_date) # <-- MODIFICATION
+        # ---
 
         if habits_data:
             message = _format_habits_message(habits_data)
@@ -195,3 +210,4 @@ async def process_habits_choice(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text("Invalid period selected.", reply_markup=keyboards.main_menu_keyboard())
 
     return ConversationHandler.END
+# --- End of file ---

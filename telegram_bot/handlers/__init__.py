@@ -1,7 +1,8 @@
 # --- Start of corrected file: telegram_bot/handlers/__init__.py ---
 
 from telegram.ext import ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler, filters
-from .common import start, quick_check, cancel # <-- REMOVED search_menu
+# --- MODIFICATION: Removed search_menu, which was part of the old decorator ---
+from .common import start, quick_check, cancel
 from .analytics import (
     report_menu, process_report_choice, received_report_start_date, received_report_end_date,
     habits_menu, process_habits_choice,
@@ -35,17 +36,17 @@ from .utility import (
     update_rate_start, received_new_rate, set_balance_start, received_balance_account,
     received_balance_amount, set_reminder_start, received_reminder_purpose,
     received_reminder_date_choice, received_reminder_custom_date, received_reminder_time,
-    get_current_rate, # <-- NEW IMPORT
+    get_current_rate,
     NEW_RATE, SETBALANCE_ACCOUNT, SETBALANCE_AMOUNT,
     REMINDER_PURPOSE, REMINDER_ASK_DATE, REMINDER_CUSTOM_DATE, REMINDER_ASK_TIME
 )
 from .search import (
-    search_menu_entry, # <-- NEW
+    search_menu_entry,
     search_start, received_period_choice, received_custom_start, received_custom_end,
     received_type_choice, received_categories, received_keywords, received_keyword_logic,
     CHOOSE_PERIOD, GET_CUSTOM_START, GET_CUSTOM_END, CHOOSE_TYPE,
     GET_CATEGORIES, GET_KEYWORDS, GET_KEYWORD_LOGIC,
-    CHOOSE_ACTION # <-- NEW
+    CHOOSE_ACTION
 )
 
 # --- Build Conversation Handlers ---
@@ -176,9 +177,9 @@ habits_conversation_handler = ConversationHandler(
 )
 
 search_conversation_handler = ConversationHandler(
-    entry_points=[CallbackQueryHandler(search_menu_entry, pattern='^search_menu$')], # <-- MODIFIED
+    entry_points=[CallbackQueryHandler(search_menu_entry, pattern='^search_menu$')],
     states={
-        CHOOSE_ACTION: [CallbackQueryHandler(search_start, pattern='^start_search_(manage|sum)$')], # <-- MODIFIED
+        CHOOSE_ACTION: [CallbackQueryHandler(search_start, pattern='^start_search_(manage|sum)$')],
         CHOOSE_PERIOD: [CallbackQueryHandler(received_period_choice, pattern='^report_period_')],
         GET_CUSTOM_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_custom_start)],
         GET_CUSTOM_END: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_custom_end)],
@@ -196,3 +197,4 @@ search_conversation_handler = ConversationHandler(
     fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start), CallbackQueryHandler(start, pattern='^start$')],
     per_message=False
 )
+# --- End of corrected file ---

@@ -1,9 +1,10 @@
+# --- Start of corrected file: telegram_bot/bot.py ---
 import os
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from dotenv import load_dotenv
 # --- MODIFICATION START ---
 from handlers import (
-    start, quick_check, cancel,  # <-- REMOVED search_menu
+    start, quick_check, cancel,
     tx_conversation_handler,
     rate_conversation_handler,
     iou_conversation_handler,
@@ -14,14 +15,15 @@ from handlers import (
     report_conversation_handler,
     edit_tx_conversation_handler,
     habits_conversation_handler,
-    search_conversation_handler,
+    search_conversation_handler, # <-- This is the conv handler
     history_menu, manage_transaction, delete_transaction_prompt, delete_transaction_confirm,
     iou_menu, iou_view, iou_person_detail, iou_detail, debt_analysis,
     iou_view_settled, iou_person_detail_settled, iou_manage_list,
     iou_manage_menu, iou_cancel_prompt, iou_cancel_confirm,
     iou_edit_conversation_handler,
-    get_current_rate  # <-- NEW IMPORT
+    get_current_rate
 )
+# This imports the unified_message_conversation_handler
 from handlers.command_handler import unified_message_conversation_handler
 
 # --- MODIFICATION END ---
@@ -39,12 +41,11 @@ def main():
 
     # --- Register ALL Handlers ---
 
-    # 1. System command handlers for start/cancel and specific commands
+    # 1. System command handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cancel", cancel))
 
-    # --- MODIFICATION START: Reorder handlers ---
-    # 2. Add button-based conversation handlers FIRST.
+    # 2. Add button-based conversation handlers
     app.add_handler(tx_conversation_handler)
     app.add_handler(rate_conversation_handler)
     app.add_handler(iou_conversation_handler)
@@ -55,21 +56,20 @@ def main():
     app.add_handler(report_conversation_handler)
     app.add_handler(edit_tx_conversation_handler)
     app.add_handler(habits_conversation_handler)
-    app.add_handler(search_conversation_handler)
+    app.add_handler(search_conversation_handler) # <-- Add search conv handler
     app.add_handler(iou_edit_conversation_handler)
 
-    # 3. The unified message handler should be one of the LAST handlers.
+    # 3. The unified message handler (for !commands and unknown text)
     app.add_handler(unified_message_conversation_handler)
-    # --- MODIFICATION END ---
 
-    # 4. Standalone callback handlers for specific button presses.
+    # 4. Standalone callback handlers for specific button presses
     app.add_handler(CallbackQueryHandler(start, pattern='^start$'))
     app.add_handler(CallbackQueryHandler(quick_check, pattern='^quick_check$'))
     app.add_handler(CallbackQueryHandler(history_menu, pattern='^history$'))
     app.add_handler(CallbackQueryHandler(manage_transaction, pattern='^manage_tx_'))
     app.add_handler(CallbackQueryHandler(delete_transaction_prompt, pattern='^delete_tx_'))
     app.add_handler(CallbackQueryHandler(delete_transaction_confirm, pattern='^confirm_delete_'))
-    app.add_handler(CallbackQueryHandler(get_current_rate, pattern='^get_live_rate$'))  # <-- MODIFIED HANDLER
+    app.add_handler(CallbackQueryHandler(get_current_rate, pattern='^get_live_rate$'))
 
     app.add_handler(CallbackQueryHandler(iou_menu, pattern='^iou_menu$'))
     app.add_handler(CallbackQueryHandler(iou_view, pattern='^iou_view$'))
@@ -89,3 +89,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+# --- End of corrected file ---

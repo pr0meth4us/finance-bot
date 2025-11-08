@@ -1,22 +1,23 @@
 # --- Start of modified file: web_service/app/summary/routes.py ---
-
+"""
+Handles the main summary endpoint for the bot.
+All endpoints are multi-tenant and require a valid user_id.
+"""
 from flask import Blueprint, jsonify
-# --- MODIFICATION START ---
 from datetime import datetime, time, date, timedelta
 from zoneinfo import ZoneInfo
-from app import get_db  # <-- IMPORT THE NEW FUNCTION
-# --- MODIFICATION END ---
+from app import get_db
+# --- MODIFICATION: Import the new auth helper ---
+from app.utils.auth import get_user_id_from_request
 
 summary_bp = Blueprint('summary', __name__, url_prefix='/summary')
 
-# --- MODIFICATION START ---
-# Define categories to exclude from operational income/expense summaries.
 FINANCIAL_TRANSACTION_CATEGORIES = [
-    'Loan Lent',         # Expense type from lending money to someone
-    'Debt Repayment',    # Expense type from repaying a debt you owed
-    'Loan Received',     # Income type from borrowing money from someone
-    'Debt Settled',      # Income type from someone repaying a debt to you
-    'Initial Balance'    # Adjustment type for setting initial account value
+    'Loan Lent',
+    'Debt Repayment',
+    'Loan Received',
+    'Debt Settled',
+    'Initial Balance'
 ]
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
@@ -24,36 +25,25 @@ UTC_TZ = ZoneInfo("UTC")
 
 def create_utc_range(start_date_local, end_date_local):
     """Converts local start/end dates into a timezone-aware UTC range for querying."""
-    # Create aware datetime objects in the local timezone
     aware_start_dt = datetime.combine(start_date_local, time.min, tzinfo=PHNOM_PENH_TZ)
     aware_end_dt = datetime.combine(end_date_local, time.max, tzinfo=PHNOM_PENH_TZ)
-    # Convert to UTC
     return aware_start_dt.astimezone(UTC_TZ), aware_end_dt.astimezone(UTC_TZ)
-# --- MODIFICATION END ---
+
 
 def get_date_ranges():
     """Helper function to get start and end datetimes for various periods."""
-    # Use local timezone to define "today"
     today = datetime.now(PHNOM_PENH_TZ).date()
 
-    # This Week (assuming week starts on Monday)
     start_of_week = today - timedelta(days=today.weekday())
     end_of_week = start_of_week + timedelta(days=6)
-
-    # Last Week
     end_of_last_week = start_of_week - timedelta(days=1)
     start_of_last_week = end_of_last_week - timedelta(days=6)
-
-    # This Month
     start_of_month = today.replace(day=1)
     next_month = start_of_month.replace(day=28) + timedelta(days=4)
     end_of_month = next_month - timedelta(days=next_month.day)
-
-    # Last Month
     end_of_last_month = start_of_month - timedelta(days=1)
     start_of_last_month = end_of_last_month.replace(day=1)
 
-    # --- MODIFICATION START: Convert all ranges to UTC ---
     return {
         "today": create_utc_range(today, today),
         "this_week": create_utc_range(start_of_week, end_of_week),
@@ -61,16 +51,15 @@ def get_date_ranges():
         "this_month": create_utc_range(start_of_month, end_of_month),
         "last_month": create_utc_range(start_of_last_month, end_of_last_month),
     }
-    # --- MODIFICATION END ---
 
 
-def calculate_period_summary(start_date, end_date, db):
-    """Helper to run aggregation for a specific time period."""
+def calculate_period_summary(start_date, end_date, db, user_id):
+    """Helper to run aggregation for a specific time period for a specific user."""
     pipeline = [
         {'$match': {
             'timestamp': {'$gte': start_date, '$lte': end_date},
-            # Filter out non-operational transactions for summary In/Out figures
-            'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}
+            'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES},
+            'user_id': user_id # <-- MODIFICATION
         }},
         {
             '$addFields': {
@@ -121,11 +110,17 @@ def calculate_period_summary(start_date, end_date, db):
 
 @summary_bp.route('/detailed', methods=['GET'])
 def get_detailed_summary():
-    db = get_db()  # <-- USE THE NEW FUNCTION
+    """Generates the detailed summary for the authenticated user."""
+    db = get_db()
 
-    # 1. Calculate Balances (All transactions included)
+    # --- MODIFICATION: Authenticate user ---
+    user_id, error = get_user_id_from_request()
+    if error: return error
+    # ---
+
+    # 1. Calculate Balances
     khr_pipeline = [
-        {'$match': {'accountName': 'KHR Account'}},
+        {'$match': {'accountName': 'KHR Account', 'user_id': user_id}}, # <-- MODIFICATION
         {'$group': {'_id': '$type', 'total': {'$sum': '$amount'}}}
     ]
     khr_results = list(db.transactions.aggregate(khr_pipeline))
@@ -134,7 +129,7 @@ def get_detailed_summary():
     khr_balance = khr_income - khr_expense
 
     usd_pipeline = [
-        {'$match': {'accountName': 'USD Account'}},
+        {'$match': {'accountName': 'USD Account', 'user_id': user_id}}, # <-- MODIFICATION
         {'$group': {'_id': '$type', 'total': {'$sum': '$amount'}}}
     ]
     usd_results = list(db.transactions.aggregate(usd_pipeline))
@@ -142,9 +137,9 @@ def get_detailed_summary():
     usd_expense = next((item['total'] for item in usd_results if item['_id'] == 'expense'), 0)
     usd_balance = usd_income - usd_expense
 
-    # 2. Calculate Debts (Grouped by person/currency for display)
+    # 2. Calculate Debts
     pipeline_debts = [
-        {'$match': {'status': 'open'}},
+        {'$match': {'status': 'open', 'user_id': user_id}}, # <-- MODIFICATION
         {'$group': {
             '_id': {'type': '$type', 'currency': '$currency'},
             'totalAmount': {'$sum': '$remainingAmount'}
@@ -154,15 +149,14 @@ def get_detailed_summary():
     debts_owed_to_you = [d for d in debt_results if d['_id']['type'] == 'lent']
     debts_owed_by_you = [d for d in debt_results if d['_id']['type'] == 'borrowed']
 
-    # Reformat debt data for frontend compatibility
     formatted_debts_to_you = [{'total': d['totalAmount'], '_id': d['_id']['currency']} for d in debts_owed_to_you]
     formatted_debts_by_you = [{'total': d['totalAmount'], '_id': d['_id']['currency']} for d in debts_owed_by_you]
 
-    # 3. Calculate Period Summaries (Filtered logic applied via calculate_period_summary)
+    # 3. Calculate Period Summaries
     date_ranges = get_date_ranges()
     period_summaries = {}
     for period, (start_utc, end_utc) in date_ranges.items():
-        period_summaries[period] = calculate_period_summary(start_utc, end_utc, db)
+        period_summaries[period] = calculate_period_summary(start_utc, end_utc, db, user_id) # <-- MODIFICATION
 
     # 4. Combine all data
     summary = {
@@ -173,4 +167,4 @@ def get_detailed_summary():
     }
 
     return jsonify(summary)
-# --- End of modified file: web_service/app/summary/routes.py ---
+# --- End of modified file ---

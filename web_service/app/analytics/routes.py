@@ -1,12 +1,17 @@
 # --- Start of modified file: web_service/app/analytics/routes.py ---
-
+"""
+Handles all analytics and report generation endpoints.
+All endpoints are multi-tenant and require a valid user_id.
+"""
 import io
 from flask import Blueprint, Response, request, jsonify
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 import matplotlib.pyplot as plt
 import re
-from app import get_db  # <-- IMPORT THE NEW FUNCTION
+from app import get_db
+# --- MODIFICATION: Import the new auth helper ---
+from app.utils.auth import get_user_id_from_request
 
 analytics_bp = Blueprint('analytics', __name__, url_prefix='/analytics')
 
@@ -47,13 +52,18 @@ def get_date_ranges_for_search():
 
 @analytics_bp.route('/search', methods=['POST'])
 def search_transactions():
-    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
-    """Performs an advanced search and sums up matching transactions."""
+    """Performs an advanced search and sums up matching transactions for a user."""
     params = request.json
-    db = get_db()  # <-- USE THE NEW FUNCTION
+    db = get_db()
 
-    # 1. Build Match Stage (Same as before)
-    match_stage = {}
+    # --- MODIFICATION: Authenticate user ---
+    user_id, error = get_user_id_from_request()
+    if error: return error
+    # ---
+
+    # 1. Build Match Stage
+    match_stage = {'user_id': user_id} # <-- MODIFICATION
+
     date_filter = {}
     if params.get('period'):
         ranges = get_date_ranges_for_search()
@@ -90,8 +100,6 @@ def search_transactions():
     if match_stage:
         pipeline.append({'$match': match_stage})
 
-    # --- NEW PIPELINE ---
-    # Group by currency to get detailed stats for each
     pipeline.append({
         '$group': {
             '_id': '$currency',
@@ -104,7 +112,7 @@ def search_transactions():
         }
     })
 
-    results = list(db.transactions.aggregate(pipeline))  # <-- USE db
+    results = list(db.transactions.aggregate(pipeline))
 
     # 3. Format Response
     if not results:
@@ -123,7 +131,6 @@ def search_transactions():
         count = res['count']
         total = res['totalAmount']
 
-        # Update overall min/max dates
         if not overall_min_date or res['minDate'] < overall_min_date:
             overall_min_date = res['minDate']
         if not overall_max_date or res['maxDate'] > overall_max_date:
@@ -147,12 +154,14 @@ def search_transactions():
 
 @analytics_bp.route('/report/detailed', methods=['GET'])
 def get_detailed_report():
-    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
-    """
-    Generates a detailed report with income/expense summaries, breakdowns,
-    and new analytics like spending over time and top transactions.
-    """
-    db = get_db()  # <-- USE THE NEW FUNCTION
+    """Generates a detailed report for the authenticated user."""
+    db = get_db()
+
+    # --- MODIFICATION: Authenticate user ---
+    user_id, error = get_user_id_from_request()
+    if error: return error
+    # ---
+
     start_date_str = request.args.get('start_date')
     end_date_str = request.args.get('end_date')
 
@@ -160,21 +169,20 @@ def get_detailed_report():
         if start_date_str and end_date_str:
             start_date_local_obj = datetime.fromisoformat(start_date_str).date()
             end_date_local_obj = datetime.fromisoformat(end_date_str).date()
-
             aware_start_local = datetime.combine(start_date_local_obj, time.min, tzinfo=PHNOM_PENH_TZ)
             aware_end_local = datetime.combine(end_date_local_obj, time.max, tzinfo=PHNOM_PENH_TZ)
-
             start_date_utc = aware_start_local.astimezone(UTC_TZ)
             end_date_utc = aware_end_local.astimezone(UTC_TZ)
         else:
-            # Default case if no dates are provided
             end_date_utc = datetime.now(UTC_TZ)
             start_date_utc = end_date_utc - timedelta(days=30)
             start_date_local_obj = (end_date_utc - timedelta(days=30)).astimezone(PHNOM_PENH_TZ).date()
             end_date_local_obj = end_date_utc.astimezone(PHNOM_PENH_TZ).date()
-
     except (ValueError, TypeError):
         return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
+
+    # Base match for user
+    user_match = {'user_id': user_id}
 
     add_fields_stage = {
         '$addFields': {
@@ -196,11 +204,11 @@ def get_detailed_report():
 
     # --- Balance at Start Calculation ---
     start_balance_pipeline = [
-        {'$match': {'timestamp': {'$lt': start_date_utc}}},
+        {'$match': {'timestamp': {'$lt': start_date_utc}, **user_match}}, # <-- MODIFICATION
         add_fields_stage,
         {'$group': {'_id': '$type', 'totalUSD': {'$sum': '$amount_in_usd'}}}
     ]
-    start_balance_data = list(db.transactions.aggregate(start_balance_pipeline))  # <-- USE db
+    start_balance_data = list(db.transactions.aggregate(start_balance_pipeline))
     start_income = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'income'), 0)
     start_expense = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'expense'), 0)
     balance_at_start_usd = start_income - start_expense
@@ -208,31 +216,31 @@ def get_detailed_report():
     # --- Pipelines for the selected period ---
     date_range_match = {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc}}
 
-    # Operational data (for operational summary)
+    # Operational data
     operational_pipeline = [
-        {'$match': {**date_range_match, 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}}},
+        {'$match': {**date_range_match, 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}}, # <-- MODIFICATION
         add_fields_stage,
         {'$group': {'_id': {'type': '$type', 'category': '$categoryId'}, 'total': {'$sum': '$amount_in_usd'}}},
         {'$sort': {'total': -1}}
     ]
 
-    # Financial data (for loan/debt summary)
+    # Financial data
     financial_pipeline = [
-        {'$match': {**date_range_match, 'categoryId': {'$in': FINANCIAL_TRANSACTION_CATEGORIES}}},
+        {'$match': {**date_range_match, 'categoryId': {'$in': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}}, # <-- MODIFICATION
         add_fields_stage,
         {'$group': {'_id': '$categoryId', 'total': {'$sum': '$amount_in_usd'}}}
     ]
 
-    # Total cash flow for the period (for ending balance)
+    # Total cash flow
     total_flow_pipeline = [
-        {'$match': date_range_match},
+        {'$match': {**date_range_match, **user_match}}, # <-- MODIFICATION
         add_fields_stage,
         {'$group': {'_id': '$type', 'totalUSD': {'$sum': '$amount_in_usd'}}}
     ]
 
-    # --- NEW: Pipeline for Spending Over Time (Line Chart) ---
+    # Spending Over Time
     spending_over_time_pipeline = [
-        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}}},
+        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}}, # <-- MODIFICATION
         add_fields_stage,
         {
             '$project': {
@@ -245,9 +253,9 @@ def get_detailed_report():
         {'$project': {'_id': 0, 'date': '$_id', 'total_spent_usd': '$total_spent_usd'}}
     ]
 
-    # --- NEW: Pipeline for Daily Expense Stats (Most/Least) ---
+    # Daily Expense Stats
     daily_stats_pipeline = [
-        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}}},
+        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}}, # <-- MODIFICATION
         add_fields_stage,
         {
             '$group': {
@@ -258,9 +266,9 @@ def get_detailed_report():
         {'$sort': {'total_spent_usd': -1}},
     ]
 
-    # --- NEW: Pipeline for Top Expense Item ---
+    # Top Expense Item
     top_expense_pipeline = [
-        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}}},
+        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}}, # <-- MODIFICATION
         add_fields_stage,
         {'$sort': {'amount_in_usd': -1}},
         {'$limit': 1},
@@ -295,7 +303,6 @@ def get_detailed_report():
                              "totalYouRepaidUSD": 0},
         "incomeBreakdown": [],
         "expenseBreakdown": [],
-        # --- NEW: Add new data keys ---
         "spendingOverTime": spending_over_time_data,
         "expenseInsights": {
             "topExpenseItem": top_expense_data[0] if top_expense_data else None,
@@ -333,10 +340,14 @@ def get_detailed_report():
 
 @analytics_bp.route('/habits', methods=['GET'])
 def get_spending_habits():
-    """
-    Analyzes transaction data to provide insights into spending habits.
-    """
-    db = get_db()  # <-- USE THE NEW FUNCTION
+    """Analyzes spending habits for the authenticated user."""
+    db = get_db()
+
+    # --- MODIFICATION: Authenticate user ---
+    user_id, error = get_user_id_from_request()
+    if error: return error
+    # ---
+
     start_date_str = request.args.get('start_date')
     end_date_str = request.args.get('end_date')
 
@@ -353,6 +364,9 @@ def get_spending_habits():
             start_date_utc = end_date_utc - timedelta(days=30)
     except (ValueError, TypeError):
         return jsonify({"error": "Invalid date format."}), 400
+
+    # Base match for user
+    user_match = {'user_id': user_id}
 
     add_fields_stage = {
         '$addFields': {
@@ -373,7 +387,7 @@ def get_spending_habits():
     }
 
     day_of_week_pipeline = [
-        {'$match': {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc}, 'type': 'expense'}},
+        {'$match': {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc}, 'type': 'expense', **user_match}}, # <-- MODIFICATION
         add_fields_stage,
         {'$group': {
             '_id': {'$dayOfWeek': {'date': '$timestamp', 'timezone': 'Asia/Phnom_Penh'}},
@@ -399,7 +413,8 @@ def get_spending_habits():
         {'$match': {
             'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc},
             'type': 'expense',
-            'description': {'$exists': True, '$ne': ''}
+            'description': {'$exists': True, '$ne': ''},
+            **user_match # <-- MODIFICATION
         }},
         {'$group': {
             '_id': {'category': '$categoryId', 'keyword': {'$toLower': '$description'}},
@@ -421,3 +436,4 @@ def get_spending_habits():
         'keywordsByCategory': list(db.transactions.aggregate(keywords_pipeline))
     }
     return jsonify(habits)
+# --- End of modified file ---

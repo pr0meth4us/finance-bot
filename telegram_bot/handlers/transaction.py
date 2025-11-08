@@ -4,7 +4,7 @@ from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 import keyboards
 import api_client
-from decorators import restricted
+from decorators import authenticate_user # <-- MODIFICATION: Fix import
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 from .helpers import format_summary_message
@@ -15,30 +15,41 @@ from .helpers import format_summary_message
     FORGOT_DATE, FORGOT_CUSTOM_DATE, FORGOT_TYPE,
     EDIT_CHOOSE_FIELD, EDIT_GET_NEW_VALUE, EDIT_GET_NEW_CATEGORY,
     EDIT_GET_CUSTOM_CATEGORY,
-    EDIT_GET_NEW_DATE # <-- FIX: Added new state
-) = range(14) # <-- FIX: Updated range
+    EDIT_GET_NEW_DATE
+) = range(14)
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
 # --- Add Transaction & Forgot Log (Shared Logic) ---
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def add_transaction_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
+    # --- MODIFICATION: Re-cache user_profile after clear() ---
     context.user_data.clear()
+    context.user_data['user_profile'] = context.application.user_data[update.effective_user.id]['user_profile']
+    # ---
+
     context.user_data['type'] = 'expense' if query.data == 'add_expense' else 'income'
     emoji = "💸" if context.user_data['type'] == 'expense' else "💰"
     await query.message.reply_text(f"{emoji} Enter the amount:")
     return AMOUNT
 
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def forgot_log_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
+    # --- MODIFICATION: Re-cache user_profile after clear() ---
     context.user_data.clear()
+    context.user_data['user_profile'] = context.application.user_data[update.effective_user.id]['user_profile']
+    # ---
+
     await query.message.reply_text("Which day did you forget to log?", reply_markup=keyboards.forgot_day_keyboard())
     return FORGOT_DATE
 
+@authenticate_user # <-- MODIFICATION
 async def received_forgot_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -53,6 +64,7 @@ async def received_forgot_day(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.message.reply_text("Got it. Was it an expense or an income?", reply_markup=keyboards.forgot_type_keyboard())
     return FORGOT_TYPE
 
+@authenticate_user # <-- MODIFICATION
 async def received_forgot_custom_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         custom_date = datetime.strptime(update.message.text, "%Y-%m-%d").date()
@@ -63,6 +75,7 @@ async def received_forgot_custom_date(update: Update, context: ContextTypes.DEFA
         await update.message.reply_text("Invalid format. Please use YYYY-MM-DD.")
         return FORGOT_CUSTOM_DATE
 
+@authenticate_user # <-- MODIFICATION
 async def received_forgot_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -70,6 +83,7 @@ async def received_forgot_type(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.message.reply_text(f"Type: <b>{context.user_data['type'].capitalize()}</b>\n\nEnter the amount:", parse_mode='HTML')
     return AMOUNT
 
+@authenticate_user # <-- MODIFICATION
 async def received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         amount = float(update.message.text)
@@ -89,6 +103,7 @@ async def received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Please enter a valid number.")
         return AMOUNT
 
+@authenticate_user # <-- MODIFICATION
 async def received_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -99,6 +114,7 @@ async def received_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.reply_text(f"Currency: <b>{currency}</b>\n\nWhich category?", parse_mode='HTML', reply_markup=keyboard)
     return CATEGORY
 
+@authenticate_user # <-- MODIFICATION
 async def received_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -110,11 +126,13 @@ async def received_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.reply_text(f"Category: <b>{category}</b>\n\nAdd a remark/description?", parse_mode='HTML', reply_markup=keyboards.ask_remark_keyboard())
     return ASK_REMARK
 
+@authenticate_user # <-- MODIFICATION
 async def received_custom_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['categoryId'] = update.message.text.strip().title()
     await update.message.reply_text("Add a remark/description?", reply_markup=keyboards.ask_remark_keyboard())
     return ASK_REMARK
 
+@authenticate_user # <-- MODIFICATION
 async def ask_remark(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -124,25 +142,38 @@ async def ask_remark(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['description'] = ''
     return await save_transaction_and_end(update, context)
 
+@authenticate_user # <-- MODIFICATION
 async def received_remark(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['description'] = update.message.text.strip()
     return await save_transaction_and_end(update, context)
 
+@authenticate_user # <-- MODIFICATION
 async def save_transaction_and_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    response = api_client.add_transaction(context.user_data)
+    # --- MODIFICATION: Get user_id ---
+    user_id = context.user_data['user_profile']['_id']
+    # ---
+
+    response = api_client.add_transaction(context.user_data, user_id) # <-- MODIFICATION
     message = update.callback_query.message if update.callback_query else update.message
     base_text = "✅ Transaction recorded successfully!" if response else "❌ Failed to record transaction."
-    summary_text = format_summary_message(api_client.get_detailed_summary())
+
+    summary_text = format_summary_message(api_client.get_detailed_summary(user_id)) # <-- MODIFICATION
+
     await message.reply_text(base_text + summary_text, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
     context.user_data.clear()
     return ConversationHandler.END
 
 # --- History & Management ---
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    transactions = api_client.get_recent_transactions()
+
+    # --- MODIFICATION: Get user_id ---
+    user_id = context.user_data['user_profile']['_id']
+    transactions = api_client.get_recent_transactions(user_id) # <-- MODIFICATION
+    # ---
+
     text = "Recent transactions:"
     keyboard = keyboards.history_keyboard(transactions)
     if not transactions:
@@ -150,12 +181,18 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = keyboards.main_menu_keyboard()
     await query.edit_message_text(text=text, reply_markup=keyboard)
 
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def manage_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
+    # --- MODIFICATION: Get user_id ---
+    user_id = context.user_data['user_profile']['_id']
+    # ---
+
     tx_id = query.data.split('_')[-1]
-    tx = api_client.get_transaction_details(tx_id)
+    tx = api_client.get_transaction_details(tx_id, user_id) # <-- MODIFICATION
+
     if not tx:
         await query.edit_message_text("Error: Could not fetch transaction details.", reply_markup=keyboards.main_menu_keyboard())
         return
@@ -163,51 +200,70 @@ async def manage_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE)
     emoji = "⬇️ Expense" if tx['type'] == 'expense' else "⬆️ Income"
     date_str = datetime.fromisoformat(tx['timestamp'].replace('Z', '+00:00')).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
     amount_format = ",.0f" if tx['currency'] == 'KHR' else ",.2f"
-    text = (f"<b>Transaction Details:</b>\n\n" f"<b>Type:</b> {emoji}\n" f"<b>Amount:</b> {tx['amount']:{amount_format}} {tx['currency']}\n" f"<b>Category:</b> {tx['categoryId']}\n" f"<b>Description:</b> {tx.get('description') or 'N/A'}\n" f"<b>Date:</b> {date_str}\n\n" "What would you like to do?")
+    text = (f"<b>Transaction Details:</b>\n\n"
+            f"<b>Type:</b> {emoji}\n"
+            f"<b>Amount:</b> {tx['amount']:{amount_format}} {tx['currency']}\n"
+            f"<b>Category:</b> {tx['categoryId']}\n"
+            f"<b>Description:</b> {tx.get('description') or 'N/A'}\n"
+            f"<b>Date:</b> {date_str}\n\n"
+            "What would you like to do?")
     await query.edit_message_text(text=text, parse_mode='HTML', reply_markup=keyboards.manage_tx_keyboard(tx_id))
 
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def delete_transaction_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     tx_id = query.data.split('_')[-1]
     await query.edit_message_text("⚠️ Are you sure you want to delete this transaction?", reply_markup=keyboards.confirm_delete_keyboard(tx_id))
 
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def delete_transaction_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer("Deleting...")
+
+    # --- MODIFICATION: Get user_id ---
+    user_id = context.user_data['user_profile']['_id']
+    # ---
+
     tx_id = query.data.split('_')[-1]
-    if api_client.delete_transaction(tx_id):
+    if api_client.delete_transaction(tx_id, user_id): # <-- MODIFICATION
         await query.edit_message_text("🗑️ Transaction successfully deleted.")
         import asyncio
         await asyncio.sleep(1.5)
-        await history_menu(update, context)
+        await history_menu(update, context) # Re-load history
     else:
         await query.edit_message_text("❌ Error: Could not delete transaction.", reply_markup=keyboards.manage_tx_keyboard(tx_id))
 
 # --- Edit Transaction Conversation ---
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def edit_transaction_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
+    # --- MODIFICATION: Re-cache user_profile after clear() ---
+    context.user_data.clear()
+    context.user_data['user_profile'] = context.application.user_data[update.effective_user.id]['user_profile']
+    user_id = context.user_data['user_profile']['_id']
+    # ---
+
     tx_id = query.data.split('_')[-1]
-    transaction = api_client.get_transaction_details(tx_id)
+    transaction = api_client.get_transaction_details(tx_id, user_id) # <-- MODIFICATION
+
     if not transaction:
         await query.edit_message_text("❌ Error: Transaction not found.", reply_markup=keyboards.main_menu_keyboard())
         return ConversationHandler.END
+
     context.user_data.update({'edit_tx_id': tx_id, 'edit_tx_type': transaction.get('type')})
     await query.edit_message_text("Which field would you like to edit?", reply_markup=keyboards.edit_tx_options_keyboard(tx_id))
     return EDIT_CHOOSE_FIELD
 
+@authenticate_user # <-- MODIFICATION
 async def edit_choose_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ --- THIS FUNCTION HAS BEEN MODIFIED --- """
+    """Handles the field selection for editing a transaction."""
     query = update.callback_query
     await query.answer()
 
-    # Extract field from "edit_field_{field}_{tx_id}"
     field = query.data.split('_')[2]
-
     context.user_data['edit_tx_field'] = field
 
     if field == 'categoryId':
@@ -216,43 +272,43 @@ async def edit_choose_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Please select the new category:", reply_markup=keyboard)
         return EDIT_GET_NEW_CATEGORY
 
-    # --- FIX: Handle timestamp field ---
     if field == 'timestamp':
         await query.edit_message_text("Please enter the new date (YYYY-MM-DD):")
         return EDIT_GET_NEW_DATE
-    # --- End Fix ---
 
     prompts = {'amount': "Please enter the new amount:", 'description': "Please enter the new description:"}
     await query.edit_message_text(prompts[field])
     return EDIT_GET_NEW_VALUE
 
+@authenticate_user # <-- MODIFICATION
 async def edit_received_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles receiving a new text value for amount or description."""
     field = context.user_data.get('edit_tx_field')
     value = update.message.text
     if field == 'amount':
-        try: value = float(value)
+        try:
+            value = float(value)
         except ValueError:
             await update.message.reply_text("Invalid amount. Please enter a valid number.")
             return EDIT_GET_NEW_VALUE
     context.user_data['edit_tx_new_value'] = value
     return await _update_transaction_and_confirm(update, context)
 
-# --- FIX: Added new handler for receiving date ---
+@authenticate_user # <-- MODIFICATION
 async def edit_received_new_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles receiving and validating the new date."""
     try:
         custom_date = datetime.strptime(update.message.text, "%Y-%m-%d").date()
-        # Set to 12:00 PM Phnom Penh time, then convert to ISO string
         new_timestamp_iso = datetime.combine(custom_date, time(12, 0), tzinfo=PHNOM_PENH_TZ).isoformat()
-
         context.user_data['edit_tx_new_value'] = new_timestamp_iso
         return await _update_transaction_and_confirm(update, context)
     except ValueError:
         await update.message.reply_text("Invalid date format. Please use YYYY-MM-DD.")
         return EDIT_GET_NEW_DATE
-# --- End Fix ---
 
+@authenticate_user # <-- MODIFICATION
 async def edit_received_new_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles receiving a new category selection."""
     query = update.callback_query
     await query.answer()
     category = query.data.split('_')[1]
@@ -263,6 +319,7 @@ async def edit_received_new_category(update: Update, context: ContextTypes.DEFAU
     context.user_data['edit_tx_new_value'] = category
     return await _update_transaction_and_confirm(update, context)
 
+@authenticate_user # <-- MODIFICATION
 async def edit_received_custom_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles receiving the text for a new custom category during an edit."""
     new_category_name = update.message.text.strip().title()
@@ -270,14 +327,21 @@ async def edit_received_custom_category(update: Update, context: ContextTypes.DE
     return await _update_transaction_and_confirm(update, context)
 
 async def _update_transaction_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Final step to update the transaction via API and end conversation."""
+
+    # --- MODIFICATION: Get user_id ---
+    user_id = context.user_data['user_profile']['_id']
+    # ---
+
     tx_id = context.user_data.get('edit_tx_id')
     field = context.user_data.get('edit_tx_field')
     value = context.user_data.get('edit_tx_new_value')
     message = update.message or update.callback_query.message
 
-    response = api_client.update_transaction(tx_id, {field: value})
+    response = api_client.update_transaction(tx_id, {field: value}, user_id) # <-- MODIFICATION
+
     if response and 'error' not in response:
-        summary_text = format_summary_message(api_client.get_detailed_summary())
+        summary_text = format_summary_message(api_client.get_detailed_summary(user_id)) # <-- MODIFICATION
         await message.reply_text(f"✅ Transaction successfully updated!{summary_text}", parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
     else:
         error = response.get('error', 'Could not update transaction.') if response else 'Could not update.'
@@ -285,3 +349,4 @@ async def _update_transaction_and_confirm(update: Update, context: ContextTypes.
 
     context.user_data.clear()
     return ConversationHandler.END
+# --- End of corrected file ---

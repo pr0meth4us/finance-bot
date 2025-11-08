@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 from .common import cancel
 from .helpers import format_summation_results
-from decorators import restricted
+from decorators import authenticate_user # <-- MODIFICATION: Fix import
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -14,31 +14,37 @@ from zoneinfo import ZoneInfo
 (
     CHOOSE_PERIOD, GET_CUSTOM_START, GET_CUSTOM_END, CHOOSE_TYPE,
     GET_CATEGORIES, GET_KEYWORDS, GET_KEYWORD_LOGIC,
-    CHOOSE_ACTION # <-- NEW STATE
-) = range(8) # <-- NEW RANGE
+    CHOOSE_ACTION
+) = range(8)
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
 
-@restricted
-async def search_menu_entry(update: Update, context: ContextTypes.DEFAULT_TYPE): # <-- NEW ENTRY FUNCTION
+@authenticate_user # <-- MODIFICATION
+async def search_menu_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the search sub-menu and enters the conversation."""
     query = update.callback_query
     await query.answer()
+
+    # --- MODIFICATION: Re-cache user_profile after clear() ---
+    context.user_data.clear()
+    context.user_data['user_profile'] = context.application.user_data[update.effective_user.id]['user_profile']
+    # ---
+
     await query.edit_message_text(
         text="What type of search do you want to perform?",
         reply_markup=keyboards.search_menu_keyboard()
     )
-    return CHOOSE_ACTION # <-- NEW RETURN
+    return CHOOSE_ACTION
 
 
-@restricted
-async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE): # <-- MODIFIED
+@authenticate_user # <-- MODIFICATION
+async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the search type choice ('manage' or 'sum') and moves to period selection."""
     query = update.callback_query
     await query.answer()
 
-    search_type = query.data.replace('start_search_', '')  # 'manage' or 'sum'
+    search_type = query.data.replace('start_search_', '')
     context.user_data['search_type'] = search_type
     context.user_data['search_params'] = {}
 
@@ -46,10 +52,10 @@ async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE): # <-
         "🔎 Advanced Search\n\nFirst, select a time period for the search.",
         reply_markup=keyboards.report_period_keyboard(is_search=True)
     )
-    return CHOOSE_PERIOD # <-- MOVED FROM search_start
+    return CHOOSE_PERIOD
 
 
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def received_period_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the period choice and asks for transaction type."""
     query = update.callback_query
@@ -69,7 +75,7 @@ async def received_period_choice(update: Update, context: ContextTypes.DEFAULT_T
     return CHOOSE_TYPE
 
 
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def received_custom_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives and validates the custom start date."""
     try:
@@ -83,7 +89,7 @@ async def received_custom_start(update: Update, context: ContextTypes.DEFAULT_TY
         return GET_CUSTOM_START
 
 
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def received_custom_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives, validates end date, and asks for transaction type."""
     try:
@@ -103,7 +109,7 @@ async def received_custom_end(update: Update, context: ContextTypes.DEFAULT_TYPE
         return GET_CUSTOM_END
 
 
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def received_type_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the transaction type choice and asks for categories."""
     query = update.callback_query
@@ -119,15 +125,15 @@ async def received_type_choice(update: Update, context: ContextTypes.DEFAULT_TYP
     return GET_CATEGORIES
 
 
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def received_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives categories and asks for keywords."""
     message_text = "Enter keywords to search for in the description, separated by a comma (e.g., coffee, lunch).\n\nOr press Skip to not filter by keywords."
-    if update.callback_query:  # User pressed skip
+    if update.callback_query:
         await update.callback_query.answer()
         await update.callback_query.edit_message_text(message_text,
                                                       reply_markup=keyboards.skip_keyboard('search_skip_keywords'))
-    else:  # User sent text
+    else:
         categories = [c.strip() for c in update.message.text.split(',')]
         context.user_data['search_params']['categories'] = categories
         await update.message.reply_text(message_text, reply_markup=keyboards.skip_keyboard('search_skip_keywords'))
@@ -135,10 +141,10 @@ async def received_categories(update: Update, context: ContextTypes.DEFAULT_TYPE
     return GET_KEYWORDS
 
 
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def received_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives keywords and either asks for logic or executes the search."""
-    if update.callback_query:  # User pressed skip
+    if update.callback_query:
         await update.callback_query.answer()
         return await execute_search(update, context)
 
@@ -156,7 +162,7 @@ async def received_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await execute_search(update, context)
 
 
-@restricted
+@authenticate_user # <-- MODIFICATION
 async def received_keyword_logic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives the keyword logic and executes the search."""
     query = update.callback_query
@@ -168,6 +174,11 @@ async def received_keyword_logic(update: Update, context: ContextTypes.DEFAULT_T
 
 async def execute_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Executes the correct search type and displays results by editing the message."""
+
+    # --- MODIFICATION: Get user_id ---
+    user_id = context.user_data['user_profile']['_id']
+    # ---
+
     params = context.user_data.get('search_params', {})
     search_type = context.user_data.get('search_type')
 
@@ -179,7 +190,7 @@ async def execute_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message_to_edit = await update.message.reply_text("🔎 searching...")
 
     if search_type == 'manage':
-        results = api_client.search_transactions_for_management(params)
+        results = api_client.search_transactions_for_management(params, user_id) # <-- MODIFICATION
         if not results:
             await message_to_edit.edit_text("No transactions found matching your criteria.",
                                             reply_markup=keyboards.main_menu_keyboard())
@@ -205,9 +216,10 @@ async def execute_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                             reply_markup=keyboards.history_keyboard(results, is_search_result=True))
 
     elif search_type == 'sum':
-        results = api_client.sum_transactions_for_analytics(params)
+        results = api_client.sum_transactions_for_analytics(params, user_id) # <-- MODIFICATION
         response_text = format_summation_results(params, results)
         await message_to_edit.edit_text(response_text, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
 
     context.user_data.clear()
     return ConversationHandler.END
+# --- End of new file ---
