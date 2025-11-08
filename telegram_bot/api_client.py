@@ -3,6 +3,11 @@ import os
 import requests
 from dotenv import load_dotenv
 import urllib.parse
+import logging
+
+# --- DEBUG TRACING ---
+log = logging.getLogger(__name__)
+# --- END DEBUG TRACING ---
 
 load_dotenv()
 BASE_URL = os.getenv("WEB_SERVICE_URL")
@@ -11,17 +16,22 @@ BASE_URL = os.getenv("WEB_SERVICE_URL")
 # --- NEW AUTH FUNCTION ---
 # api_client.py
 def find_or_create_user(telegram_id):
+    url = f"{BASE_URL}/auth/find_or_create"
+    data = {"telegram_user_id": str(telegram_id)}
+    log.info(f"Sending auth request to {url} for user {telegram_id}")
     try:
-        data = {"telegram_user_id": str(telegram_id)}
-        res = requests.post(f"{BASE_URL}/auth/find_or_create", json=data, timeout=10)
+        res = requests.post(url, json=data, timeout=10)
+        log.info(f"Auth request for {telegram_id} returned HTTP {res.status_code}")
         if res.status_code == 200:
             return res.json()
         if res.status_code == 403:
+            log.warning(f"Auth failed for {telegram_id} (HTTP 403): {res.text}")
             return res.json()
-        print(f"[AUTH] HTTP {res.status_code}: {res.text}")
+
+        log.error(f"[AUTH] HTTP {res.status_code}: {res.text}")
         return {"error": f"Auth API error ({res.status_code})"}
     except requests.exceptions.RequestException as e:
-        print(f"[AUTH] Network error: {e}")
+        log.error(f"[AUTH] Network error reaching Auth API: {e}", exc_info=True)
         return {"error": "Network error reaching Auth API"}
 
 
@@ -37,7 +47,7 @@ def get_detailed_summary(user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error fetching detailed summary: {e}")
+        log.error(f"API Error fetching detailed summary: {e}", exc_info=True)
         return None
 
 
@@ -49,7 +59,7 @@ def add_debt(data, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error adding debt: {e}")
+        log.error(f"API Error adding debt: {e}", exc_info=True)
         return None
 
 
@@ -61,7 +71,7 @@ def add_reminder(data, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error adding reminder: {e}")
+        log.error(f"API Error adding reminder: {e}", exc_info=True)
         return None
 
 
@@ -74,7 +84,7 @@ def get_open_debts(user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error fetching debts: {e}")
+        log.error(f"API Error fetching debts: {e}", exc_info=True)
         return []
 
 
@@ -90,7 +100,7 @@ def get_open_debts_export(user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error fetching debts for export: {e}")
+        log.error(f"API Error fetching debts for export: {e}", exc_info=True)
         return []
 # --- END NEW FUNCTION ---
 
@@ -106,7 +116,7 @@ def get_settled_debts_grouped(user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error fetching settled debts: {e}")
+        log.error(f"API Error fetching settled debts: {e}", exc_info=True)
         return []
 
 
@@ -122,8 +132,8 @@ def get_debts_by_person_and_currency(person_name, currency, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(
-            f"API Error fetching debts for {person_name} ({currency}): {e}"
+        log.error(
+            f"API Error fetching debts for {person_name} ({currency}): {e}", exc_info=True
         )
         return []
 
@@ -140,7 +150,7 @@ def get_all_debts_by_person(person_name, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error fetching all debts for {person_name}: {e}")
+        log.error(f"API Error fetching all debts for {person_name}: {e}", exc_info=True)
         return []
 
 
@@ -156,8 +166,8 @@ def get_all_settled_debts_by_person(person_name, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(
-            f"API Error fetching all settled debts for {person_name}: {e}"
+        log.error(
+            f"API Error fetching all settled debts for {person_name}: {e}", exc_info=True
         )
         return []
 
@@ -173,7 +183,7 @@ def get_debt_details(debt_id, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error fetching debt details: {e}")
+        log.error(f"API Error fetching debt details: {e}", exc_info=True)
         return None
 
 
@@ -188,7 +198,7 @@ def cancel_debt(debt_id, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error canceling debt: {e}")
+        log.error(f"API Error canceling debt: {e}", exc_info=True)
         try:
             return e.response.json()
         except Exception:
@@ -205,7 +215,7 @@ def update_debt(debt_id, data, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error updating debt: {e}")
+        log.error(f"API Error updating debt: {e}", exc_info=True)
         try:
             return e.response.json()
         except Exception:
@@ -232,7 +242,7 @@ def record_lump_sum_repayment(
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error recording lump-sum repayment: {e}")
+        log.error(f"API Error recording lump-sum repayment: {e}", exc_info=True)
         try:
             return e.response.json()
         except Exception:
@@ -250,7 +260,7 @@ def update_exchange_rate(rate, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error updating rate: {e}")
+        log.error(f"API Error updating rate: {e}", exc_info=True)
         return None
 
 
@@ -265,7 +275,7 @@ def get_exchange_rate(user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error fetching rate: {e}")
+        log.error(f"API Error fetching rate: {e}", exc_info=True)
         return None
 
 
@@ -279,7 +289,7 @@ def add_transaction(data, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error adding transaction: {e}")
+        log.error(f"API Error adding transaction: {e}", exc_info=True)
         return None
 
 
@@ -294,7 +304,7 @@ def get_recent_transactions(user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error fetching recent transactions: {e}")
+        log.error(f"API Error fetching recent transactions: {e}", exc_info=True)
         return []
 
 
@@ -309,7 +319,7 @@ def get_transaction_details(tx_id, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error fetching transaction details: {e}")
+        log.error(f"API Error fetching transaction details: {e}", exc_info=True)
         return None
 
 
@@ -323,7 +333,7 @@ def update_transaction(tx_id, data, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error updating transaction: {e}")
+        log.error(f"API Error updating transaction: {e}", exc_info=True)
         return None
 
 
@@ -338,7 +348,7 @@ def delete_transaction(tx_id, user_id):
         res.raise_for_status()
         return True
     except requests.exceptions.RequestException as e:
-        print(f"API Error deleting transaction: {e}")
+        log.error(f"API Error deleting transaction: {e}", exc_info=True)
         return False
 
 
@@ -357,9 +367,11 @@ def get_detailed_report(user_id, start_date=None, end_date=None):
         )
         if res.status_code == 200:
             return res.json()
+
+        log.error(f"API Error fetching detailed report (HTTP {res.status_code}): {res.text}")
         return None
     except requests.exceptions.RequestException as e:
-        print(f"API Error fetching detailed report: {e}")
+        log.error(f"API Error fetching detailed report: {e}", exc_info=True)
         return None
 
 
@@ -377,7 +389,7 @@ def get_spending_habits(user_id, start_date, end_date):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error fetching spending habits: {e}")
+        log.error(f"API Error fetching spending habits: {e}", exc_info=True)
         return None
 
 
@@ -392,7 +404,7 @@ def get_debt_analysis(user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error fetching debt analysis: {e}")
+        log.error(f"API Error fetching debt analysis: {e}", exc_info=True)
         return None
 
 
@@ -406,7 +418,7 @@ def search_transactions_for_management(params, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error searching transactions for management: {e}")
+        log.error(f"API Error searching transactions for management: {e}", exc_info=True)
         return []
 
 
@@ -420,7 +432,7 @@ def sum_transactions_for_analytics(params, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error summing transactions: {e}")
+        log.error(f"API Error summing transactions: {e}", exc_info=True)
         return None
 
 
@@ -435,7 +447,7 @@ def get_user_settings(user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error fetching settings: {e}")
+        log.error(f"API Error fetching settings: {e}", exc_info=True)
         return None
 
 
@@ -453,7 +465,7 @@ def update_initial_balance(user_id, currency, amount):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error updating initial balance: {e}")
+        log.error(f"API Error updating initial balance: {e}", exc_info=True)
         return None
 
 
@@ -468,7 +480,7 @@ def complete_onboarding(user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error completing onboarding: {e}")
+        log.error(f"API Error completing onboarding: {e}", exc_info=True)
         return None
 # --- END NEW FUNCTION ---
 
@@ -487,7 +499,7 @@ def add_category(user_id, cat_type, cat_name):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error adding category: {e}")
+        log.error(f"API Error adding category: {e}", exc_info=True)
         return None
 
 
@@ -505,7 +517,7 @@ def remove_category(user_id, cat_type, cat_name):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
-        print(f"API Error removing category: {e}")
+        log.error(f"API Error removing category: {e}", exc_info=True)
         return None
 
 # --- End of modified file ---

@@ -1,6 +1,7 @@
 # --- telegram_bot/bot.py (FULL) ---
 import os
 import logging
+import asyncio  # <-- NEW IMPORT
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from dotenv import load_dotenv
@@ -35,24 +36,53 @@ from utils.i18n import load_translations
 
 load_dotenv()
 
+# --- MODIFIED: More detailed logging ---
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
+# Set httpx logger to WARNING to reduce noise, unless DEBUG is needed
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("apscheduler").setLevel(logging.WARNING)
+
 logger = logging.getLogger("finance-bot")
+# --- END MODIFICATION ---
 
 
 async def on_error(update: object, context):
-    logger.exception("Unhandled error while processing update: %s", update)
+    """
+    Logs errors caused by updates.
+    This is the most important function for debugging production issues.
+    """
+    logger.error(
+        "--- Unhandled error processing update ---",
+        exc_info=context.error
+    )
+
+    # Log the update object itself to see what caused the error
+    if isinstance(update, Update):
+        logger.error(f"Update: {update}")
+    else:
+        logger.error(f"Update object (type {type(update)}): {update}")
+
+    # Log user data if available, to trace user state
+    if context and context.user_data:
+        logger.error(f"User Data: {context.user_data}")
 
 
-def main():
+async def main():  # <-- MODIFIED: Changed to async
     # Load translations into memory on boot
     load_translations()
 
+    # --- DEBUG TRACING ---
+    logger.info("--- Starting Bot ---")
+    logger.info(f"WEB_SERVICE_URL: {os.getenv('WEB_SERVICE_URL')}")
+    logger.info(f"MONGODB_URI (Bot check, not used directly): {os.getenv('MONGODB_URI', 'NOT SET')[:15]}...")
+    # --- END DEBUG TRACING ---
+
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
-        print("❌ TELEGRAM_TOKEN not found.")
+        logger.critical("❌ TELEGRAM_TOKEN not found. Bot cannot start.")
         return
 
     app = Application.builder().token(token).build()
@@ -103,17 +133,34 @@ def main():
     app.add_handler(CallbackQueryHandler(download_debt_analysis_csv, pattern="^debt_analysis_csv$"))
     # --- END NEW HANDLERS ---
 
-    print("🚀 Bot is running...")
-    # Important for reducing stale-update storms when the bot restarts:
-    # - drop_pending_updates clears backlog that can cause many parallel getUpdates consumers to race.
-    # NOTE: If two containers run the bot at once, Telegram will *still* 409. Ensure one replica.
-    app.run_polling(
-        drop_pending_updates=True,
+    # --- MODIFICATION: Force delete webhook before polling ---
+    # This is critical to prevent the '409 Conflict' error if a
+    # previous instance of the bot crashed without shutting down.
+    try:
+        logger.info("Attempting to delete webhook...")
+        await app.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Webhook deleted successfully.")
+    except Exception as e:
+        logger.error(f"Error deleting webhook: {e}", exc_info=True)
+    # --- END MODIFICATION ---
+
+    logger.info("🚀 Bot is starting polling...")
+
+    # We pass 'stop_signals=None' so that the container orchestrator
+    # (like Docker or Kubernetes) can send SIGTERM and the bot
+    # will shut down gracefully on its own.
+    await app.run_polling(
+        drop_pending_updates=True,  # Drop old updates on start
         allowed_updates=Update.ALL_TYPES,
-        stop_signals=None,  # Let container orchestrator send SIGTERM cleanly
+        stop_signals=None,
     )
 
 
 if __name__ == "__main__":
-    main()
-
+    # --- MODIFICATION: Use asyncio.run to start the async main() ---
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Bot shutting down...")
+    except Exception as e:
+        logger.critical(f"Bot failed to start: {e}", exc_info=True)

@@ -5,6 +5,7 @@ import io
 import os
 import requests
 import matplotlib.pyplot as plt
+import logging
 from flask import Flask, jsonify, g, current_app
 from pymongo import MongoClient
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -14,6 +15,14 @@ from datetime import datetime, time, timedelta, date
 from zoneinfo import ZoneInfo
 from bson import ObjectId
 
+# --- DEBUG TRACING: Setup detailed logging ---
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+log = logging.getLogger(__name__)
+# --- END DEBUG TRACING ---
+
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 UTC_TZ = ZoneInfo("UTC")
 FINANCIAL_TRANSACTION_CATEGORIES = [
@@ -21,10 +30,8 @@ FINANCIAL_TRANSACTION_CATEGORIES = [
 ]
 
 # --- Default Connection Arguments ---
-# Use these for ALL client instances
 MONGO_CONNECTION_ARGS = {
     "tls": True,
-    # "tlsDisableOCSPEndpointCheck": True, <-- THIS WAS THE PROBLEM
     "serverSelectionTimeoutMS": 30000,
     "connectTimeoutMS": 20000,
     "socketTimeoutMS": 20000,
@@ -41,9 +48,9 @@ def send_telegram_message(chat_id, text, token, parse_mode='HTML'):
     try:
         response = requests.post(url, json=payload, timeout=20)
         response.raise_for_status()
-        print(f"Sent scheduled message to {chat_id}.")
+        log.info(f"Sent scheduled message to {chat_id}.")
     except Exception as e:
-        print(f"Failed to send scheduled message to {chat_id}: {e}")
+        log.warning(f"Failed to send scheduled message to {chat_id}: {e}")
 
 
 def send_telegram_photo(chat_id, photo_bytes, token, caption=""):
@@ -54,9 +61,9 @@ def send_telegram_photo(chat_id, photo_bytes, token, caption=""):
     try:
         response = requests.post(url, data=data, files=files, timeout=30)
         response.raise_for_status()
-        print(f"Sent scheduled photo to {chat_id}.")
+        log.info(f"Sent scheduled photo to {chat_id}.")
     except Exception as e:
-        print(f"Failed to send scheduled photo to {chat_id}: {e}")
+        log.warning(f"Failed to send scheduled photo to {chat_id}: {e}")
 
 
 def get_report_data(start_date_local_obj, end_date_local_obj, db):
@@ -181,7 +188,7 @@ def create_pie_chart_from_data(data, start_date, end_date):
     return buf.getvalue()
 
 
-# --- SCHEDULED JOB DEFINITIONS (Modified) ---
+# --- SCHEDULED JOB DEFINITIONS ---
 def _send_report_job(period_name, start_date, end_date, db, token, chat_id):
     """Generic helper to generate and send a report."""
     report_data = get_report_data(start_date, end_date, db)
@@ -198,31 +205,36 @@ def _send_report_job(period_name, start_date, end_date, db, token, chat_id):
 
 def run_scheduled_report(period):
     """Main function called by scheduler to run a report for a given period."""
-    print(f"Running {period} scheduled report job...")
+    log.info(f"Running {period} scheduled report job...")
 
-    # --- THIS IS THE FIX ---
-    # Use the robust connection arguments for the background job
-    client = MongoClient(Config.MONGODB_URI, **MONGO_CONNECTION_ARGS)
-    # --- END FIX ---
-
-    db = client[Config.DB_NAME]
-    token = Config.TELEGRAM_TOKEN
+    try:
+        client = MongoClient(Config.MONGODB_URI, **MONGO_CONNECTION_ARGS)
+        db = client[Config.DB_NAME]
+        token = Config.TELEGRAM_TOKEN
+    except Exception as e:
+        log.error(f"Failed to create MongoClient for scheduled job: {e}", exc_info=True)
+        return
 
     # --- MODIFICATION: This job is now user-specific ---
-    users_to_report = db.users.find({
-        "settings.report_chat_id": {"$exists": True, "$ne": None},
-        "subscription_status": "active"
-    })
+    try:
+        users_to_report = db.users.find({
+            "settings.report_chat_id": {"$exists": True, "$ne": None},
+            "subscription_status": "active"
+        })
+    except Exception as e:
+        log.error(f"Scheduled job failed to query users: {e}", exc_info=True)
+        client.close()
+        return
 
     for user in users_to_report:
         chat_id = user['settings']['report_chat_id']
-        print(f"Generating {period} report for user {user['name']} (ChatID: {chat_id})...")
+        log.info(f"Generating {period} report for user {user['name']} (ChatID: {chat_id})...")
         # (Future: scope queries by user_id)
 
     # --- TEMPORARY: Revert to old non-user-specific logic for jobs ---
     chat_id = Config.TELEGRAM_CHAT_ID
     if not token or not chat_id:
-        print(f"Skipping {period} report: Telegram token or chat ID not configured.")
+        log.warning(f"Skipping {period} report: Telegram token or chat ID not configured.")
         client.close()
         return
     # --- END TEMPORARY ---
@@ -251,24 +263,22 @@ def run_scheduled_report(period):
         _send_report_job('previous year', start_date, end_date, db, token, chat_id)
 
     client.close()
-    print(f"{period.capitalize()} report job finished.")
+    log.info(f"{period.capitalize()} report job finished.")
 
 
 def send_daily_reminder_job():
-    # This job is different, so it keeps its own logic
+    log.info("Running daily reminder job...")
+    try:
+        client = MongoClient(Config.MONGODB_URI, **MONGO_CONNECTION_ARGS)
+        db = client[Config.DB_NAME]
+    except Exception as e:
+        log.error(f"Failed to create MongoClient for daily job: {e}", exc_info=True)
+        return
 
-    # --- THIS IS THE FIX ---
-    # Use the robust connection arguments for the background job
-    client = MongoClient(Config.MONGODB_URI, **MONGO_CONNECTION_ARGS)
-    # --- END FIX ---
-
-    db = client[Config.DB_NAME]
-
-    # --- TEMPORARY: Revert to old non-user-specific logic for jobs ---
     token = Config.TELEGRAM_TOKEN
     chat_id = Config.TELEGRAM_CHAT_ID
     if not token or not chat_id:
-        print("Skipped daily transaction reminder, config missing.")
+        log.warning("Skipped daily transaction reminder, config missing.")
         client.close()
         return
 
@@ -276,25 +286,42 @@ def send_daily_reminder_job():
     today_start_local_aware = datetime.combine(now_in_phnom_penh.date(), time.min, tzinfo=PHNOM_PENH_TZ)
     today_start_utc = today_start_local_aware.astimezone(ZoneInfo("UTC"))
 
-    # This query is NOT user-specific yet. We will fix this in a later part.
-    count = db.transactions.count_documents({'timestamp': {'$gte': today_start_utc}})
+    try:
+        count = db.transactions.count_documents({'timestamp': {'$gte': today_start_utc}})
+        if count == 0:
+            message = "Hey! 잊지마! (Don't forget!)\n\nLooks like you haven't logged any transactions today. Take a moment to log your activity! ✍️"
+            send_telegram_message(chat_id, message, token, parse_mode='Markdown')
+            log.info("Sent daily transaction reminder.")
+        else:
+            log.info("Skipped daily transaction reminder, transactions found.")
+    except Exception as e:
+        log.error(f"Daily reminder job failed to query/send: {e}", exc_info=True)
 
-    if count == 0:
-        message = "Hey! 잊지마! (Don't forget!)\n\nLooks like you haven't logged any transactions today. Take a moment to log your activity! ✍️"
-        send_telegram_message(chat_id, message, token, parse_mode='Markdown')
-        print("Sent daily transaction reminder.")
-    else:
-        print("Skipped daily transaction reminder, transactions found.")
     client.close()
 
 
-# --- NEW DB CONNECTION FUNCTIONS (Modified) ---
+# --- DB CONNECTION FUNCTIONS (Modified) ---
 
 def get_db():
+    """
+    Connects to the specific database.
+    Uses Flask's 'g' to reuse the connection per-request.
+    """
+    log.info("get_db() called.")
     if 'db_client' not in g:
         uri = current_app.config['MONGODB_URI']
-        g.db_client = MongoClient(uri, **MONGO_CONNECTION_ARGS)
-        g.db = g.db_client[current_app.config['DB_NAME']]
+        log.info(f"Creating new MongoClient for 'g'. URI: {uri[:15]}...")
+        log.info(f"Connection args: {MONGO_CONNECTION_ARGS}")
+        try:
+            g.db_client = MongoClient(uri, **MONGO_CONNECTION_ARGS)
+            g.db = g.db_client[current_app.config['DB_NAME']]
+            log.info("MongoClient created and attached to 'g'.")
+        except Exception as e:
+            log.error(f"Failed to create MongoClient: {e}", exc_info=True)
+            # Re-raise to fail the request
+            raise e
+    else:
+        log.info("Reusing existing MongoClient from 'g'.")
     return g.db
 
 
@@ -304,12 +331,13 @@ def close_db(e=None):
     if client is not None:
         client.close()
         g.pop('db', None)
-        print("MongoDB connection closed for this context.")
+        log.info("MongoDB connection closed for this 'g' context.")
 
 
 # --- APP CREATION (Modified) ---
 
 def create_app():
+    log.info("--- create_app() called ---")
     app = Flask(__name__)
     app.config.from_object(Config)
 
@@ -317,9 +345,11 @@ def create_app():
     app.config['MONGODB_URI'] = Config.MONGODB_URI
     app.config['DB_NAME'] = Config.DB_NAME
     app.config['TELEGRAM_TOKEN'] = Config.TELEGRAM_TOKEN
+    log.info("App config loaded.")
 
     # Close DB on teardown
     app.teardown_appcontext(close_db)
+    log.info("Registered teardown_appcontext.")
 
     # ----- Scheduler (unchanged) -----
     scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Phnom_Penh')
@@ -330,9 +360,10 @@ def create_app():
     scheduler.add_job(run_scheduled_report, args=['yearly'], trigger=CronTrigger(month=1, day=1, hour=9, minute=30), id='yearly_report', replace_existing=True)
     scheduler.start()
     app.scheduler = scheduler
-    print("⏰ Scheduler started with daily, weekly, monthly, semesterly, and yearly jobs.")
+    log.info("⏰ Scheduler started with daily, weekly, monthly, semesterly, and yearly jobs.")
 
     # ----- Blueprints (unchanged) -----
+    log.info("Registering blueprints...")
     from .settings.routes import settings_bp
     from .analytics.routes import analytics_bp
     from .transactions.routes import transactions_bp
@@ -348,19 +379,21 @@ def create_app():
     app.register_blueprint(summary_bp)
     app.register_blueprint(reminders_bp)
     app.register_blueprint(auth_bp)
+    log.info("Blueprints registered.")
 
     # ----- Health & Utility -----
 
     @app.route("/health")
     def health_check():
+        log.info("/health route hit.")
         return jsonify({"status": "ok"})
 
     @app.route("/__egress_ip")
     def egress_ip():
         """
         Returns the public egress IP of the running container.
-        Tries ipify -> ifconfig.me -> httpbin as fallbacks.
         """
+        log.info("/__egress_ip route hit.")
         tries = [
             ("https://api.ipify.org?format=json", "json", "ip"),
             ("https://ifconfig.me/ip", "text", None),
@@ -373,41 +406,53 @@ def create_app():
                 if mode == "json":
                     data = r.json()
                     val = data.get(key, "")
-                    # httpbin 'origin' can be "ip, ip" when passing proxies
                     ip = val.split(",")[0].strip() if isinstance(val, str) else val
                     if ip:
+                        log.info(f"Egress IP found: {ip}")
                         return jsonify({"ip": ip, "source": url.split("//")[1].split("/")[0]})
                 else:
                     ip = (r.text or "").strip()
                     if ip:
+                        log.info(f"Egress IP found: {ip}")
                         return jsonify({"ip": ip, "source": url.split("//")[1].split("/")[0]})
             except Exception as e:
+                log.warning(f"Egress IP check failed for {url}: {e}")
                 continue
+        log.error("Unable to determine egress IP.")
         return jsonify({"error": "Unable to determine egress IP"}), 502
 
     @app.route("/__db_ping")
     def db_ping():
         """
         Pings MongoDB using the same connection args the app uses.
-        Returns admin ping, current DB ping, and a light stats snapshot.
         """
+        log.info("/__db_ping route hit. This is the primary debug endpoint.")
         uri = current_app.config.get("MONGODB_URI")
         dbname = current_app.config.get("DB_NAME")
         if not uri or not dbname:
+            log.error("__db_ping: DB config missing")
             return jsonify({"ok": False, "error": "DB config missing"}), 500
 
         try:
-            # Fresh short-lived client to avoid depending on request context state
+            log.info(f"Creating fresh MongoClient for ping. URI: {uri[:15]}...")
+            log.info(f"Ping Connection args: {MONGO_CONNECTION_ARGS}")
             client = MongoClient(uri, **MONGO_CONNECTION_ARGS)
+
+            log.info("Pinging admin...")
             admin_ok = client.admin.command("ping").get("ok", 0) == 1
+            log.info(f"Admin ping OK: {admin_ok}")
 
             db = client[dbname]
+            log.info(f"Pinging database: {dbname}...")
             db_ok = db.command("ping").get("ok", 0) == 1
+            log.info(f"DB ping OK: {db_ok}")
 
-            # Light info (avoid heavy ops):
             try:
+                log.info("Listing collections...")
                 colls = db.list_collection_names()
-            except Exception:
+                log.info(f"Found {len(colls)} collections.")
+            except Exception as e:
+                log.warning(f"Could not list collections: {e}")
                 colls = []
 
             payload = {
@@ -416,12 +461,15 @@ def create_app():
                 "db_ping": db_ok,
                 "db_name": dbname,
                 "collections_count": len(colls),
-                "collections": sorted(colls)[:25],  # cap the list
+                "collections": sorted(colls)[:25],
             }
             client.close()
             status = 200 if payload["ok"] else 500
+            log.info(f"__db_ping completed. Status: {status}")
             return jsonify(payload), status
         except Exception as e:
+            log.error(f"__db_ping FAILED: {e}", exc_info=True)
             return jsonify({"ok": False, "error": str(e)}), 500
 
+    log.info("--- create_app() finished. Returning app. ---")
     return app
