@@ -31,10 +31,12 @@ async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    # --- THIS IS THE FIX ---
+    # Preserve the user_profile, clear everything else, then restore it.
+    user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
-    context.user_data['user_profile'] = (
-        context.application.user_data[update.effective_user.id]['user_profile']
-    )
+    context.user_data['user_profile'] = user_profile
+    # --- END FIX ---
 
     await query.edit_message_text(
         t("analytics.report_ask_period", context),
@@ -180,10 +182,12 @@ async def habits_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    # --- THIS IS THE FIX ---
+    # Preserve the user_profile, clear everything else, then restore it.
+    user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
-    context.user_data['user_profile'] = (
-        context.application.user_data[update.effective_user.id]['user_profile']
-    )
+    context.user_data['user_profile'] = user_profile
+    # --- END FIX ---
 
     await query.edit_message_text(
         t("analytics.habits_ask_period", context),

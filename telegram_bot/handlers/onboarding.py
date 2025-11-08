@@ -27,11 +27,13 @@ async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Starts the mandatory onboarding flow for new users.
     This is typically triggered by the @authenticate_user decorator.
     """
+    # --- THIS IS THE FIX ---
+    # The decorator already put the profile in context.user_data
+    # We must preserve it.
+    user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
-    profile = context.application.user_data[update.effective_user.id].get(
-        'user_profile'
-    )
-    context.user_data['user_profile'] = profile
+    context.user_data['user_profile'] = user_profile
+    # --- END FIX ---
 
     # Since this is the first interaction, we don't know the language.
     # We will ask in English, then update.

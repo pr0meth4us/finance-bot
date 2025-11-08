@@ -9,6 +9,7 @@ from .helpers import format_summation_results
 from decorators import authenticate_user # <-- MODIFICATION: Fix import
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from utils.i18n import t
 
 # Conversation states
 (
@@ -26,14 +27,16 @@ async def search_menu_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # --- MODIFICATION: Re-cache user_profile after clear() ---
+    # --- THIS IS THE FIX ---
+    # Preserve the user_profile, clear everything else, then restore it.
+    user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
-    context.user_data['user_profile'] = context.application.user_data[update.effective_user.id]['user_profile']
-    # ---
+    context.user_data['user_profile'] = user_profile
+    # --- END FIX ---
 
     await query.edit_message_text(
-        text="What type of search do you want to perform?",
-        reply_markup=keyboards.search_menu_keyboard()
+        text=t("search.menu_header", context),
+        reply_markup=keyboards.search_menu_keyboard(context)
     )
     return CHOOSE_ACTION
 
@@ -49,8 +52,8 @@ async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['search_params'] = {}
 
     await query.edit_message_text(
-        "🔎 Advanced Search\n\nFirst, select a time period for the search.",
-        reply_markup=keyboards.report_period_keyboard(is_search=True)
+        t("search.ask_period", context),
+        reply_markup=keyboards.report_period_keyboard(context, is_search=True)
     )
     return CHOOSE_PERIOD
 
@@ -63,14 +66,14 @@ async def received_period_choice(update: Update, context: ContextTypes.DEFAULT_T
     period = query.data.replace('report_period_', '')
 
     if period == "custom":
-        await query.edit_message_text("Please enter the start date (YYYY-MM-DD):")
+        await query.edit_message_text(t("search.ask_start", context))
         return GET_CUSTOM_START
     elif period != "all_time":
         context.user_data['search_params']['period'] = period
 
     await query.edit_message_text(
-        "Which transaction type do you want to search?",
-        reply_markup=keyboards.search_type_keyboard()
+        t("search.ask_type", context),
+        reply_markup=keyboards.search_type_keyboard(context)
     )
     return CHOOSE_TYPE
 
@@ -82,10 +85,11 @@ async def received_custom_start(update: Update, context: ContextTypes.DEFAULT_TY
         start_date = datetime.strptime(update.message.text, "%Y-%m-%d").date()
         context.user_data['search_params']['start_date'] = start_date.isoformat()
         await update.message.reply_text(
-            f"Start date set to {start_date:%Y-%m-%d}.\nNow, please enter the end date (YYYY-MM-DD):")
+            t("search.ask_end", context, date=start_date)
+        )
         return GET_CUSTOM_END
     except ValueError:
-        await update.message.reply_text("Invalid date format. Please use YYYY-MM-DD.")
+        await update.message.reply_text(t("search.invalid_date", context))
         return GET_CUSTOM_START
 
 
@@ -96,16 +100,17 @@ async def received_custom_end(update: Update, context: ContextTypes.DEFAULT_TYPE
         end_date = datetime.strptime(update.message.text, "%Y-%m-%d").date()
         start_date_str = context.user_data['search_params'].get('start_date')
         if not start_date_str or end_date < datetime.fromisoformat(start_date_str).date():
-            await update.message.reply_text("Invalid date range. End date cannot be before start date.")
+            await update.message.reply_text(t("search.invalid_range", context))
             return GET_CUSTOM_END
+
         context.user_data['search_params']['end_date'] = end_date.isoformat()
         await update.message.reply_text(
-            "Which transaction type do you want to search?",
-            reply_markup=keyboards.search_type_keyboard()
+            t("search.ask_type", context),
+            reply_markup=keyboards.search_type_keyboard(context)
         )
         return CHOOSE_TYPE
     except ValueError:
-        await update.message.reply_text("Invalid date format. Please use YYYY-MM-DD.")
+        await update.message.reply_text(t("search.invalid_date", context))
         return GET_CUSTOM_END
 
 
@@ -119,8 +124,8 @@ async def received_type_choice(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data['search_params']['transaction_type'] = tx_type
 
     await query.edit_message_text(
-        "Enter the categories you want to include, separated by a comma (e.g., Food, Drink).\n\nOr press Skip to include all categories.",
-        reply_markup=keyboards.skip_keyboard('search_skip_categories')
+        t("search.ask_categories", context),
+        reply_markup=keyboards.skip_keyboard(context, 'search_skip_categories')
     )
     return GET_CATEGORIES
 
@@ -128,15 +133,20 @@ async def received_type_choice(update: Update, context: ContextTypes.DEFAULT_TYP
 @authenticate_user # <-- MODIFICATION
 async def received_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives categories and asks for keywords."""
-    message_text = "Enter keywords to search for in the description, separated by a comma (e.g., coffee, lunch).\n\nOr press Skip to not filter by keywords."
+    message_text = t("search.ask_keywords", context)
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.edit_message_text(message_text,
-                                                      reply_markup=keyboards.skip_keyboard('search_skip_keywords'))
+        await update.callback_query.edit_message_text(
+            message_text,
+            reply_markup=keyboards.skip_keyboard(context, 'search_skip_keywords')
+        )
     else:
         categories = [c.strip() for c in update.message.text.split(',')]
         context.user_data['search_params']['categories'] = categories
-        await update.message.reply_text(message_text, reply_markup=keyboards.skip_keyboard('search_skip_keywords'))
+        await update.message.reply_text(
+            message_text,
+            reply_markup=keyboards.skip_keyboard(context, 'search_skip_keywords')
+        )
 
     return GET_KEYWORDS
 
@@ -153,8 +163,8 @@ async def received_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if len(keywords) > 1:
         await update.message.reply_text(
-            "Should the description contain ALL of these keywords (AND) or ANY of them (OR)?",
-            reply_markup=keyboards.search_keyword_logic_keyboard()
+            t("search.ask_logic", context),
+            reply_markup=keyboards.search_keyword_logic_keyboard(context)
         )
         return GET_KEYWORD_LOGIC
 
@@ -175,50 +185,60 @@ async def received_keyword_logic(update: Update, context: ContextTypes.DEFAULT_T
 async def execute_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Executes the correct search type and displays results by editing the message."""
 
-    # --- MODIFICATION: Get user_id ---
     user_id = context.user_data['user_profile']['_id']
-    # ---
-
     params = context.user_data.get('search_params', {})
     search_type = context.user_data.get('search_type')
 
     message_to_edit = None
     if update.callback_query:
-        await update.callback_query.edit_message_text("🔎 searching...")
+        await update.callback_query.edit_message_text(t("search.searching", context))
         message_to_edit = update.callback_query.message
     else:
-        message_to_edit = await update.message.reply_text("🔎 searching...")
+        message_to_edit = await update.message.reply_text(t("search.searching", context))
 
     if search_type == 'manage':
-        results = api_client.search_transactions_for_management(params, user_id) # <-- MODIFICATION
+        results = api_client.search_transactions_for_management(params, user_id)
         if not results:
-            await message_to_edit.edit_text("No transactions found matching your criteria.",
-                                            reply_markup=keyboards.main_menu_keyboard())
+            await message_to_edit.edit_text(
+                t("search.no_results", context),
+                reply_markup=keyboards.main_menu_keyboard(context)
+            )
         elif len(results) == 1:
             tx = results[0]
             emoji = "⬇️ Expense" if tx['type'] == 'expense' else "⬆️ Income"
-            date_str = datetime.fromisoformat(tx['timestamp'].replace('Z', '+00:00')).astimezone(
-                PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
+            date_str = datetime.fromisoformat(
+                tx['timestamp']
+            ).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
             amount_format = ",.0f" if tx['currency'] == 'KHR' else ",.2f"
+            amount = tx['amount']
+            description = tx.get('description') or 'N/A'
+
             text = (
-                f"Found 1 matching transaction:\n\n<b>Transaction Details:</b>\n"
-                f"<b>Type:</b> {emoji}\n"
-                f"<b>Amount:</b> {tx['amount']:{amount_format}} {tx['currency']}\n"
-                f"<b>Category:</b> {tx['categoryId']}\n"
-                f"<b>Description:</b> {tx.get('description') or 'N/A'}\n"
-                f"<b>Date:</b> {date_str}"
+                f"{t('search.one_result', context)}\n\n"
+                f"{t('history.tx_details_no_prompt', context, emoji=emoji, amount=f'{amount:{amount_format}}', currency=tx['currency'], category=tx['categoryId'], description=description, date=date_str)}"
             )
-            await message_to_edit.edit_text(text=text, parse_mode='HTML',
-                                            reply_markup=keyboards.manage_tx_keyboard(tx['_id']))
+            await message_to_edit.edit_text(
+                text=text,
+                parse_mode='HTML',
+                reply_markup=keyboards.manage_tx_keyboard(tx['_id'], context)
+            )
         else:
-            text = f"Found {len(results)} matching transactions. Select one to manage:"
-            await message_to_edit.edit_text(text=text,
-                                            reply_markup=keyboards.history_keyboard(results, is_search_result=True))
+            text = t("search.many_results", context, count=len(results))
+            await message_to_edit.edit_text(
+                text=text,
+                reply_markup=keyboards.history_keyboard(
+                    results, context, is_search_result=True
+                )
+            )
 
     elif search_type == 'sum':
-        results = api_client.sum_transactions_for_analytics(params, user_id) # <-- MODIFICATION
-        response_text = format_summation_results(params, results)
-        await message_to_edit.edit_text(response_text, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard())
+        results = api_client.sum_transactions_for_analytics(params, user_id)
+        response_text = format_summation_results(params, results, context)
+        await message_to_edit.edit_text(
+            response_text,
+            parse_mode='HTML',
+            reply_markup=keyboards.main_menu_keyboard(context)
+        )
 
     context.user_data.clear()
     return ConversationHandler.END

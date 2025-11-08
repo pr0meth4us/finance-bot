@@ -38,10 +38,11 @@ async def add_transaction_start(update: Update,
     query = update.callback_query
     await query.answer()
 
+    # --- THIS IS THE FIX ---
+    user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
-    context.user_data['user_profile'] = (
-        context.application.user_data[update.effective_user.id]['user_profile']
-    )
+    context.user_data['user_profile'] = user_profile
+    # --- END FIX ---
 
     tx_type = 'expense' if query.data == 'add_expense' else 'income'
     context.user_data['tx_type'] = tx_type
@@ -222,10 +223,11 @@ async def forgot_log_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    # --- THIS IS THE FIX ---
+    user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
-    context.user_data['user_profile'] = (
-        context.application.user_data[update.effective_user.id]['user_profile']
-    )
+    context.user_data['user_profile'] = user_profile
+    # --- END FIX ---
 
     await query.message.reply_text(
         t("forgot.ask_day", context),
@@ -403,10 +405,12 @@ async def edit_transaction_start(update: Update,
     await query.answer()
     tx_id = query.data.replace('edit_tx_', '')
 
+    # --- THIS IS THE FIX ---
+    user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
-    context.user_data['user_profile'] = (
-        context.application.user_data[update.effective_user.id]['user_profile']
-    )
+    context.user_data['user_profile'] = user_profile
+    # --- END FIX ---
+
     context.user_data['edit_tx_id'] = tx_id
 
     tx = api_client.get_transaction_details(
