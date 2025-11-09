@@ -12,7 +12,7 @@ from telegram.ext import (
 
 import api_client
 import keyboards
-from .common import start
+from .common import start, cancel  # <-- THIS IS THE FIX
 from decorators import authenticate_user
 from utils.i18n import t
 
