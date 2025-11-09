@@ -5,6 +5,19 @@ from telegram.ext import ContextTypes
 from utils.i18n import t
 
 
+def _get_user_settings_for_keyboards(context: ContextTypes.DEFAULT_TYPE):
+    """Helper to safely get user settings and currency mode."""
+    profile = context.user_data.get('user_profile', {})
+    settings = profile.get('settings', {})
+    mode = settings.get('currency_mode', 'dual')
+
+    if mode == 'single':
+        primary_currency = settings.get('primary_currency', 'USD')
+        return mode, (primary_currency,)
+
+    return 'dual', ('USD', 'KHR')
+
+
 def main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
@@ -71,7 +84,6 @@ def main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
     return InlineKeyboardMarkup(keyboard)
 
 
-# --- NEW KEYBOARD ---
 def report_actions_keyboard(start_date, end_date,
                             context: ContextTypes.DEFAULT_TYPE):
     """Keyboard shown after a report is generated."""
@@ -87,7 +99,6 @@ def report_actions_keyboard(start_date, end_date,
     return InlineKeyboardMarkup(keyboard)
 
 
-# --- NEW KEYBOARD ---
 def debt_analysis_actions_keyboard(context: ContextTypes.DEFAULT_TYPE):
     """Keyboard shown after debt analysis is generated."""
     keyboard = [
@@ -234,6 +245,8 @@ def search_keyword_logic_keyboard(context: ContextTypes.DEFAULT_TYPE):
 
 
 def settings_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
+    mode, currencies = _get_user_settings_for_keyboards(context)
+
     keyboard = [
         [
             InlineKeyboardButton(
@@ -243,30 +256,69 @@ def settings_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
         ],
         [
             InlineKeyboardButton(
-                "📈 Update Fixed Rate", callback_data='settings_set_rate'
-            )
-        ],
-        [
-            InlineKeyboardButton(
                 "🏷️ Manage Categories",
                 callback_data='settings_manage_categories'
             )
         ],
-        [InlineKeyboardButton("‹ Back to Main Menu", callback_data='start')],
     ]
+
+    # Only show rate and mode-switch options to dual-currency users
+    # or single-currency users (to let them switch *to* dual)
+    if mode == 'dual':
+        keyboard.append([
+            InlineKeyboardButton(
+                "📈 Update Fixed Rate", callback_data='settings_set_rate'
+            )
+        ])
+    elif mode == 'single':
+        keyboard.append([
+            InlineKeyboardButton(
+                "🔄 Switch to Dual-Currency Mode",
+                callback_data='settings_switch_to_dual'
+            )
+        ])
+
+    keyboard.append([InlineKeyboardButton("‹ Back to Main Menu", callback_data='start')])
     return InlineKeyboardMarkup(keyboard)
 
 
-def set_balance_account_keyboard(context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [
+def set_balance_account_keyboard(context: ContextTypes.DEFAULT_TYPE, mode: str, currencies: tuple):
+    keyboard = []
+
+    if mode == 'dual':
+        keyboard.append([
             InlineKeyboardButton("💵 USD Account",
                                  callback_data='set_balance_USD'),
             InlineKeyboardButton("៛ KHR Account",
                                  callback_data='set_balance_KHR')
+        ])
+    else:
+        # Single currency mode
+        curr = currencies[0]
+        keyboard.append([
+            InlineKeyboardButton(f"Update {curr} Balance",
+                                 callback_data=f'set_balance_{curr}'),
+        ])
+
+    keyboard.append([InlineKeyboardButton("‹ Back to Settings",
+                                          callback_data='settings_menu')])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def switch_to_dual_confirm_keyboard(context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "✅ Yes, Switch Me",
+                callback_data='confirm_switch_dual'
+            )
         ],
-        [InlineKeyboardButton("‹ Back to Settings",
-                              callback_data='settings_menu')]
+        [
+            InlineKeyboardButton(
+                "‹ No, Go Back",
+                callback_data="settings_menu"
+            )
+        ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -326,36 +378,44 @@ def iou_list_keyboard(grouped_debts, context: ContextTypes.DEFAULT_TYPE,
     keyboard = []
     status_str = "settled" if is_settled else "open"
 
+    mode, currencies = _get_user_settings_for_keyboards(context)
+
     lent = [d for d in grouped_debts if d['type'] == 'lent']
     borrowed = [d for d in grouped_debts if d['type'] == 'borrowed']
 
     def format_totals(totals):
         parts = []
         for t in totals:
-            amount_format = ",.0f" if t['currency'] == 'KHR' else ",.2f"
-            parts.append(
-                f"{t['total']:{amount_format}} {t['currency']} ({t['count']})"
-            )
-        return ", ".join(parts)
+            # Only show totals for currencies the user cares about
+            if t['currency'] in currencies:
+                amount_format = ",.0f" if t['currency'] == 'KHR' else ",.2f"
+                parts.append(
+                    f"{t['total']:{amount_format}} {t['currency']} ({t['count']})"
+                )
+        return ", ".join(parts) if parts else None
 
     if lent:
         for debt in lent:
-            label = f"Owed by {debt['person']}: {format_totals(debt['totals'])}"
-            keyboard.append(
-                [InlineKeyboardButton(
-                    label,
-                    callback_data=f"iou:person:{status_str}:{debt['person']}"
-                )]
-            )
+            formatted_total = format_totals(debt['totals'])
+            if formatted_total: # Only show if there's a relevant total
+                label = f"Owed by {debt['person']}: {formatted_total}"
+                keyboard.append(
+                    [InlineKeyboardButton(
+                        label,
+                        callback_data=f"iou:person:{status_str}:{debt['person']}"
+                    )]
+                )
     if borrowed:
         for debt in borrowed:
-            label = f"You owe {debt['person']}: {format_totals(debt['totals'])}"
-            keyboard.append(
-                [InlineKeyboardButton(
-                    label,
-                    callback_data=f"iou:person:{status_str}:{debt['person']}"
-                )]
-            )
+            formatted_total = format_totals(debt['totals'])
+            if formatted_total: # Only show if there's a relevant total
+                label = f"You owe {debt['person']}: {formatted_total}"
+                keyboard.append(
+                    [InlineKeyboardButton(
+                        label,
+                        callback_data=f"iou:person:{status_str}:{debt['person']}"
+                    )]
+                )
 
     keyboard.append([InlineKeyboardButton("‹ Back", callback_data='iou_menu')])
     return InlineKeyboardMarkup(keyboard)
@@ -392,16 +452,23 @@ def iou_manage_list_keyboard(person_debts, person_name,
     """Displays a list of individual debts for management (Edit/Cancel)."""
     keyboard = []
 
+    mode, currencies = _get_user_settings_for_keyboards(context)
+
     for debt in person_debts:
+        # Filter list by user's currency mode
+        if debt.get('currency') not in currencies:
+            continue
+
         created_date = datetime.fromisoformat(
             debt['created_at']
         ).strftime('%d %b')
         purpose = debt.get('purpose') or 'No purpose'
         amount_key = 'remainingAmount' if not is_settled else 'originalAmount'
         amount = debt.get(amount_key, 0)
+        currency = debt.get('currency')
 
-        amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
-        label = f"{amount:{amount_format}} {debt['currency']} " \
+        amount_format = ",.0f" if currency == 'KHR' else ",.2f"
+        label = f"{amount:{amount_format}} {currency} " \
                 f"({created_date}) - {purpose}"
 
         callback = f"iou:detail:{debt['_id']}:{person_name}:{is_settled}"
@@ -491,6 +558,10 @@ def iou_cancel_confirm_keyboard(debt_id, person, is_settled_str,
 
 
 def currency_keyboard(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Returns a currency keyboard, always showing USD and KHR.
+    This is only used in dual-currency mode.
+    """
     keyboard = [
         [
             InlineKeyboardButton("💵 USD", callback_data='curr_USD'),
@@ -568,7 +639,13 @@ def history_keyboard(transactions, context: ContextTypes.DEFAULT_TYPE,
             t("keyboards.search", context), callback_data='search_menu'
         )])
 
+    mode, currencies = _get_user_settings_for_keyboards(context)
+
     for tx in transactions:
+        # Filter list by user's currency mode
+        if tx.get('currency') not in currencies:
+            continue
+
         amount = tx.get('amount', 0)
         currency = tx.get('currency', 'N/A')
         category = tx.get('categoryId', 'Unknown')
@@ -599,6 +676,9 @@ def manage_tx_keyboard(tx_id, context: ContextTypes.DEFAULT_TYPE):
 
 
 def edit_tx_options_keyboard(tx_id, context: ContextTypes.DEFAULT_TYPE):
+
+    mode, currencies = _get_user_settings_for_keyboards(context)
+
     keyboard = [
         [
             InlineKeyboardButton(
@@ -617,10 +697,20 @@ def edit_tx_options_keyboard(tx_id, context: ContextTypes.DEFAULT_TYPE):
                 "🗓️ Date", callback_data=f'edit_field_timestamp_{tx_id}'
             ),
         ],
-        [InlineKeyboardButton(
-            "‹ Cancel Edit", callback_data=f'manage_tx_{tx_id}'
-        )],
     ]
+
+    # Only show the "Edit Currency" button to dual-mode users
+    if mode == 'dual':
+        keyboard.append([
+            InlineKeyboardButton(
+                "🪙 Currency", callback_data=f'edit_field_currency_{tx_id}'
+            )
+        ])
+
+    keyboard.append([InlineKeyboardButton(
+        "‹ Cancel Edit", callback_data=f'manage_tx_{tx_id}'
+    )])
+
     return InlineKeyboardMarkup(keyboard)
 
 

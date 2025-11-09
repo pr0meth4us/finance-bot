@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 import logging
 import shlex
 from asteval import Interpreter
-from utils.i18n import t  # <-- THIS IS THE FIX
+from utils.i18n import t
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -69,15 +69,50 @@ COMMAND_MAP = {
 }
 
 
-def parse_amount_and_currency(amount_str: str):
-    amount_str = amount_str.lower()
-    if 'khr' in amount_str:
-        return float(amount_str.replace('khr', '').strip()), 'KHR'
+def _get_user_settings_for_command(context: ContextTypes.DEFAULT_TYPE):
+    """Helper to get currency mode and primary currency."""
+    profile = context.user_data.get('user_profile', {})
+    settings = profile.get('settings', {})
+    mode = settings.get('currency_mode', 'dual')
 
-    return float(amount_str), 'USD'
+    if mode == 'single':
+        primary_currency = settings.get('primary_currency', 'USD')
+        return mode, primary_currency
+
+    return 'dual', 'USD' # Default primary for dual is USD
+
+
+def parse_amount_and_currency_dual(amount_str: str):
+    """Original v1 parser for dual-currency mode."""
+    amount_str = amount_str.lower().strip()
+    if 'khr' in amount_str:
+        amount_val = float(amount_str.replace('khr', '').strip())
+        return amount_val, 'KHR'
+
+    amount_val = float(amount_str)
+    return amount_val, 'USD'
+
+
+def parse_amount_and_currency_for_mode(amount_str: str, mode: str, primary_currency: str):
+    """
+    Parses an amount string based on the user's currency mode.
+    - dual: Detects 'khr' or defaults to 'USD'.
+    - single: Ignores currency tags, always uses primary_currency.
+    """
+    if mode == 'single':
+        try:
+            # In single mode, just strip all non-numeric characters
+            amount_val = float(re.sub(r"[^0-9.]", "", amount_str))
+            return amount_val, primary_currency
+        except ValueError:
+            raise ValueError("Invalid amount for single currency mode")
+    else:
+        # Use the original dual-currency logic
+        return parse_amount_and_currency_dual(amount_str)
 
 
 def parse_date_from_args(args):
+    """Extracts an optional date (MM-DD or DD-MM) from the end of an arg list."""
     if not args:
         return None, args
 
@@ -91,8 +126,9 @@ def parse_date_from_args(args):
         try:
             parsed_date = datetime.strptime(date_str, '%d-%m')
         except (ValueError, TypeError):
-            return None, args
+            return None, args # Last arg wasn't a date
 
+    # It was a date, so return it and the args *without* it
     tx_datetime = today.replace(
         month=parsed_date.month, day=parsed_date.day,
         hour=12, minute=0, second=0, microsecond=0
@@ -104,10 +140,15 @@ def _format_success_message(data):
     """Formats a detailed success message for logged items."""
     lines = ["<b>✅ Recorded:</b>"]
     lines.append(f"  - <b>Type:</b> {data['type'].title()}")
+
     amount = data.get('amount') or data.get('iou_amount')
     currency = data.get('currency') or data.get('iou_currency')
-    amount_format = ",.0f" if currency == 'KHR' else ",.2f"
-    lines.append(f"  - <b>Amount:</b> {amount:{amount_format}} {currency}")
+
+    if currency:
+        amount_format = ",.0f" if currency == 'KHR' else ",.2f"
+        lines.append(f"  - <b>Amount:</b> {amount:{amount_format}} {currency}")
+    else:
+        lines.append(f"  - <b>Amount:</b> {amount}")
 
     if 'categoryId' in data:
         lines.append(f"  - <b>Category:</b> {data['categoryId']}")
@@ -140,12 +181,17 @@ async def handle_generic_transaction(update: Update,
             await update.message.reply_text(error_message, parse_mode='Markdown')
             return None, None
 
+        mode, primary_curr = _get_user_settings_for_command(context)
+
         parsed_args = args
         tx_date, remaining_args = parse_date_from_args(parsed_args)
+
         amount_str = remaining_args[-1]
-        amount, currency = parse_amount_and_currency(amount_str)
+        amount, currency = parse_amount_and_currency_for_mode(amount_str, mode, primary_curr)
+
         category = remaining_args[0]
         description = " ".join(remaining_args[1:-1])
+
         tx_data = {
             "type": command, "amount": amount, "currency": currency,
             "accountName": f"{currency} Account", "categoryId": category,
@@ -168,11 +214,15 @@ async def handle_generic_debt(update: Update,
             await update.message.reply_text(error_message, parse_mode='Markdown')
             return None, None
 
+        mode, primary_curr = _get_user_settings_for_command(context)
+
         parsed_args = args
         tx_date, remaining_args = parse_date_from_args(parsed_args)
+
         person = remaining_args[0]
         amount_str = remaining_args[1]
-        amount, currency = parse_amount_and_currency(amount_str)
+        amount, currency = parse_amount_and_currency_for_mode(amount_str, mode, primary_curr)
+
         purpose = " ".join(remaining_args[2:])
         debt_data = {
             "type": command, "person": person, "amount": amount,
@@ -190,6 +240,8 @@ async def handle_quick_command(update: Update,
                                command, args):
     """Handles parsing predefined quick commands like !coffee."""
     try:
+        mode, primary_curr = _get_user_settings_for_command(context)
+
         parsed_args = args
         tx_date, remaining_args = parse_date_from_args(parsed_args)
 
@@ -201,7 +253,8 @@ async def handle_quick_command(update: Update,
             return None, None
 
         amount_str = remaining_args[-1]
-        amount, currency = parse_amount_and_currency(amount_str)
+        amount, currency = parse_amount_and_currency_for_mode(amount_str, mode, primary_curr)
+
         description_parts = remaining_args[:-1]
         details = COMMAND_MAP[command]
         description = (" ".join(description_parts) if description_parts
@@ -227,6 +280,7 @@ async def handle_repayment(update: Update, context: ContextTypes.DEFAULT_TYPE,
     """Handles parsing !paid and !repaid by commands."""
     try:
         user_id = context.user_data['user_profile']['_id']
+        mode, primary_curr = _get_user_settings_for_command(context)
 
         command_example = (
             "`!repaid by <Person> <Amount>[khr] [MM-DD]`"
@@ -246,7 +300,7 @@ async def handle_repayment(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
         person = remaining_args[0]
         amount_str = remaining_args[1]
-        amount, currency = parse_amount_and_currency(amount_str)
+        amount, currency = parse_amount_and_currency_for_mode(amount_str, mode, primary_curr)
 
         response = api_client.record_lump_sum_repayment(
             person, currency, amount, debt_type, user_id, tx_date
@@ -391,8 +445,10 @@ async def unknown_command_entry_point(update: Update,
         amount_str = args_without_date[-1]
         description_parts = args_without_date[:-1]
 
+        mode, primary_curr = _get_user_settings_for_command(context)
+
         try:
-            amount, currency = parse_amount_and_currency(amount_str)
+            amount, currency = parse_amount_and_currency_for_mode(amount_str, mode, primary_curr)
         except ValueError:
             await update.message.reply_text(t("command.unknown_fail", context))
             return ConversationHandler.END
@@ -407,8 +463,12 @@ async def unknown_command_entry_point(update: Update,
             "timestamp": tx_date
         }
 
-        amount_display = (f"{amount:,.0f} {currency}" if currency == 'KHR'
-                          else f"${amount:,.2f}")
+        if currency == 'KHR':
+            amount_display = f"{amount:,.0f} {currency}"
+        elif currency:
+            amount_display = f"{amount:,.2f} {currency}"
+        else: # Fallback for single mode with no symbol
+            amount_display = f"{amount:,.2f}"
 
         # Get user's dynamic categories
         profile = context.user_data['user_profile']

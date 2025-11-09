@@ -2,7 +2,7 @@
 
 from datetime import datetime
 import io
-import csv  # <-- NEW IMPORT
+import csv
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from zoneinfo import ZoneInfo
@@ -13,64 +13,98 @@ from utils.i18n import t
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
 
+def _get_user_settings(context: ContextTypes.DEFAULT_TYPE):
+    """Helper to safely get user settings and currency mode."""
+    profile = context.user_data.get('user_profile', {})
+    settings = profile.get('settings', {})
+    mode = settings.get('currency_mode', 'dual')
+
+    if mode == 'single':
+        primary_currency = settings.get('primary_currency', 'USD')
+        return mode, (primary_currency,)
+
+    # Default to dual if not set
+    return 'dual', ('USD', 'KHR')
+
+
 def format_summary_message(summary_data,
                            context: ContextTypes.DEFAULT_TYPE):
     """Formats the detailed summary data into a readable string."""
     if not summary_data:
         return ""
 
-    # Balances
-    khr_bal = summary_data.get('balances', {}).get('KHR', 0)
-    usd_bal = summary_data.get('balances', {}).get('USD', 0)
-    balance_text = (
-        f"{t('summary.balances', context)}\n"
-        f"💵 {usd_bal:,.2f} USD\n៛ {khr_bal:,.0f} KHR"
-    )
+    mode, currencies = _get_user_settings(context)
 
-    # Debts
+    # 1. Balances
+    balance_lines = [f"{t('summary.balances', context)}"]
+    balances = summary_data.get('balances', {})
+
+    if mode == 'dual':
+        usd_bal = balances.get('USD', 0)
+        khr_bal = balances.get('KHR', 0)
+        balance_lines.append(f"💵 {usd_bal:,.2f} USD")
+        balance_lines.append(f"៛ {khr_bal:,.0f} KHR")
+    else:
+        currency = currencies[0]
+        bal = balances.get(currency, 0)
+        # Apply currency-specific formatting
+        amount_format = ",.0f" if currency == 'KHR' else ",.2f"
+        balance_lines.append(f"<b>{bal:{amount_format}} {currency}</b>")
+
+    balance_text = "\n".join(balance_lines)
+
+    # 2. Debts
+    debt_lines = [f"{t('summary.debts', context)}"]
+
+    # Owed To You
+    debt_lines.append(f"{t('summary.you_are_owed', context)}")
     owed_to_you_data = summary_data.get('debts_owed_to_you', [])
-    owed_to_you_usd = next((item['total'] for item in owed_to_you_data
-                            if item['_id'] == 'USD'), 0)
-    owed_to_you_khr = next((item['total'] for item in owed_to_you_data
-                            if item['_id'] == 'KHR'), 0)
-    owed_to_you_text = (
-        f"    💵 {owed_to_you_usd:,.2f} USD\n"
-        f"    ៛ {owed_to_you_khr:,.0f} KHR"
-    )
+    found_debt_to_you = False
+    for currency in currencies:
+        total = next((item['total'] for item in owed_to_you_data
+                      if item['_id'] == currency), 0)
+        if total > 0:
+            amount_format = ",.0f" if currency == 'KHR' else ",.2f"
+            symbol = "៛" if currency == 'KHR' else "💵"
+            debt_lines.append(f"    {symbol} {total:{amount_format}} {currency}")
+            found_debt_to_you = True
+    if not found_debt_to_you:
+        debt_lines.append("    -")
 
+    # Owed By You
+    debt_lines.append(f"{t('summary.you_owe', context)}")
     owed_by_you_data = summary_data.get('debts_owed_by_you', [])
-    owed_by_you_usd = next((item['total'] for item in owed_by_you_data
-                            if item['_id'] == 'USD'), 0)
-    owed_by_you_khr = next((item['total'] for item in owed_by_you_data
-                            if item['_id'] == 'KHR'), 0)
-    owed_by_you_text = (
-        f"    💵 {owed_by_you_usd:,.2f} USD\n"
-        f"    ៛ {owed_by_you_khr:,.0f} KHR"
-    )
+    found_debt_by_you = False
+    for currency in currencies:
+        total = next((item['total'] for item in owed_by_you_data
+                      if item['_id'] == currency), 0)
+        if total > 0:
+            amount_format = ",.0f" if currency == 'KHR' else ",.2f"
+            symbol = "៛" if currency == 'KHR' else "💵"
+            debt_lines.append(f"    {symbol} {total:{amount_format}} {currency}")
+            found_debt_by_you = True
+    if not found_debt_by_you:
+        debt_lines.append("    -")
 
-    debt_text = (
-        f"{t('summary.debts', context)}\n"
-        f"{t('summary.you_are_owed', context)}\n{owed_to_you_text}\n"
-        f"{t('summary.you_owe', context)}\n{owed_by_you_text}"
-    )
+    debt_text = "\n".join(debt_lines)
 
-    # Activity Periods
+    # 3. Activity Periods
     def format_period_line(period_data):
         income = period_data.get('income', {})
         expense = period_data.get('expense', {})
 
         income_parts = []
-        if income.get('USD', 0) > 0:
-            income_parts.append(f"{income['USD']:,.2f} USD")
-        if income.get('KHR', 0) > 0:
-            income_parts.append(f"{income['KHR']:,.0f} KHR")
+        for currency in currencies:
+            if income.get(currency, 0) > 0:
+                amount_format = ",.0f" if currency == 'KHR' else ",.2f"
+                income_parts.append(f"{income[currency]:{amount_format}} {currency}")
         income_str = ' & '.join(income_parts) if income_parts else "0"
 
         expense_parts = []
-        if expense.get('USD', 0) > 0:
-            expense_parts.append(f"{expense['USD']:,.2f} USD")
-        if expense.get('KHR', 0) > 0:
-            expense_parts.append(f"{expense['KHR']:,.0f} KHR")
+        for currency in currencies:
+            if expense.get(currency, 0) > 0:
+                amount_format = ",.0f" if currency == 'KHR' else ",.2f"
+                expense_parts.append(f"{expense[currency]:{amount_format}} {currency}")
         expense_str = ' & '.join(expense_parts) if expense_parts else "0"
 
         return (
@@ -100,18 +134,21 @@ def format_summary_message(summary_data,
             f"{t('summary.this_month', context)}\n"
             f"{format_period_line(periods.get('this_month', {}))}"
         )
-        this_month_net_text = t(
-            'summary.net',
-            context,
-            value=this_month_net,
-            emoji=net_emoji
-        )
 
         activity_text = (
             f"{t('summary.activity_header', context)}\n{today_text}\n"
-            f"{this_week_text}\n{last_week_text}\n{this_month_text}\n"
-            f"{this_month_net_text}"
+            f"{this_week_text}\n{last_week_text}\n{this_month_text}"
         )
+
+        # Only show Net USD if in dual mode
+        if mode == 'dual':
+            this_month_net_text = t(
+                'summary.net',
+                context,
+                value=this_month_net,
+                emoji=net_emoji
+            )
+            activity_text += f"\n{this_month_net_text}"
 
     return (
         f"{t('summary.status_header', context)}\n{balance_text}\n"
@@ -462,6 +499,7 @@ def _format_habits_message(data):
     """Formats the spending habits data into a readable string."""
     if not data:
         return "Could not analyze spending habits."
+
     day_text = "\n<b>📅 Spending by Day of Week:</b>\n"
     by_day = sorted(data.get('byDayOfWeek', []),
                     key=lambda x: x.get('total', 0), reverse=True)

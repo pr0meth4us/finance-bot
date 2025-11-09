@@ -10,90 +10,161 @@ from telegram.ext import (
 )
 
 import api_client
-import keyboards
-# from .common import start  <-- REMOVED TO FIX CIRCULAR IMPORT
 from utils.i18n import t
 
 # Conversation states
 (
+    ASK_CURRENCY_MODE,
     ASK_LANGUAGE,
+    ASK_NAME_EN,
+    ASK_NAME_KM,
+    ASK_SINGLE_CURRENCY,
     ASK_USD_BALANCE,
-    ASK_KHR_BALANCE
-) = range(3)
+    ASK_KHR_BALANCE,
+    ASK_SINGLE_BALANCE
+) = range(8)
 
 
 async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Starts the mandatory onboarding flow for new users.
-    This is typically triggered by the @authenticate_user decorator.
+    This is triggered by the @authenticate_user decorator.
     """
-    # --- THIS IS THE FIX ---
-    # The decorator already put the profile in context.user_data
-    # We must preserve it.
     user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
     context.user_data['user_profile'] = user_profile
-    # --- END FIX ---
+    context.user_data['onboarding_data'] = {}
 
-    # Since this is the first interaction, we don't know the language.
-    # We will ask in English, then update.
-    # A more advanced flow might show a language picker first.
     await (update.message or update.callback_query.message).reply_text(
         t("onboarding.welcome", context)
-        # For now, we skip language selection and default to 'en'
-        # reply_markup=keyboards.language_keyboard()
     )
-
-    # Skipping language selection for now
     await (update.message or update.callback_query.message).reply_text(
-        t("onboarding.ask_usd_balance", context)
+        t("onboarding.ask_mode", context)
     )
-    return ASK_USD_BALANCE
-    # return ASK_LANGUAGE # Enable this when language selection is active
+    return ASK_CURRENCY_MODE
+
+
+async def received_currency_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the '1' or '2' currency mode choice."""
+    choice = update.message.text.strip()
+    data = context.user_data['onboarding_data']
+
+    if choice == '1':
+        data['mode'] = 'single'
+        data['language'] = 'en'
+        await update.message.reply_text(t("onboarding.ask_name_en", context))
+        return ASK_NAME_EN
+
+    elif choice == '2':
+        data['mode'] = 'dual'
+        await update.message.reply_text(t("onboarding.ask_language", context))
+        return ASK_LANGUAGE
+
+    else:
+        await update.message.reply_text(t("onboarding.invalid_mode", context))
+        return ASK_CURRENCY_MODE
 
 
 async def received_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Handles language selection.
-    """
-    # query = update.callback_query
-    # await query.answer()
-    # lang = query.data.split(':')[-1]
+    """Handles language selection for dual-currency mode."""
+    choice = update.message.text.strip().lower()
+    data = context.user_data['onboarding_data']
 
-    # For now, just using text
-    lang = update.message.text
-    if lang not in ['en', 'km']:
-        await update.message.reply_text(
-            t("onboarding.ask_language_fallback", context)
-        )
+    if choice not in ['en', 'km']:
+        await update.message.reply_text(t("onboarding.invalid_language", context))
         return ASK_LANGUAGE
 
-    # user_id = context.user_data['user_profile']['_id']
-    # api_client.update_user_setting(user_id, 'language', lang)
-    context.user_data['user_profile']['settings']['language'] = lang
+    data['language'] = choice
+    context.user_data['user_profile']['settings']['language'] = choice
+
+    await update.message.reply_text(t("onboarding.ask_name_en", context))
+    return ASK_NAME_EN
+
+
+async def received_name_en(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles receiving the user's English name."""
+    data = context.user_data['onboarding_data']
+    data['name_en'] = update.message.text.strip()
+
+    if data['mode'] == 'single':
+        await update.message.reply_text(t("onboarding.ask_primary_currency", context))
+        return ASK_SINGLE_CURRENCY
+
+    elif data['mode'] == 'dual':
+        await update.message.reply_text(t("onboarding.ask_name_km", context))
+        return ASK_NAME_KM
+
+
+async def received_name_km(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles receiving the user's Khmer name (dual mode)."""
+    data = context.user_data['onboarding_data']
+    data['name_km'] = update.message.text.strip()
+    user_id = context.user_data['user_profile']['_id']
+
+    # Save mode, language, and names to DB
+    api_client.update_user_mode(
+        user_id,
+        mode=data['mode'],
+        language=data['language'],
+        name_en=data['name_en'],
+        name_km=data['name_km']
+    )
+
+    # Update local cache
+    context.user_data['user_profile']['name_en'] = data['name_en']
+    context.user_data['user_profile']['name_km'] = data['name_km']
+    context.user_data['user_profile']['settings']['currency_mode'] = data['mode']
 
     await update.message.reply_text(
-        t("onboarding.language_selected", context, lang=lang)
+        t("onboarding.ask_usd_balance", context, name=data['name_en'])
     )
     return ASK_USD_BALANCE
 
 
+async def received_single_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles receiving the primary currency (single mode)."""
+    data = context.user_data['onboarding_data']
+    data['primary_currency'] = update.message.text.strip().upper()
+    user_id = context.user_data['user_profile']['_id']
+
+    # Save mode, language, name, and currency to DB
+    api_client.update_user_mode(
+        user_id,
+        mode=data['mode'],
+        language=data['language'],
+        name_en=data['name_en'],
+        primary_currency=data['primary_currency']
+    )
+
+    # Update local cache
+    context.user_data['user_profile']['name_en'] = data['name_en']
+    context.user_data['user_profile']['settings']['currency_mode'] = data['mode']
+    context.user_data['user_profile']['settings']['primary_currency'] = data['primary_currency']
+
+    await update.message.reply_text(
+        t("onboarding.ask_single_balance", context,
+          name=data['name_en'], currency=data['primary_currency'])
+    )
+    return ASK_SINGLE_BALANCE
+
+
 async def received_usd_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles receiving the initial USD balance."""
+    """Handles receiving the initial USD balance (dual mode)."""
     try:
         amount = float(update.message.text)
         user_id = context.user_data['user_profile']['_id']
 
         api_client.update_initial_balance(user_id, 'USD', amount)
+        context.user_data['user_profile']['settings']['initial_balances']['USD'] = amount
 
         await update.message.reply_text(
-            t("onboarding.usd_balance_set", context, amount=amount)
+            t("onboarding.ask_khr_balance", context)
         )
         return ASK_KHR_BALANCE
 
     except (ValueError, TypeError):
         await update.message.reply_text(
-            t("onboarding.invalid_amount_usd", context)
+            t("onboarding.invalid_amount", context)
         )
         return ASK_USD_BALANCE
     except Exception as e:
@@ -102,24 +173,19 @@ async def received_usd_balance(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def received_khr_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles receiving the initial KHR balance and ends onboarding."""
+    """Handles receiving the initial KHR balance (dual mode) and ends onboarding."""
     try:
-        from .common import start  # <-- LOCAL IMPORT TO FIX CIRCULAR DEPENDENCY
+        from .common import start
 
         amount = float(update.message.text)
         user_id = context.user_data['user_profile']['_id']
 
         api_client.update_initial_balance(user_id, 'KHR', amount)
+        context.user_data['user_profile']['settings']['initial_balances']['KHR'] = amount
 
-        await update.message.reply_text(
-            t("onboarding.khr_balance_set", context, amount=amount)
-        )
-
-        # --- THIS IS THE FIX ---
         # Mark onboarding as complete in the DB and local cache
         api_client.complete_onboarding(user_id)
         context.user_data['user_profile']['onboarding_complete'] = True
-        # --- END FIX ---
 
         await update.message.reply_text(
             t("onboarding.setup_complete", context)
@@ -128,7 +194,7 @@ async def received_khr_balance(update: Update, context: ContextTypes.DEFAULT_TYP
 
     except (ValueError, TypeError):
         await update.message.reply_text(
-            t("onboarding.invalid_amount_khr", context)
+            t("onboarding.invalid_amount", context)
         )
         return ASK_KHR_BALANCE
     except Exception as e:
@@ -136,17 +202,65 @@ async def received_khr_balance(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
 
+async def received_single_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles receiving the initial balance (single mode) and ends onboarding."""
+    try:
+        from .common import start
+
+        amount = float(update.message.text)
+        user_id = context.user_data['user_profile']['_id']
+        currency = context.user_data['onboarding_data']['primary_currency']
+
+        api_client.update_initial_balance(user_id, currency, amount)
+        context.user_data['user_profile']['settings']['initial_balances'][currency] = amount
+
+        # Mark onboarding as complete in the DB and local cache
+        api_client.complete_onboarding(user_id)
+        context.user_data['user_profile']['onboarding_complete'] = True
+
+        await update.message.reply_text(
+            t("onboarding.setup_complete", context)
+        )
+        return await start(update, context)
+
+    except (ValueError, TypeError):
+        await update.message.reply_text(
+            t("onboarding.invalid_amount", context)
+        )
+        return ASK_SINGLE_BALANCE
+    except Exception as e:
+        await update.message.reply_text(t("common.error_generic", context, error=e))
+        return ConversationHandler.END
+
+
+async def cancel_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancels the onboarding process."""
+    await (update.message or update.callback_query.message).reply_text(
+        t("common.cancel_onboarding", context)
+    )
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
 onboarding_conversation_handler = ConversationHandler(
     entry_points=[
         # This handler is entered programmatically by the decorator
     ],
     states={
-        # ASK_LANGUAGE: [
-        #     CallbackQueryHandler(received_language, pattern='^lang:')
-        # ],
-        # Temp: Use text for language
+        ASK_CURRENCY_MODE: [MessageHandler(
+            filters.TEXT & ~filters.COMMAND, received_currency_mode
+        )],
         ASK_LANGUAGE: [MessageHandler(
             filters.TEXT & ~filters.COMMAND, received_language
+        )],
+        ASK_NAME_EN: [MessageHandler(
+            filters.TEXT & ~filters.COMMAND, received_name_en
+        )],
+        ASK_NAME_KM: [MessageHandler(
+            filters.TEXT & ~filters.COMMAND, received_name_km
+        )],
+        ASK_SINGLE_CURRENCY: [MessageHandler(
+            filters.TEXT & ~filters.COMMAND, received_single_currency
         )],
         ASK_USD_BALANCE: [MessageHandler(
             filters.TEXT & ~filters.COMMAND, received_usd_balance
@@ -154,8 +268,13 @@ onboarding_conversation_handler = ConversationHandler(
         ASK_KHR_BALANCE: [MessageHandler(
             filters.TEXT & ~filters.COMMAND, received_khr_balance
         )],
+        ASK_SINGLE_BALANCE: [MessageHandler(
+            filters.TEXT & ~filters.COMMAND, received_single_balance
+        )],
     },
-    fallbacks=[],
+    fallbacks=[
+        MessageHandler(filters.COMMAND, cancel_onboarding)
+    ],
     per_message=False
 )
 

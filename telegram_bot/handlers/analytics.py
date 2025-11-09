@@ -1,311 +1,476 @@
-# --- Start of modified file: telegram_bot/handlers/analytics.py ---
-
-from telegram import Update
-from telegram.ext import ContextTypes, ConversationHandler
-import keyboards
-import api_client
-from decorators import authenticate_user
-from datetime import datetime, timedelta
+# --- Start of modified file: web_service/app/analytics/routes.py ---
+"""
+Handles all analytics and report generation endpoints.
+All endpoints are multi-tenant and require a valid user_id.
+"""
+import io
+from flask import Blueprint, Response, request, jsonify
+from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
-from .helpers import (
-    _format_report_summary_message,
-    _create_income_expense_chart,
-    _create_expense_pie_chart,
-    _format_habits_message,
-    _create_spending_line_chart,
-    _create_csv_from_transactions  # <-- NEW IMPORT
-)
-from utils.i18n import t
+import matplotlib.pyplot as plt
+import re
+from app import get_db
+from app.utils.auth import get_user_id_from_request
+from app.utils.currency import get_live_usd_to_khr_rate
 
-(
-    CHOOSE_REPORT_PERIOD, REPORT_ASK_START_DATE, REPORT_ASK_END_DATE,
-    CHOOSE_HABITS_PERIOD
-) = range(4)
+analytics_bp = Blueprint('analytics', __name__, url_prefix='/analytics')
+
+FINANCIAL_TRANSACTION_CATEGORIES = [
+    'Loan Lent',
+    'Debt Repayment',
+    'Loan Received',
+    'Debt Settled',
+    'Initial Balance' # Kept for v1 data, but excluded from new reports
+]
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
-REPORT_PERIOD_REGEX = '^(Today|This Week|Last Week|This Month|Last Month|Custom Range)$'
+UTC_TZ = ZoneInfo("UTC")
 
 
-@authenticate_user
-async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the menu for selecting a report period."""
-    query = update.callback_query
-    await query.answer()
-
-    # --- THIS IS THE FIX ---
-    # Preserve the user_profile, clear everything else, then restore it.
-    user_profile = context.user_data.get('user_profile')
-    context.user_data.clear()
-    context.user_data['user_profile'] = user_profile
-    # --- END FIX ---
-
-    await query.edit_message_text(
-        t("analytics.report_ask_period", context),
-        reply_markup=keyboards.report_period_keyboard(context)
+def _get_user_financial_base(db, user_id):
+    """
+    Helper to get the user's initial balance in USD and their preferred rate.
+    """
+    user = db.users.find_one(
+        {'_id': user_id},
+        {'settings': 1}
     )
-    return CHOOSE_REPORT_PERIOD
+    if not user:
+        raise Exception("User not found")
+
+    settings = user.get('settings', {})
+
+    # Get initial balances
+    initial_balances = settings.get('initial_balances', {})
+    initial_usd = initial_balances.get('USD', 0)
+    initial_khr = initial_balances.get('KHR', 0)
+
+    # Get rate
+    rate_preference = settings.get('rate_preference', 'live')
+    rate = 4100.0
+    if rate_preference == 'fixed':
+        rate = settings.get('fixed_rate', 4100.0)
+    else:
+        rate = get_live_usd_to_khr_rate()
+
+    # Calculate total initial balance in USD
+    initial_balance_in_usd = initial_usd + (initial_khr / rate)
+
+    return initial_balance_in_usd, rate
 
 
-@authenticate_user
-async def process_report_choice(update: Update,
-                                context: ContextTypes.DEFAULT_TYPE):
-    """Handles standard period selection or transitions to custom date entry."""
-    query = update.callback_query
-    await query.answer()
-    period = query.data.replace('report_period_', '')
-
-    if period == "custom":
-        await query.edit_message_text(t("analytics.report_ask_start", context))
-        return REPORT_ASK_START_DATE
-
+def get_date_ranges_for_search():
+    """Helper for analytics endpoints to get UTC date ranges."""
     today = datetime.now(PHNOM_PENH_TZ).date()
-    end_of_last_month = today.replace(day=1) - timedelta(days=1)
-    start_of_last_month = end_of_last_month.replace(day=1)
-    date_ranges = {
-        "today": (today, today),
-        "this_week": (today - timedelta(days=today.weekday()),
-                      today - timedelta(days=today.weekday()) +
-                      timedelta(days=6)),
-        "last_week": (today - timedelta(days=today.weekday() + 7),
-                      today - timedelta(days=today.weekday() + 1)),
-        "this_month": (today.replace(day=1),
-                       (today.replace(day=28) +
-                        timedelta(days=4)).replace(day=1) -
-                       timedelta(days=1)),
-        "last_month": (start_of_last_month, end_of_last_month)
+    start_of_week = today - timedelta(days=today.weekday())
+    start_of_month = today.replace(day=1)
+    end_of_last_week = start_of_week - timedelta(days=1)
+    start_of_last_week = end_of_last_week - timedelta(days=6)
+
+    def create_utc_range(start_local, end_local):
+        aware_start = datetime.combine(start_local, time.min, tzinfo=PHNOM_PENH_TZ)
+        aware_end = datetime.combine(end_local, time.max, tzinfo=PHNOM_PENH_TZ)
+        return aware_start.astimezone(UTC_TZ), aware_end.astimezone(UTC_TZ)
+
+    return {
+        "today": create_utc_range(today, today),
+        "this_week": create_utc_range(start_of_week, start_of_week + timedelta(days=6)),
+        "last_week": create_utc_range(start_of_last_week, end_of_last_week),
+        "this_month": create_utc_range(start_of_month,
+                                       (start_of_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(
+                                           days=1))
     }
 
-    date_pair = date_ranges.get(period)
-    if date_pair:
-        start_date, end_date = date_pair
-        await _generate_report(update, context, start_date, end_date)
-    else:
-        await query.edit_message_text(
-            t("analytics.habits_invalid_period", context),
-            reply_markup=keyboards.main_menu_keyboard(context)
-        )
 
-    return ConversationHandler.END
+@analytics_bp.route('/search', methods=['POST'])
+def search_transactions():
+    """Performs an advanced search and sums up matching transactions for a user."""
+    params = request.json
+    db = get_db()
 
+    user_id, error = get_user_id_from_request()
+    if error: return error
 
-@authenticate_user
-async def received_report_start_date(update: Update,
-                                     context: ContextTypes.DEFAULT_TYPE):
-    """Receives and validates the custom start date."""
-    try:
-        start_date = datetime.strptime(update.message.text, "%Y-%m-%d").date()
-        context.user_data['report_start_date'] = start_date
-        await update.message.reply_text(
-            t("analytics.report_ask_end", context, date=start_date)
-        )
-        return REPORT_ASK_END_DATE
-    except ValueError:
-        await update.message.reply_text(
-            t("analytics.report_invalid_date", context)
-        )
-        return REPORT_ASK_START_DATE
+    match_stage = {'user_id': user_id}
 
+    date_filter = {}
+    if params.get('period'):
+        ranges = get_date_ranges_for_search()
+        if params['period'] in ranges:
+            start_utc, end_utc = ranges[params['period']]
+            date_filter['$gte'] = start_utc
+            date_filter['$lte'] = end_utc
+    elif params.get('start_date') and params.get('end_date'):
+        start_local = datetime.fromisoformat(params['start_date']).date()
+        end_local = datetime.fromisoformat(params['end_date']).date()
+        aware_start = datetime.combine(start_local, time.min, tzinfo=PHNOM_PENH_TZ)
+        aware_end = datetime.combine(end_local, time.max, tzinfo=PHNOM_PENH_TZ)
+        date_filter['$gte'] = aware_start.astimezone(UTC_TZ)
+        date_filter['$lte'] = aware_end.astimezone(UTC_TZ)
 
-@authenticate_user
-async def received_report_end_date(update: Update,
-                                   context: ContextTypes.DEFAULT_TYPE):
-    """Receives, validates end date, and generates the report."""
-    try:
-        end_date = datetime.strptime(update.message.text, "%Y-%m-%d").date()
-        start_date = context.user_data.get('report_start_date')
-        if not start_date or end_date < start_date:
-            await update.message.reply_text(
-                t("analytics.report_invalid_range", context)
-            )
-            return REPORT_ASK_END_DATE
-        await _generate_report(update, context, start_date, end_date)
-        return ConversationHandler.END
-    except ValueError:
-        await update.message.reply_text(
-            t("analytics.report_invalid_date", context)
-        )
-        return REPORT_ASK_END_DATE
-    finally:
-        context.user_data.pop('report_start_date', None)
-
-
-async def _generate_report(update: Update,
-                           context: ContextTypes.DEFAULT_TYPE,
-                           start_date, end_date):
-    """Shared logic to generate and send report summary and charts."""
-    chat_id = update.effective_chat.id
-    user_id = context.user_data['user_profile']['_id']
-
-    loading_text = t("analytics.report_generating", context,
-                     start_date=start_date, end_date=end_date)
-
-    loading_message = await context.bot.send_message(
-        chat_id=chat_id, text=loading_text
-    )
-    if update.callback_query:
-        await update.callback_query.message.delete()
-
-    report_data = api_client.get_detailed_report(user_id, start_date, end_date)
-    await loading_message.delete()
-
-    if report_data:
-        summary_message = _format_report_summary_message(report_data)
-        await context.bot.send_message(
-            chat_id=chat_id, text=summary_message, parse_mode='HTML'
-        )
-
-        if bar_chart := _create_income_expense_chart(
-                report_data, start_date, end_date):
-            await context.bot.send_photo(chat_id=chat_id, photo=bar_chart)
-        if line_chart := _create_spending_line_chart(
-                report_data, start_date, end_date):
-            await context.bot.send_photo(chat_id=chat_id, photo=line_chart)
-        if pie_chart := _create_expense_pie_chart(
-                report_data, start_date, end_date):
-            await context.bot.send_photo(chat_id=chat_id, photo=pie_chart)
-
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=t("analytics.report_success", context),
-            # --- MODIFICATION: Use new keyboard ---
-            reply_markup=keyboards.report_actions_keyboard(
-                start_date, end_date, context
-            )
-        )
-    else:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=t("analytics.report_fail", context),
-            reply_markup=keyboards.main_menu_keyboard(context)
-        )
-
-
-@authenticate_user
-async def habits_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays menu to choose a period for habits analysis."""
-    query = update.callback_query
-    await query.answer()
-
-    # --- THIS IS THE FIX ---
-    # Preserve the user_profile, clear everything else, then restore it.
-    user_profile = context.user_data.get('user_profile')
-    context.user_data.clear()
-    context.user_data['user_profile'] = user_profile
-    # --- END FIX ---
-
-    await query.edit_message_text(
-        t("analytics.habits_ask_period", context),
-        reply_markup=keyboards.report_period_keyboard(context)
-    )
-    return CHOOSE_HABITS_PERIOD
-
-
-@authenticate_user
-async def process_habits_choice(update: Update,
-                                context: ContextTypes.DEFAULT_TYPE):
-    """Generates and sends the habits report for the selected period."""
-    query = update.callback_query
-    await query.answer()
-    period = query.data.replace('report_period_', '')
-
-    if period == "custom":
-        await query.edit_message_text(
-            t("analytics.habits_no_custom", context),
-            reply_markup=keyboards.report_period_keyboard(context)
-        )
-        return CHOOSE_HABITS_PERIOD
-
-    today = datetime.now(PHNOM_PENH_TZ).date()
-    end_of_last_month = today.replace(day=1) - timedelta(days=1)
-    start_of_last_month = end_of_last_month.replace(day=1)
-    date_ranges = {
-        "today": (today, today),
-        "this_week": (today - timedelta(days=today.weekday()),
-                      today - timedelta(days=today.weekday()) +
-                      timedelta(days=6)),
-        "last_week": (today - timedelta(days=today.weekday() + 7),
-                      today - timedelta(days=today.weekday() + 1)),
-        "this_month": (today.replace(day=1),
-                       (today.replace(day=28) +
-                        timedelta(days=4)).replace(day=1) -
-                       timedelta(days=1)),
-        "last_month": (start_of_last_month, end_of_last_month)
-    }
-
-    date_pair = date_ranges.get(period)
-    if date_pair:
-        start_date, end_date = date_pair
-        await query.edit_message_text(
-            t("analytics.habits_generating", context)
-        )
-
-        user_id = context.user_data['user_profile']['_id']
-        habits_data = api_client.get_spending_habits(
-            user_id, start_date, end_date
-        )
-
-        if habits_data:
-            message = _format_habits_message(habits_data)
-            await query.edit_message_text(
-                text=message,
-                parse_mode='HTML',
-                reply_markup=keyboards.main_menu_keyboard(context)
-            )
+    if date_filter:
+        match_stage['timestamp'] = date_filter
+    if params.get('transaction_type'):
+        match_stage['type'] = params['transaction_type']
+    if params.get('categories'):
+        categories_regex = [re.compile(f'^{re.escape(c.strip())}$', re.IGNORECASE) for c in params['categories']]
+        match_stage['categoryId'] = {'$in': categories_regex}
+    if params.get('keywords'):
+        keywords = params['keywords']
+        keyword_logic = params.get('keyword_logic', 'OR').upper()
+        if keyword_logic == 'AND':
+            match_stage['$and'] = [{'description': re.compile(k, re.IGNORECASE)} for k in keywords]
         else:
-            await query.edit_message_text(
-                t("analytics.habits_fail", context),
-                reply_markup=keyboards.main_menu_keyboard(context)
-            )
-    else:
-        await query.edit_message_text(
-            t("analytics.habits_invalid_period", context),
-            reply_markup=keyboards.main_menu_keyboard(context)
-        )
+            regex_str = '|'.join([re.escape(k) for k in keywords])
+            match_stage['description'] = re.compile(regex_str, re.IGNORECASE)
 
-    return ConversationHandler.END
+    pipeline = []
+    if match_stage:
+        pipeline.append({'$match': match_stage})
+
+    pipeline.append({
+        '$group': {
+            '_id': '$currency',
+            'totalAmount': {'$sum': '$amount'},
+            'count': {'$sum': 1},
+            'minAmount': {'$min': '$amount'},
+            'maxAmount': {'$max': '$amount'},
+            'minDate': {'$min': '$timestamp'},
+            'maxDate': {'$max': '$timestamp'}
+        }
+    })
+
+    results = list(db.transactions.aggregate(pipeline))
+
+    if not results:
+        return jsonify({'total_count': 0, 'totals_by_currency': []})
+
+    overall_min_date = None
+    overall_max_date = None
+
+    summary = {
+        'total_count': 0,
+        'totals_by_currency': []
+    }
+
+    for res in results:
+        currency = res['_id']
+        count = res['count']
+        total = res['totalAmount']
+
+        if not overall_min_date or res['minDate'] < overall_min_date:
+            overall_min_date = res['minDate']
+        if not overall_max_date or res['maxDate'] > overall_max_date:
+            overall_max_date = res['maxDate']
+
+        summary['total_count'] += count
+        summary['totals_by_currency'].append({
+            'currency': currency,
+            'count': count,
+            'total': total,
+            'avg': total / count,
+            'min': res['minAmount'],
+            'max': res['maxAmount']
+        })
+
+    summary['earliest_log_utc'] = overall_min_date.isoformat() if overall_min_date else None
+    summary['latest_log_utc'] = overall_max_date.isoformat() if overall_max_date else None
+
+    return jsonify(summary)
 
 
-# --- NEW HANDLER FOR CSV EXPORT ---
-@authenticate_user
-async def download_report_csv(update: Update,
-                              context: ContextTypes.DEFAULT_TYPE):
-    """Handles the 'Download Report CSV' button press."""
-    query = update.callback_query
-    await query.answer(t("search.searching", context))
+@analytics_bp.route('/report/detailed', methods=['GET'])
+def get_detailed_report():
+    """Generates a detailed report for the authenticated user."""
+    db = get_db()
+
+    user_id, error = get_user_id_from_request()
+    if error: return error
+
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
 
     try:
-        user_id = context.user_data['user_profile']['_id']
-        _, start_date_str, end_date_str = query.data.split(':')
-        start_date = datetime.fromisoformat(start_date_str).date()
-        end_date = datetime.fromisoformat(end_date_str).date()
+        if start_date_str and end_date_str:
+            start_date_local_obj = datetime.fromisoformat(start_date_str).date()
+            end_date_local_obj = datetime.fromisoformat(end_date_str).date()
+            aware_start_local = datetime.combine(start_date_local_obj, time.min, tzinfo=PHNOM_PENH_TZ)
+            aware_end_local = datetime.combine(end_date_local_obj, time.max, tzinfo=PHNOM_PENH_TZ)
+            start_date_utc = aware_start_local.astimezone(UTC_TZ)
+            end_date_utc = aware_end_local.astimezone(UTC_TZ)
+        else:
+            end_date_utc = datetime.now(UTC_TZ)
+            start_date_utc = end_date_utc - timedelta(days=30)
+            start_date_local_obj = (end_date_utc - timedelta(days=30)).astimezone(PHNOM_PENH_TZ).date()
+            end_date_local_obj = end_date_utc.astimezone(PHNOM_PENH_TZ).date()
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
 
-        search_params = {
-            'start_date': start_date.isoformat(),
-            'end_date': end_date.isoformat()
-        }
-
-        # Use the existing search API to get all raw transactions
-        transactions = api_client.search_transactions_for_management(
-            search_params, user_id
-        )
-
-        if not transactions:
-            await query.message.reply_text(t("search.no_results", context))
-            return
-
-        # Generate CSV
-        csv_buffer = _create_csv_from_transactions(transactions)
-        file_name = f"report_{start_date.isoformat()}_to_{end_date.isoformat()}.csv"
-
-        await context.bot.send_document(
-            chat_id=update.effective_chat.id,
-            document=csv_buffer,
-            filename=file_name,
-            caption=f"Here is your transaction export for {start_date} to {end_date}."
-        )
-
+    # --- THIS IS THE FIX ---
+    try:
+        initial_balance_in_usd, user_rate = _get_user_financial_base(db, user_id)
     except Exception as e:
-        print(f"Error generating report CSV: {e}")
-        await query.message.reply_text(t("common.error_generic", context, error=str(e)))
+        return jsonify({"error": f"Could not load user settings: {str(e)}"}), 404
+    # --- END FIX ---
 
+    user_match = {'user_id': user_id}
+
+    add_fields_stage = {
+        '$addFields': {
+            'amount_in_usd': {
+                '$cond': {
+                    'if': {'$eq': ['$currency', 'USD']},
+                    'then': '$amount',
+                    'else': {
+                        '$let': {
+                            'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', user_rate]}}, # Use user's rate
+                            'in': {'$cond': {'if': {'$gt': ['$$rate', 0]}, 'then': {'$divide': ['$amount', '$$rate']},
+                                             'else': {'$divide': ['$amount', user_rate]}}}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    # --- Balance at Start Calculation ---
+    start_balance_pipeline = [
+        {'$match': {'timestamp': {'$lt': start_date_utc}, **user_match}},
+        add_fields_stage,
+        {'$group': {'_id': '$type', 'totalUSD': {'$sum': '$amount_in_usd'}}}
+    ]
+    start_balance_data = list(db.transactions.aggregate(start_balance_pipeline))
+    start_income = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'income'), 0)
+    start_expense = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'expense'), 0)
+
+    # --- THIS IS THE FIX ---
+    # The starting balance is the Initial Balance + all transactions before the start date
+    balance_at_start_usd = initial_balance_in_usd + start_income - start_expense
+    # --- END FIX ---
+
+    # --- Pipelines for the selected period ---
+    date_range_match = {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc}}
+
+    # Operational data (Exclude financial categories)
+    operational_pipeline = [
+        {'$match': {**date_range_match, 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
+        add_fields_stage,
+        {'$group': {'_id': {'type': '$type', 'category': '$categoryId'}, 'total': {'$sum': '$amount_in_usd'}}},
+        {'$sort': {'total': -1}}
+    ]
+
+    # Financial data
+    financial_pipeline = [
+        {'$match': {**date_range_match, 'categoryId': {'$in': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
+        add_fields_stage,
+        {'$group': {'_id': '$categoryId', 'total': {'$sum': '$amount_in_usd'}}}
+    ]
+
+    # Total cash flow (Used for calculating end balance correctly)
+    total_flow_pipeline = [
+        {'$match': {**date_range_match, **user_match}},
+        add_fields_stage,
+        {'$group': {'_id': '$type', 'totalUSD': {'$sum': '$amount_in_usd'}}}
+    ]
+
+    # Spending Over Time
+    spending_over_time_pipeline = [
+        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
+        add_fields_stage,
+        {
+            '$project': {
+                'date': {'$dateToString': {'format': '%Y-%m-%d', 'date': '$timestamp', 'timezone': 'Asia/Phnom_Penh'}},
+                'amount_in_usd': '$amount_in_usd'
+            }
+        },
+        {'$group': {'_id': '$date', 'total_spent_usd': {'$sum': '$amount_in_usd'}}},
+        {'$sort': {'_id': 1}},
+        {'$project': {'_id': 0, 'date': '$_id', 'total_spent_usd': '$total_spent_usd'}}
+    ]
+
+    # Daily Expense Stats
+    daily_stats_pipeline = [
+        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
+        add_fields_stage,
+        {
+            '$group': {
+                '_id': {'$dateToString': {'format': '%Y-%m-%d', 'date': '$timestamp', 'timezone': 'Asia/Phnom_Penh'}},
+                'total_spent_usd': {'$sum': '$amount_in_usd'}
+            }
+        },
+        {'$sort': {'total_spent_usd': -1}},
+    ]
+
+    # Top Expense Item
+    top_expense_pipeline = [
+        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
+        add_fields_stage,
+        {'$sort': {'amount_in_usd': -1}},
+        {'$limit': 1},
+        {
+            '$project': {
+                '_id': 0,
+                'description': '$description',
+                'category': '$categoryId',
+                'amount_usd': '$amount_in_usd',
+                'date': {'$dateToString': {'format': '%Y-%m-%d', 'date': '$timestamp', 'timezone': 'Asia/Phnom_Penh'}}
+            }
+        }
+    ]
+
+    # --- Execute All Pipelines ---
+    operational_data = list(db.transactions.aggregate(operational_pipeline))
+    financial_data = list(db.transactions.aggregate(financial_pipeline))
+    total_flow_data = list(db.transactions.aggregate(total_flow_pipeline))
+    spending_over_time_data = list(db.transactions.aggregate(spending_over_time_pipeline))
+    daily_stats_data = list(db.transactions.aggregate(daily_stats_pipeline))
+    top_expense_data = list(db.transactions.aggregate(top_expense_pipeline))
+
+    # --- Assemble Report ---
+    report = {
+        "startDate": start_date_local_obj.isoformat(),
+        "endDate": end_date_local_obj.isoformat(),
+        "summary": {
+            "totalIncomeUSD": 0, "totalExpenseUSD": 0, "netSavingsUSD": 0,
+            "balanceAtStartUSD": balance_at_start_usd, "balanceAtEndUSD": 0
+        },
+        "financialSummary": {"totalLentUSD": 0, "totalBorrowedUSD": 0, "totalRepaidToYouUSD": 0,
+                             "totalYouRepaidUSD": 0},
+        "incomeBreakdown": [],
+        "expenseBreakdown": [],
+        "spendingOverTime": spending_over_time_data,
+        "expenseInsights": {
+            "topExpenseItem": top_expense_data[0] if top_expense_data else None,
+            "mostExpensiveDay": daily_stats_data[0] if daily_stats_data else None,
+            "leastExpensiveDay": daily_stats_data[-1] if daily_stats_data and (len(daily_stats_data) > 1 or daily_stats_data[0]['total_spent_usd'] > 0) else None
+        }
+    }
+
+    # Populate Operational Summary
+    for item in operational_data:
+        if item['_id']['type'] == 'income':
+            report['summary']['totalIncomeUSD'] += item['total']
+            report['incomeBreakdown'].append({'category': item['_id']['category'], 'totalUSD': item['total']})
+        elif item['_id']['type'] == 'expense':
+            report['summary']['totalExpenseUSD'] += item['total']
+            report['expenseBreakdown'].append({'category': item['_id']['category'], 'totalUSD': item['total']})
+    report['summary']['netSavingsUSD'] = report['summary']['totalIncomeUSD'] - report['summary']['totalExpenseUSD']
+
+    # Populate Financial Summary
+    for item in financial_data:
+        category_map = {
+            'Loan Lent': 'totalLentUSD', 'Loan Received': 'totalBorrowedUSD',
+            'Debt Settled': 'totalRepaidToYouUSD', 'Debt Repayment': 'totalYouRepaidUSD'
+        }
+        if item['_id'] in category_map:
+            report['financialSummary'][category_map[item['_id']]] += item['total']
+
+    # Calculate correct Ending Balance
+    total_income_in_period = next((item['totalUSD'] for item in total_flow_data if item['_id'] == 'income'), 0)
+    total_expense_in_period = next((item['totalUSD'] for item in total_flow_data if item['_id'] == 'expense'), 0)
+    report['summary']['balanceAtEndUSD'] = balance_at_start_usd + total_income_in_period - total_expense_in_period
+
+    return jsonify(report)
+
+
+@analytics_bp.route('/habits', methods=['GET'])
+def get_spending_habits():
+    """Analyzes spending habits for the authenticated user."""
+    db = get_db()
+
+    user_id, error = get_user_id_from_request()
+    if error: return error
+
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+
+    try:
+        if start_date_str and end_date_str:
+            start_date_local_obj = datetime.fromisoformat(start_date_str).date()
+            end_date_local_obj = datetime.fromisoformat(end_date_str).date()
+            aware_start_local = datetime.combine(start_date_local_obj, time.min, tzinfo=PHNOM_PENH_TZ)
+            aware_end_local = datetime.combine(end_date_local_obj, time.max, tzinfo=PHNOM_PENH_TZ)
+            start_date_utc = aware_start_local.astimezone(UTC_TZ)
+            end_date_utc = aware_end_local.astimezone(UTC_TZ)
+        else:
+            end_date_utc = datetime.now(UTC_TZ)
+            start_date_utc = end_date_utc - timedelta(days=30)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid date format."}), 400
+
+    try:
+        _, user_rate = _get_user_financial_base(db, user_id)
+    except Exception as e:
+        return jsonify({"error": f"Could not load user settings: {str(e)}"}), 404
+
+    user_match = {'user_id': user_id}
+
+    add_fields_stage = {
+        '$addFields': {
+            'amount_in_usd': {
+                '$cond': {
+                    'if': {'$eq': ['$currency', 'USD']},
+                    'then': '$amount',
+                    'else': {
+                        '$let': {
+                            'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', user_rate]}},
+                            'in': {'$cond': {'if': {'$gt': ['$$rate', 0]}, 'then': {'$divide': ['$amount', '$$rate']},
+                                             'else': {'$divide': ['$amount', user_rate]}}}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    day_of_week_pipeline = [
+        {'$match': {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc}, 'type': 'expense', **user_match}},
+        add_fields_stage,
+        {'$group': {
+            '_id': {'$dayOfWeek': {'date': '$timestamp', 'timezone': 'Asia/Phnom_Penh'}},
+            'totalAmount': {'$sum': '$amount_in_usd'}
+        }},
+        {'$sort': {'_id': 1}},
+        {'$project': {
+            '_id': 0,
+            'day': {'$switch': {'branches': [
+                {'case': {'$eq': ["$_id", 1]}, 'then': 'Sunday'},
+                {'case': {'$eq': ["$_id", 2]}, 'then': 'Monday'},
+                {'case': {'$eq': ["$_id", 3]}, 'then': 'Tuesday'},
+                {'case': {'$eq': ["$_id", 4]}, 'then': 'Wednesday'},
+                {'case': {'$eq': ["$_id", 5]}, 'then': 'Thursday'},
+                {'case': {'$eq': ["$_id", 6]}, 'then': 'Friday'},
+                {'case': {'$eq': ["$_id", 7]}, 'then': 'Saturday'}
+            ]}},
+            'total': '$totalAmount'
+        }}
+    ]
+
+    keywords_pipeline = [
+        {'$match': {
+            'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc},
+            'type': 'expense',
+            'description': {'$exists': True, '$ne': ''},
+            **user_match
+        }},
+        {'$group': {
+            '_id': {'category': '$categoryId', 'keyword': {'$toLower': '$description'}},
+            'count': {'$sum': 1}
+        }},
+        {'$sort': {'count': -1}},
+        {'$group': {
+            '_id': '$_id.category',
+            'topKeywordsWithCount': {'$push': {'keyword': '$_id.keyword', 'count': '$count'}}
+        }},
+        {'$project': {
+            '_id': 0, 'category': '$_id',
+            'topKeywords': {'$slice': ['$topKeywordsWithCount.keyword', 3]}
+        }}
+    ]
+
+    habits = {
+        'byDayOfWeek': list(db.transactions.aggregate(day_of_week_pipeline)),
+        'keywordsByCategory': list(db.transactions.aggregate(keywords_pipeline))
+    }
+    return jsonify(habits)
 # --- End of modified file ---

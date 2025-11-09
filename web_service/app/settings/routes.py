@@ -19,11 +19,11 @@ def get_user_settings():
     if error:
         return error
 
-    user = db.users.find_one({'_id': user_id}, {'_id': 0, 'settings': 1})
+    user = db.users.find_one({'_id': user_id}, {'_id': 0, 'settings': 1, 'name_en': 1, 'name_km': 1})
     if not user:
         return jsonify({'error': 'User not found'}), 404
 
-    return jsonify(user.get('settings', {}))
+    return jsonify(user)
 
 
 @settings_bp.route('/balance', methods=['POST'])
@@ -40,8 +40,6 @@ def update_initial_balance():
 
     try:
         currency = str(data['currency']).upper()
-        if currency not in ['USD', 'KHR']:
-            raise ValueError("Invalid currency")
         amount = float(data['amount'])
     except (ValueError, TypeError):
         return jsonify({'error': 'Invalid currency or amount format'}), 400
@@ -185,12 +183,10 @@ def get_khr_rate():
     return jsonify({'rate': live_rate, 'source': 'live'})
 
 
-# --- NEW ENDPOINT ---
 @settings_bp.route('/mode', methods=['POST'])
-def update_currency_mode():
+def update_user_mode():
     """
-    Sets the user's currency mode (and language if 'single').
-    This is used during onboarding.
+    Sets the user's currency mode, language, and names during onboarding.
     """
     db = get_db()
     user_id, error = get_user_id_from_request()
@@ -199,20 +195,38 @@ def update_currency_mode():
 
     data = request.json
     mode = data.get('mode')
-    language = data.get('language')  # Optional language
+    name_en = data.get('name_en')
 
-    if mode not in ['single', 'dual']:
+    if not mode or mode not in ['single', 'dual']:
         return jsonify({'error': 'Invalid mode. Must be "single" or "dual".'}), 400
 
+    if not name_en:
+        return jsonify({'error': 'name_en is required.'}), 400
+
     update_payload = {
-        'settings.currency_mode': mode
+        'settings.currency_mode': mode,
+        'name_en': name_en
     }
 
-    # As requested, if mode is "single", force language to "en"
     if mode == 'single':
+        primary_currency = data.get('primary_currency')
+        if not primary_currency:
+            return jsonify({'error': 'primary_currency is required for single mode.'}), 400
+
         update_payload['settings.language'] = 'en'
-    elif language:  # If dual, we can set the language they chose
+        update_payload['settings.primary_currency'] = primary_currency.upper()
+
+    elif mode == 'dual':
+        language = data.get('language')
+        name_km = data.get('name_km')
+        if not language or language not in ['en', 'km']:
+            return jsonify({'error': 'Invalid language for dual mode.'}), 400
+        if not name_km:
+            return jsonify({'error': 'name_km is required for dual mode.'}), 400
+
         update_payload['settings.language'] = language
+        update_payload['name_km'] = name_km
+        update_payload['settings.primary_currency'] = 'USD' # Default for dual
 
     result = db.users.update_one(
         {'_id': user_id},
@@ -222,11 +236,9 @@ def update_currency_mode():
     if result.matched_count == 0:
         return jsonify({'error': 'User not found'}), 404
 
-    return jsonify({'message': f'Currency mode set to {mode}.'})
-# --- END NEW ENDPOINT ---
+    return jsonify({'message': f'User mode set to {mode}.'})
 
 
-# --- NEW ENDPOINT ---
 @settings_bp.route('/complete_onboarding', methods=['POST'])
 def complete_onboarding():
     """Marks the user's onboarding as complete."""
@@ -244,6 +256,3 @@ def complete_onboarding():
         return jsonify({'error': 'User not found'}), 404
 
     return jsonify({'message': 'Onboarding complete.'})
-# --- END NEW ENDPOINT ---
-
-# --- End of file ---

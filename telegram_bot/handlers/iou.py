@@ -12,10 +12,11 @@ from .helpers import (
     _format_debt_analysis_message,
     _create_debt_overview_pie,
     _create_debt_concentration_bar,
-    _create_csv_from_debts  # <-- NEW IMPORT
+    _create_csv_from_debts
 )
-from .command_handler import parse_amount_and_currency
+from .command_handler import parse_amount_and_currency_for_mode
 from utils.i18n import t
+import re
 
 # Conversation states
 (
@@ -27,21 +28,36 @@ from utils.i18n import t
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
 
+def _get_user_settings_for_iou(context: ContextTypes.DEFAULT_TYPE):
+    """Helper to get currency mode and primary currency."""
+    profile = context.user_data.get('user_profile', {})
+    settings = profile.get('settings', {})
+    mode = settings.get('currency_mode', 'dual')
+
+    if mode == 'single':
+        primary_currency = settings.get('primary_currency', 'USD')
+        return mode, (primary_currency,)
+
+    return 'dual', ('USD', 'KHR')
+
+
 def _format_debt_details(debt, context: ContextTypes.DEFAULT_TYPE):
     """Helper to format the full details of a debt, including repayments."""
     direction = t("iou.debt_direction_lent", context) if debt['type'] == 'lent' else t("iou.debt_direction_borrowed", context)
     purpose_text = t("iou.debt_purpose", context, purpose=debt['purpose']) if debt.get('purpose') else ""
     created_date = datetime.fromisoformat(debt['created_at'].replace('Z', '+00:00')).astimezone(PHNOM_PENH_TZ).strftime(
         '%d %b %Y, %I:%M %p')
-    amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
+
+    currency = debt.get('currency', 'USD')
+    amount_format = ",.0f" if currency == 'KHR' else ",.2f"
 
     text_lines = [
         t("iou.debt_details_header", context, status=debt['status'].title()),
         t("iou.debt_person", context, person=debt['person'], direction=direction),
         t("iou.debt_created", context, date=created_date),
         purpose_text,
-        t("iou.debt_original", context, amount=f"{debt['originalAmount']:{amount_format}}", currency=debt['currency']),
-        t("iou.debt_remaining", context, amount=f"{debt['remainingAmount']:{amount_format}}", currency=debt['currency'])
+        t("iou.debt_original", context, amount=f"{debt['originalAmount']:{amount_format}}", currency=currency),
+        t("iou.debt_remaining", context, amount=f"{debt['remainingAmount']:{amount_format}}", currency=currency)
     ]
 
     repayments = debt.get('repayments', [])
@@ -49,7 +65,7 @@ def _format_debt_details(debt, context: ContextTypes.DEFAULT_TYPE):
         text_lines.append(t("iou.debt_repayments", context))
         for rep in repayments:
             rep_date = datetime.fromisoformat(rep['date'].replace('Z', '+00:00')).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y')
-            text_lines.append(t("iou.debt_repayment_item", context, amount=f"{rep['amount']:{amount_format}}", currency=debt['currency'], date=rep_date))
+            text_lines.append(t("iou.debt_repayment_item", context, amount=f"{rep['amount']:{amount_format}}", currency=currency, date=rep_date))
 
     return "\n".join(text_lines)
 
@@ -58,32 +74,37 @@ def _format_person_ledger(person_debts, context: ContextTypes.DEFAULT_TYPE, is_s
     """Formats all debts and repayments for one person into a single chronological list."""
 
     if not person_debts:
-        return t("iou.person_fail", context, person="this person")  # Fallback text
+        return t("iou.person_fail", context, person="this person")
 
-    ledger_items = []  # (datetime_obj, text_string, currency)
-    total_remaining_usd = 0
-    total_remaining_khr = 0
+    mode, currencies = _get_user_settings_for_iou(context)
+    ledger_items = []
+
+    totals_remaining = {curr: 0 for curr in currencies}
 
     for debt in person_debts:
         created_dt = datetime.fromisoformat(debt['created_at'].replace('Z', '+00:00'))
-        amount_format = ",.0f" if debt['currency'] == 'KHR' else ",.2f"
+        currency = debt.get('currency', 'USD')
 
-        if debt['currency'] == 'USD':
-            total_remaining_usd += debt['remainingAmount']
-        else:
-            total_remaining_khr += debt['remainingAmount']
+        # Only process debts that match the user's currency mode
+        if currency not in currencies:
+            continue
+
+        amount_format = ",.0f" if currency == 'KHR' else ",.2f"
+
+        if currency in totals_remaining:
+            totals_remaining[currency] += debt['remainingAmount']
 
         purpose = debt.get('purpose') or "No purpose"
         amount = debt['originalAmount']
         status_icon = "✅" if debt['status'] == 'settled' else ("❌" if debt['status'] == 'canceled' else "🔹")
 
-        debt_text = f"{status_icon} <b>{amount:{amount_format}} {debt['currency']}</b> ({purpose})"
-        ledger_items.append((created_dt, debt_text, debt['currency']))
+        debt_text = f"{status_icon} <b>{amount:{amount_format}} {currency}</b> ({purpose})"
+        ledger_items.append((created_dt, debt_text, currency))
 
         for rep in debt.get('repayments', []):
             rep_dt = datetime.fromisoformat(rep['date'].replace('Z', '+00:00'))
-            rep_text = f"  <i>- Repaid {rep['amount']:{amount_format}} {debt['currency']}</i>"
-            ledger_items.append((rep_dt, rep_text, debt['currency']))
+            rep_text = f"  <i>- Repaid {rep['amount']:{amount_format}} {currency}</i>"
+            ledger_items.append((rep_dt, rep_text, currency))
 
     ledger_items.sort(key=lambda x: x[0])
 
@@ -93,12 +114,25 @@ def _format_person_ledger(person_debts, context: ContextTypes.DEFAULT_TYPE, is_s
 
     if not is_settled:
         header_lines = [t("iou.ledger_total_remaining", context)]
-        if total_remaining_usd > 0:
-            header_lines.append(f"  💵 {total_remaining_usd:,.2f} USD")
-        if total_remaining_khr > 0:
-            header_lines.append(f"  ៛ {total_remaining_khr:,.0f} KHR")
-        if total_remaining_usd == 0 and total_remaining_khr == 0:
+        found_remaining = False
+
+        if mode == 'dual':
+            if totals_remaining.get('USD', 0) > 0:
+                header_lines.append(f"  💵 {totals_remaining['USD']:,.2f} USD")
+                found_remaining = True
+            if totals_remaining.get('KHR', 0) > 0:
+                header_lines.append(f"  ៛ {totals_remaining['KHR']:,.0f} KHR")
+                found_remaining = True
+        else:
+            currency = currencies[0]
+            if totals_remaining.get(currency, 0) > 0:
+                amount_format = ",.0f" if currency == 'KHR' else ",.2f"
+                header_lines.append(f"  <b>{totals_remaining[currency]:{amount_format}} {currency}</b>")
+                found_remaining = True
+
+        if not found_remaining:
             header_lines.append(t("iou.ledger_none", context))
+
         ledger_lines.append("\n".join(header_lines) + "\n")
 
     ledger_lines.append(t("iou.ledger_header", context))
@@ -131,10 +165,8 @@ async def iou_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # --- MODIFICATION: Get user_id and pass to API ---
     user_id = context.user_data['user_profile']['_id']
     grouped_debts = api_client.get_open_debts(user_id)
-    # ---
 
     text = t("iou.view_header_open", context)
     keyboard = keyboards.iou_list_keyboard(grouped_debts, context, is_settled=False)
@@ -150,10 +182,8 @@ async def iou_view_settled(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # --- MODIFICATION: Get user_id and pass to API ---
     user_id = context.user_data['user_profile']['_id']
     grouped_debts = api_client.get_settled_debts_grouped(user_id)
-    # ---
 
     text = t("iou.view_header_settled", context)
     keyboard = keyboards.iou_list_keyboard(grouped_debts, context, is_settled=True)
@@ -170,10 +200,8 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     _, _, _, person_name = query.data.split(':')
 
-    # --- MODIFICATION: Get user_id and pass to API ---
     user_id = context.user_data['user_profile']['_id']
     person_debts = api_client.get_all_debts_by_person(person_name, user_id)
-    # ---
 
     if not person_debts:
         await query.edit_message_text(
@@ -202,10 +230,8 @@ async def iou_person_detail_settled(update: Update, context: ContextTypes.DEFAUL
     await query.answer()
     _, _, _, person_name = query.data.split(':')
 
-    # --- MODIFICATION: Get user_id and pass to API ---
     user_id = context.user_data['user_profile']['_id']
     person_debts = api_client.get_all_settled_debts_by_person(person_name, user_id)
-    # ---
 
     if not person_debts:
         await query.edit_message_text(
@@ -235,13 +261,11 @@ async def iou_manage_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _, _, _, person_name, debt_type, is_settled_str = query.data.split(':')
     is_settled = is_settled_str == 'True'
 
-    # --- MODIFICATION: Get user_id and pass to API ---
     user_id = context.user_data['user_profile']['_id']
     if is_settled:
         person_debts = api_client.get_all_settled_debts_by_person(person_name, user_id)
     else:
         person_debts = api_client.get_all_debts_by_person(person_name, user_id)
-    # ---
 
     if not person_debts:
         await query.edit_message_text(
@@ -264,10 +288,8 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _, _, debt_id, person_name, is_settled_str = query.data.split(':')
     is_settled = is_settled_str == 'True'
 
-    # --- MODIFICATION: Get user_id and pass to API ---
     user_id = context.user_data['user_profile']['_id']
     debt = api_client.get_debt_details(debt_id, user_id)
-    # ---
 
     if not debt:
         await query.edit_message_text(
@@ -288,10 +310,8 @@ async def debt_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer(t("iou.analysis_loading", context))
     chat_id = update.effective_chat.id
 
-    # --- MODIFICATION: Get user_id and pass to API ---
     user_id = context.user_data['user_profile']['_id']
     analysis_data = api_client.get_debt_analysis(user_id)
-    # ---
 
     if not analysis_data:
         await query.edit_message_text(
@@ -304,7 +324,6 @@ async def debt_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(
         text=final_text,
         parse_mode='HTML',
-        # --- MODIFICATION: Use new keyboard ---
         reply_markup=keyboards.debt_analysis_actions_keyboard(context)
     )
 
@@ -324,15 +343,12 @@ async def download_debt_analysis_csv(update: Update,
 
     try:
         user_id = context.user_data['user_profile']['_id']
-
-        # Use the new export API
         debts = api_client.get_open_debts_export(user_id)
 
         if not debts:
             await query.message.reply_text(t("iou.view_no_open", context))
             return
 
-        # Generate CSV
         csv_buffer = _create_csv_from_debts(debts)
         file_name = f"open_debts_export_{datetime.now(PHNOM_PENH_TZ).strftime('%Y%m%d')}.csv"
 
@@ -355,11 +371,9 @@ async def iou_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # --- THIS IS THE FIX ---
     user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
     context.user_data['user_profile'] = user_profile
-    # --- END FIX ---
 
     context.user_data['iou_type'] = 'lent' if query.data == 'iou_lent' else 'borrowed'
     await query.message.reply_text(
@@ -414,26 +428,41 @@ async def iou_received_person(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def iou_received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives IOU amount, parses it, and asks for purpose or currency."""
     try:
-        amount_str = update.message.text
-        amount, currency = parse_amount_and_currency(amount_str)
-        context.user_data['iou_amount'] = amount
-        context.user_data['iou_currency'] = currency
+        mode, currencies = _get_user_settings_for_iou(context)
+        primary_currency = currencies[0] if mode == 'single' else 'USD'
 
-        if currency in ['USD', 'KHR']:
-            amount_display = f"{amount:,.0f} {currency}" if currency == 'KHR' else f"${amount:,.2f}"
+        amount_str = update.message.text
+        amount, currency, is_ambiguous = parse_amount_and_currency_for_mode(
+            amount_str, mode, primary_currency
+        )
+
+        context.user_data['iou_amount'] = amount
+
+        if mode == 'single' or not is_ambiguous:
+            # Single mode OR Dual mode with explicit currency (e.g., "10khr")
+            context.user_data['iou_currency'] = currency
+
+            if currency == 'KHR':
+                amount_display = f"{amount:,.0f} {currency}"
+            else:
+                amount_display = f"{amount:,.2f} {currency}"
+
             await update.message.reply_text(
                 t("iou.ask_purpose", context, amount_display=amount_display),
                 parse_mode='HTML'
             )
             return IOU_PURPOSE
 
-        # Fallback
-        await update.message.reply_text(
-            t("iou.ask_currency", context),
-            reply_markup=keyboards.currency_keyboard(context)
-        )
-        return IOU_CURRENCY
+        else:
+            # Dual mode and ambiguous (e.g., "10")
+            await update.message.reply_text(
+                t("iou.ask_currency", context),
+                reply_markup=keyboards.currency_keyboard(context)
+            )
+            return IOU_CURRENCY
+
     except ValueError:
         await update.message.reply_text(t("iou.invalid_amount", context))
         return IOU_AMOUNT
@@ -486,11 +515,9 @@ async def repay_lump_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # --- THIS IS THE FIX ---
     user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
     context.user_data['user_profile'] = user_profile
-    # --- END FIX ---
 
     _, _, person, debt_type = query.data.split(':')
     context.user_data.update({
@@ -509,8 +536,18 @@ async def received_lump_repayment_amount(update: Update, context: ContextTypes.D
     """Receives and processes the lump-sum repayment amount."""
     try:
         user_id = context.user_data['user_profile']['_id']
+        mode, currencies = _get_user_settings_for_iou(context)
+        primary_currency = currencies[0] if mode == 'single' else 'USD'
+
         amount_str = update.message.text
-        amount, currency = parse_amount_and_currency(amount_str)
+        # Use the mode-aware parser. It will auto-select currency in single-mode.
+        amount, currency, is_ambiguous = parse_amount_and_currency_for_mode(
+            amount_str, mode, primary_currency
+        )
+
+        if is_ambiguous:
+            # Default ambiguous repayments to USD in dual mode
+            currency = 'USD'
 
         person = context.user_data['lump_repay_person']
         debt_type = context.user_data['lump_repay_debt_type']
@@ -599,11 +636,9 @@ async def iou_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # --- THIS IS THE FIX ---
     user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
     context.user_data['user_profile'] = user_profile
-    # --- END FIX ---
 
     _, _, field, debt_id = query.data.split(':')
 

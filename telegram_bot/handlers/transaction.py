@@ -10,23 +10,70 @@ from telegram.ext import (
 )
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
-
+import re
 import api_client
 import keyboards
 from .common import start, cancel
 from decorators import authenticate_user
-from utils.i18n import t  # <-- THIS IS THE FIX
-from .command_handler import parse_amount_and_currency
+from utils.i18n import t
 
 # Conversation states
 (
     AMOUNT, CURRENCY, CATEGORY, CUSTOM_CATEGORY, ASK_REMARK, REMARK,
     FORGOT_DATE, FORGOT_CUSTOM_DATE, FORGOT_TYPE,
     EDIT_CHOOSE_FIELD, EDIT_GET_NEW_VALUE, EDIT_GET_NEW_CATEGORY,
-    EDIT_GET_CUSTOM_CATEGORY, EDIT_GET_NEW_DATE
-) = range(14)
+    EDIT_GET_CUSTOM_CATEGORY, EDIT_GET_NEW_DATE, EDIT_GET_NEW_CURRENCY
+) = range(15)
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
+
+
+def _get_user_settings_for_tx(context: ContextTypes.DEFAULT_TYPE):
+    """Helper to get currency mode and primary currency."""
+    profile = context.user_data.get('user_profile', {})
+    settings = profile.get('settings', {})
+    mode = settings.get('currency_mode', 'dual')
+
+    if mode == 'single':
+        primary_currency = settings.get('primary_currency', 'USD')
+        return mode, (primary_currency,)
+
+    return 'dual', ('USD', 'KHR')
+
+
+def parse_amount_and_currency_for_mode(amount_str: str, mode: str, primary_currency: str):
+    """
+    Parses an amount string based on the user's currency mode.
+    Returns (amount, currency, is_ambiguous)
+    """
+    amount_str = amount_str.lower().strip()
+
+    if mode == 'single':
+        try:
+            # In single mode, just strip all non-numeric characters
+            amount_val = float(re.sub(r"[^0-9.]", "", amount_str))
+            return amount_val, primary_currency, False
+        except ValueError:
+            raise ValueError("Invalid amount for single currency mode")
+
+    # Dual-currency mode logic
+    try:
+        if 'khr' in amount_str:
+            amount_val = float(amount_str.replace('khr', '').strip())
+            return amount_val, 'KHR', False
+
+        # Check if it's just a number (ambiguous)
+        amount_val = float(amount_str)
+        return amount_val, None, True # Ambiguous, default to USD but ask
+
+    except ValueError:
+        # Check if it has 'usd' or '$'
+        amount_val_str = re.sub(r"[^0-9.]", "", amount_str)
+        if amount_val_str:
+            amount_val = float(amount_val_str)
+            return amount_val, 'USD', False
+
+        raise ValueError("Invalid amount for dual currency mode")
 
 
 # --- Add Transaction Flow ---
@@ -38,11 +85,9 @@ async def add_transaction_start(update: Update,
     query = update.callback_query
     await query.answer()
 
-    # --- THIS IS THE FIX ---
     user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
     context.user_data['user_profile'] = user_profile
-    # --- END FIX ---
 
     tx_type = 'expense' if query.data == 'add_expense' else 'income'
     context.user_data['tx_type'] = tx_type
@@ -54,36 +99,56 @@ async def add_transaction_start(update: Update,
 
 @authenticate_user
 async def received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receives amount, parses it, and asks for the category."""
+    """Receives amount, parses it, and asks for category or currency."""
     try:
+        mode, currencies = _get_user_settings_for_tx(context)
+        primary_currency = currencies[0] if mode == 'single' else 'USD'
+
         amount_str = update.message.text
-        amount, currency = parse_amount_and_currency(amount_str)
+        amount, currency, is_ambiguous = parse_amount_and_currency_for_mode(
+            amount_str, mode, primary_currency
+        )
 
         context.user_data['tx_amount'] = amount
-        context.user_data['tx_currency'] = currency
 
-        amount_display = (f"{amount:,.0f} {currency}" if currency == 'KHR'
-                          else f"${amount:,.2f}")
+        # --- MODE-BASED LOGIC ---
+        if mode == 'single' or not is_ambiguous:
+            # Single mode OR Dual mode with explicit currency (e.g., "10khr")
+            context.user_data['tx_currency'] = currency
 
-        # Get user's dynamic categories
-        profile = context.user_data['user_profile']
-        tx_type = context.user_data['tx_type']
-        all_categories = profile.get('settings', {}).get('categories', {})
-        user_categories = all_categories.get(tx_type, [])
+            if currency == 'KHR':
+                amount_display = f"{amount:,.0f} {currency}"
+            else:
+                amount_display = f"{amount:,.2f} {currency}"
 
-        if tx_type == 'expense':
-            keyboard = keyboards.expense_categories_keyboard(user_categories,
-                                                             context)
+            # Get user's dynamic categories
+            profile = context.user_data['user_profile']
+            tx_type = context.user_data['tx_type']
+            all_categories = profile.get('settings', {}).get('categories', {})
+            user_categories = all_categories.get(tx_type, [])
+
+            if tx_type == 'expense':
+                keyboard = keyboards.expense_categories_keyboard(user_categories,
+                                                                 context)
+            else:
+                keyboard = keyboards.income_categories_keyboard(user_categories,
+                                                                context)
+
+            await update.message.reply_text(
+                t("tx.ask_category", context, amount_display=amount_display),
+                parse_mode='HTML',
+                reply_markup=keyboard
+            )
+            return CATEGORY
+
         else:
-            keyboard = keyboards.income_categories_keyboard(user_categories,
-                                                            context)
-
-        await update.message.reply_text(
-            t("tx.ask_category", context, amount_display=amount_display),
-            parse_mode='HTML',
-            reply_markup=keyboard
-        )
-        return CATEGORY
+            # Dual mode and ambiguous (e.g., "10")
+            # Ask for currency
+            await update.message.reply_text(
+                t("tx.ask_currency", context),
+                reply_markup=keyboards.currency_keyboard(context)
+            )
+            return CURRENCY
 
     except ValueError:
         await update.message.reply_text(t("tx.invalid_amount", context))
@@ -223,11 +288,9 @@ async def forgot_log_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # --- THIS IS THE FIX ---
     user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
     context.user_data['user_profile'] = user_profile
-    # --- END FIX ---
 
     await query.message.reply_text(
         t("forgot.ask_day", context),
@@ -341,14 +404,16 @@ async def manage_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE)
     date_str = datetime.fromisoformat(
         tx['timestamp']
     ).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
-    amount_format = ",.0f" if tx['currency'] == 'KHR' else ",.2f"
+
+    currency = tx.get('currency', 'USD') # Default for safety
+    amount_format = ",.0f" if currency == 'KHR' else ",.2f"
     amount = tx['amount']
     description = tx.get('description') or 'N/A'
 
     text = t("history.tx_details", context,
              emoji=emoji,
              amount=f"{amount:{amount_format}}",
-             currency=tx['currency'],
+             currency=currency,
              category=tx['categoryId'],
              description=description,
              date=date_str)
@@ -405,11 +470,9 @@ async def edit_transaction_start(update: Update,
     await query.answer()
     tx_id = query.data.replace('edit_tx_', '')
 
-    # --- THIS IS THE FIX ---
     user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
     context.user_data['user_profile'] = user_profile
-    # --- END FIX ---
 
     context.user_data['edit_tx_id'] = tx_id
 
@@ -455,11 +518,30 @@ async def edit_choose_field(update: Update,
             reply_markup=keyboard
         )
         return EDIT_GET_NEW_CATEGORY
+
     if field == 'timestamp':
         await query.edit_message_text(
             t("history.edit_ask_new_date", context)
         )
         return EDIT_GET_NEW_DATE
+
+    if field == 'currency':
+        # Only show currency keyboard for dual-mode users
+        mode, _ = _get_user_settings_for_tx(context)
+        if mode == 'dual':
+            await query.edit_message_text(
+                t("history.edit_ask_new_currency", context),
+                reply_markup=keyboards.currency_keyboard(context)
+            )
+            return EDIT_GET_NEW_CURRENCY
+        else:
+            await context.bot.answer_callback_query(
+                query.id,
+                t("history.edit_no_currency_single", context),
+                show_alert=True
+            )
+            return EDIT_CHOOSE_FIELD # Stay on the same menu
+
     if field == 'amount':
         await query.edit_message_text(
             t("history.edit_ask_new_amount", context)
@@ -512,6 +594,23 @@ async def edit_received_new_date(update: Update,
 
 
 @authenticate_user
+async def edit_received_new_currency(update: Update,
+                                     context: ContextTypes.DEFAULT_TYPE):
+    """Receives new currency from button and saves."""
+    query = update.callback_query
+    await query.answer()
+    currency = query.data.split('_')[1]
+
+    context.user_data['edit_new_value'] = currency
+    # Also update the accountName to match
+    context.user_data['edit_extra_field'] = {
+        "field": "accountName",
+        "value": f"{currency} Account"
+    }
+    return await save_updated_transaction(update, context)
+
+
+@authenticate_user
 async def edit_received_new_category(update: Update,
                                      context: ContextTypes.DEFAULT_TYPE):
     """Receives new category from button and saves."""
@@ -547,6 +646,12 @@ async def save_updated_transaction(update: Update,
     value = context.user_data['edit_new_value']
 
     payload = {field: value}
+
+    # Check if we also need to update accountName (from currency edit)
+    if 'edit_extra_field' in context.user_data:
+        extra = context.user_data['edit_extra_field']
+        payload[extra['field']] = extra['value']
+
     response = api_client.update_transaction(tx_id, payload, user_id)
 
     message_interface = (update.callback_query.message if update.callback_query

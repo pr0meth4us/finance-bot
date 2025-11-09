@@ -7,7 +7,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     MessageHandler,
     filters,
-    CommandHandler  # <-- THIS IS THE FIX
+    CommandHandler
 )
 
 import api_client
@@ -26,33 +26,77 @@ from utils.i18n import t
     CATEGORY_ADD_START,
     CATEGORY_ADD_GET_NAME,
     CATEGORY_REMOVE_START,
-    CATEGORY_REMOVE_GET_NAME
-) = range(9)
+    CATEGORY_REMOVE_GET_NAME,
+    SWITCH_TO_DUAL_CONFIRM,
+    SWITCH_TO_DUAL_GET_KM_NAME
+) = range(11)
+
+
+def _get_user_settings_for_settings(context: ContextTypes.DEFAULT_TYPE):
+    """Helper to safely get user settings and currency mode."""
+    profile = context.user_data.get('user_profile', {})
+    settings = profile.get('settings', {})
+    mode = settings.get('currency_mode', 'dual')
+
+    if mode == 'single':
+        primary_currency = settings.get('primary_currency', 'USD')
+        return mode, (primary_currency,)
+
+    return 'dual', ('USD', 'KHR')
 
 
 @authenticate_user
 async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the main settings menu."""
     query = update.callback_query
-    await query.answer()
+    if query:
+        await query.answer()
 
     user_id = context.user_data['user_profile']['_id']
-    settings = api_client.get_user_settings(user_id)
+    # Use the /settings/ endpoint which returns settings + names
+    user_data = api_client.get_user_settings(user_id)
     rate_data = api_client.get_exchange_rate(user_id)
 
-    if not settings or not rate_data:
-        await query.edit_message_text(
-            t("common.error_generic", context, error="Could not load settings"),
-            reply_markup=keyboards.main_menu_keyboard(context)
-        )
+    if not user_data or not rate_data:
+        err_msg = t("common.error_generic", context)
+        if query:
+            await query.edit_message_text(
+                err_msg,
+                reply_markup=keyboards.main_menu_keyboard(context)
+            )
+        else:
+            await update.message.reply_text(
+                err_msg,
+                reply_markup=keyboards.main_menu_keyboard(context)
+            )
         return ConversationHandler.END
 
+    # Update local cache with fresh data
+    context.user_data['user_profile']['settings'] = user_data.get('settings', {})
+    context.user_data['user_profile']['name_en'] = user_data.get('name_en')
+    context.user_data['user_profile']['name_km'] = user_data.get('name_km')
+
+    settings = user_data.get('settings', {})
     balances = settings.get('initial_balances', {})
-    usd_bal = balances.get('USD', 0)
-    khr_bal = balances.get('KHR', 0)
     rate_pref = settings.get('rate_preference', 'live')
     fixed_rate = settings.get('fixed_rate', 4100)
     current_rate = rate_data.get('rate', 4100)
+
+    mode, currencies = _get_user_settings_for_settings(context)
+
+    balance_lines = []
+    if mode == 'dual':
+        usd_bal = balances.get('USD', 0)
+        khr_bal = balances.get('KHR', 0)
+        balance_lines.append(f"  💵 ${usd_bal:,.2f} USD")
+        balance_lines.append(f"  ៛ {khr_bal:,.0f} KHR")
+    else:
+        curr = currencies[0]
+        bal = balances.get(curr, 0)
+        fmt = ",.0f" if curr == 'KHR' else ",.2f"
+        balance_lines.append(f"  <b>{bal:{fmt}} {curr}</b>")
+
+    balance_text = "\n".join(balance_lines)
 
     rate_text = (
         f"Fixed ({fixed_rate:,.0f})"
@@ -61,13 +105,26 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     text = t("settings.menu_header", context,
-             usd_bal=usd_bal, khr_bal=khr_bal, rate_text=rate_text)
+             balance_text=balance_text,
+             rate_text=rate_text,
+             mode=mode.title()
+             )
 
-    await query.edit_message_text(
-        text=text,
-        parse_mode='HTML',
-        reply_markup=keyboards.settings_menu_keyboard(context)
-    )
+    keyboard = keyboards.settings_menu_keyboard(context)
+
+    if query:
+        await query.edit_message_text(
+            text=text,
+            parse_mode='HTML',
+            reply_markup=keyboard
+        )
+    else:
+        await update.message.reply_text(
+            text=text,
+            parse_mode='HTML',
+            reply_markup=keyboard
+        )
+
     return SETTINGS_MENU
 
 
@@ -78,9 +135,12 @@ async def set_balance_start(update: Update,
     """Asks which account balance to set."""
     query = update.callback_query
     await query.answer()
+
+    mode, currencies = _get_user_settings_for_settings(context)
+
     await query.edit_message_text(
         t("settings.ask_balance_account", context),
-        reply_markup=keyboards.set_balance_account_keyboard(context)
+        reply_markup=keyboards.set_balance_account_keyboard(context, mode, currencies)
     )
     return SETBALANCE_ACCOUNT
 
@@ -116,7 +176,9 @@ async def received_balance_amount(update: Update,
             t("settings.balance_set_success", context,
               currency=currency, amount=amount)
         )
-        return await start(update, context)
+
+        # Go back to settings menu
+        return await settings_menu(update, context)
 
     except (ValueError, TypeError):
         await update.message.reply_text(
@@ -124,7 +186,7 @@ async def received_balance_amount(update: Update,
         )
         return SETBALANCE_AMOUNT
     except Exception as e:
-        await update.message.reply_text(t("common.error_generic", context, error=e))
+        await update.message.reply_text(t("common.error_generic", context))
         return await start(update, context)
 
 
@@ -150,13 +212,13 @@ async def received_new_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             t("settings.rate_set_success", context, rate=new_rate)
         )
-        return await start(update, context)
+        return await settings_menu(update, context)
 
     except (ValueError, TypeError):
         await update.message.reply_text(t("settings.invalid_rate", context))
         return NEW_RATE
     except Exception as e:
-        await update.message.reply_text(t("common.error_generic", context, error=e))
+        await update.message.reply_text(t("common.error_generic", context))
         return await start(update, context)
 
 
@@ -168,21 +230,21 @@ async def categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     user_id = context.user_data['user_profile']['_id']
-    settings = api_client.get_user_settings(user_id)
-    if not settings:
+    user_data = api_client.get_user_settings(user_id)
+    if not user_data:
         await query.edit_message_text(
-            t("common.error_generic", context, error="Could not load categories"),
+            t("common.error_generic", context),
             reply_markup=keyboards.settings_menu_keyboard(context)
         )
         return SETTINGS_MENU
 
-    categories = settings.get('categories', {})
+    categories = user_data.get('settings', {}).get('categories', {})
     expense_cats = categories.get('expense', [])
     income_cats = categories.get('income', [])
 
     text = t("settings.categories_header", context,
-             expense_cats=', '.join(expense_cats),
-             income_cats=', '.join(income_cats))
+             expense_cats=', '.join(expense_cats) or 'None',
+             income_cats=', '.join(income_cats) or 'None')
 
     await query.edit_message_text(
         text=text,
@@ -251,10 +313,10 @@ async def received_category_add_name(update: Update,
             t("settings.category_add_success", context,
               name=cat_name, type=cat_type)
         )
-        return await start(update, context)
+        return await settings_menu(update, context)
 
     except Exception as e:
-        await update.message.reply_text(t("common.error_generic", context, error=e))
+        await update.message.reply_text(t("common.error_generic", context))
         return await start(update, context)
 
 
@@ -271,10 +333,71 @@ async def received_category_remove_name(update: Update,
             t("settings.category_remove_success", context,
               name=cat_name, type=cat_type)
         )
-        return await start(update, context)
+        return await settings_menu(update, context)
 
     except Exception as e:
-        await update.message.reply_text(t("common.error_generic", context, error=e))
+        await update.message.reply_text(t("common.error_generic", context))
+        return await start(update, context)
+
+
+# --- Switch Mode Flow ---
+
+async def switch_to_dual_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Asks the user to confirm switching to dual-currency mode."""
+    query = update.callback_query
+    await query.answer()
+
+    await query.edit_message_text(
+        t("settings.switch_to_dual_confirm", context),
+        reply_markup=keyboards.switch_to_dual_confirm_keyboard(context)
+    )
+    return SWITCH_TO_DUAL_CONFIRM
+
+
+async def switch_to_dual_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Asks for the user's Khmer name."""
+    query = update.callback_query
+    await query.answer()
+
+    # Set language to Khmer by default for this prompt
+    context.user_data['user_profile']['settings']['language'] = 'km'
+
+    await query.edit_message_text(
+        t("settings.ask_name_km_switch", context)
+    )
+    return SWITCH_TO_DUAL_GET_KM_NAME
+
+
+async def received_km_name_for_switch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receives the Khmer name and finalizes the mode switch."""
+    try:
+        km_name = update.message.text.strip()
+        user_id = context.user_data['user_profile']['_id']
+
+        # Get existing English name
+        name_en = context.user_data['user_profile'].get('name_en', 'User')
+
+        # Use the /settings/mode endpoint to update
+        api_client.update_user_mode(
+            user_id,
+            mode='dual',
+            language='km', # Default to Khmer upon switch
+            name_en=name_en,
+            name_km=km_name
+        )
+
+        # Update local cache
+        context.user_data['user_profile']['settings']['currency_mode'] = 'dual'
+        context.user_data['user_profile']['settings']['language'] = 'km'
+        context.user_data['user_profile']['name_km'] = km_name
+
+        await update.message.reply_text(
+            t("settings.switch_to_dual_success", context)
+        )
+        return await settings_menu(update, context)
+
+    except Exception as e:
+        await update.message.reply_text(t("common.error_generic", context))
         return await start(update, context)
 
 
@@ -292,6 +415,9 @@ settings_conversation_handler = ConversationHandler(
             ),
             CallbackQueryHandler(
                 categories_menu, pattern='^settings_manage_categories$'
+            ),
+            CallbackQueryHandler(
+                switch_to_dual_confirm, pattern='^settings_switch_to_dual$'
             ),
             CallbackQueryHandler(start, pattern='^start$'),
         ],
@@ -334,10 +460,22 @@ settings_conversation_handler = ConversationHandler(
             MessageHandler(filters.TEXT & ~filters.COMMAND,
                            received_category_remove_name)
         ],
+        SWITCH_TO_DUAL_CONFIRM: [
+            CallbackQueryHandler(
+                switch_to_dual_get_name, pattern='^confirm_switch_dual$'
+            ),
+            CallbackQueryHandler(settings_menu, pattern='^settings_menu$'),
+        ],
+        SWITCH_TO_DUAL_GET_KM_NAME: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND,
+                           received_km_name_for_switch)
+        ],
     },
     fallbacks=[
         CommandHandler('start', start),
-        CallbackQueryHandler(start, pattern='^start$')
+        CommandHandler('cancel', cancel),
+        CallbackQueryHandler(start, pattern='^start$'),
+        CallbackQueryHandler(cancel, pattern='^cancel_conversation$')
     ],
     per_message=False
 )

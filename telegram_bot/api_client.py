@@ -5,28 +5,21 @@ from dotenv import load_dotenv
 import urllib.parse
 import logging
 
-# --- DEBUG TRACING ---
 log = logging.getLogger(__name__)
-# --- END DEBUG TRACING ---
 
 load_dotenv()
 BASE_URL = os.getenv("WEB_SERVICE_URL")
 
 
-# --- NEW AUTH FUNCTION ---
-# api_client.py
 def find_or_create_user(telegram_id):
     url = f"{BASE_URL}/auth/find_or_create"
     data = {"telegram_user_id": str(telegram_id)}
-    log.info(f"Sending auth request to {url} for user {telegram_id}")
     try:
         res = requests.post(url, json=data, timeout=10)
-        log.info(f"Auth request for {telegram_id} returned HTTP {res.status_code}")
 
         if res.status_code == 200:
             return res.json()
         if res.status_code == 403:
-            log.warning(f"Auth failed for {telegram_id} (HTTP 403): {res.text}")
             return res.json()
 
         log.error(f"[AUTH] HTTP {res.status_code}: {res.text}")
@@ -34,7 +27,6 @@ def find_or_create_user(telegram_id):
     except requests.exceptions.RequestException as e:
         log.error(f"[AUTH] Network error reaching Auth API: {e}", exc_info=True)
         return {"error": "Network error reaching Auth API"}
-
 
 
 def get_detailed_summary(user_id):
@@ -89,7 +81,6 @@ def get_open_debts(user_id):
         return []
 
 
-# --- NEW FUNCTION FOR DEBT EXPORT ---
 def get_open_debts_export(user_id):
     """Fetches a flat list of all open debts for export."""
     try:
@@ -103,7 +94,6 @@ def get_open_debts_export(user_id):
     except requests.exceptions.RequestException as e:
         log.error(f"API Error fetching debts for export: {e}", exc_info=True)
         return []
-# --- END NEW FUNCTION ---
 
 
 def get_settled_debts_grouped(user_id):
@@ -470,16 +460,20 @@ def update_initial_balance(user_id, currency, amount):
         return None
 
 
-# --- NEW FUNCTION ---
-def update_user_mode(user_id, mode, language=None):
+def update_user_mode(user_id, mode, language=None, name_en=None, name_km=None, primary_currency=None):
     """Sets the user's currency mode and language during onboarding."""
     try:
         payload = {
             'user_id': user_id,
             'mode': mode,
+            'name_en': name_en
         }
         if language:
             payload['language'] = language
+        if name_km:
+            payload['name_km'] = name_km
+        if primary_currency:
+            payload['primary_currency'] = primary_currency
 
         res = requests.post(
             f"{BASE_URL}/settings/mode", json=payload, timeout=10
@@ -489,10 +483,8 @@ def update_user_mode(user_id, mode, language=None):
     except requests.exceptions.RequestException as e:
         log.error(f"API Error updating user mode: {e}", exc_info=True)
         return None
-# --- END NEW FUNCTION ---
 
 
-# --- NEW FUNCTION ---
 def complete_onboarding(user_id):
     """Marks the user's onboarding as complete."""
     try:
@@ -505,7 +497,6 @@ def complete_onboarding(user_id):
     except requests.exceptions.RequestException as e:
         log.error(f"API Error completing onboarding: {e}", exc_info=True)
         return None
-# --- END NEW FUNCTION ---
 
 
 def add_category(user_id, cat_type, cat_name):

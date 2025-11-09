@@ -11,7 +11,6 @@ from app.utils.auth import get_user_id_from_request
 
 summary_bp = Blueprint('summary', __name__, url_prefix='/summary')
 
-# "Initial Balance" is removed. It's no longer an operational transaction.
 FINANCIAL_TRANSACTION_CATEGORIES = [
     'Loan Lent',
     'Debt Repayment',
@@ -57,7 +56,7 @@ def get_date_ranges():
     }
 
 
-def calculate_period_summary(start_date, end_date, db, user_id):
+def calculate_period_summary(start_date, end_date, db, user_id, user_rate):
     """Helper to run aggregation for a specific time period for a user."""
     pipeline = [
         {'$match': {
@@ -74,12 +73,12 @@ def calculate_period_summary(start_date, end_date, db, user_id):
                         'else': {
                             '$let': {
                                 'vars': {'rate': {'$ifNull': [
-                                    '$exchangeRateAtTime', 4100.0
+                                    '$exchangeRateAtTime', user_rate
                                 ]}},
                                 'in': {'$cond': {
                                     'if': {'$gt': ['$$rate', 0]},
                                     'then': {'$divide': ['$amount', '$$rate']},
-                                    'else': {'$divide': ['$amount', 4100.0]}
+                                    'else': {'$divide': ['$amount', user_rate]}
                                 }}
                             }
                         }
@@ -126,71 +125,90 @@ def get_detailed_summary():
     if error:
         return error
 
-    # 1. Get User's Initial Balances
+    # 1. Get User's Settings (Initial Balances, Mode, Currencies)
     user = db.users.find_one(
         {'_id': user_id},
-        {'settings.initial_balances': 1}
+        {'settings': 1}
     )
     if not user:
         return jsonify({'error': 'User not found'}), 404
 
-    initial_balances = user.get('settings', {}).get('initial_balances', {})
-    initial_khr = initial_balances.get('KHR', 0)
-    initial_usd = initial_balances.get('USD', 0)
+    settings = user.get('settings', {})
+    initial_balances = settings.get('initial_balances', {})
+    mode = settings.get('currency_mode', 'dual')
 
-    # 2. Calculate Total Operational Cash Flow
-    khr_pipeline = [
-        {'$match': {'accountName': 'KHR Account', 'user_id': user_id}},
-        {'$group': {'_id': '$type', 'total': {'$sum': '$amount'}}}
+    currencies_to_track = []
+    if mode == 'single':
+        currencies_to_track.append(settings.get('primary_currency', 'USD'))
+    else:
+        currencies_to_track = ['USD', 'KHR']
+
+    # 2. Calculate Total Transaction Flow (Income & Expense)
+    pipeline_transactions = [
+        {'$match': {
+            'user_id': user_id,
+            'currency': {'$in': currencies_to_track}
+        }},
+        {'$group': {
+            '_id': {'type': '$type', 'currency': '$currency'},
+            'total': {'$sum': '$amount'}
+        }}
     ]
-    khr_results = list(db.transactions.aggregate(khr_pipeline))
-    khr_income = next((r['total'] for r in khr_results if r['_id'] == 'income'), 0)
-    khr_expense = next((r['total'] for r in khr_results if r['_id'] == 'expense'), 0)
-    khr_balance = initial_khr + khr_income - khr_expense
+    tx_results = list(db.transactions.aggregate(pipeline_transactions))
 
-    usd_pipeline = [
-        {'$match': {'accountName': 'USD Account', 'user_id': user_id}},
-        {'$group': {'_id': '$type', 'total': {'$sum': '$amount'}}}
-    ]
-    usd_results = list(db.transactions.aggregate(usd_pipeline))
-    usd_income = next((r['total'] for r in usd_results if r['_id'] == 'income'), 0)
-    usd_expense = next((r['total'] for r in usd_results if r['_id'] == 'expense'), 0)
-    usd_balance = initial_usd + usd_income - usd_expense
+    # 3. Calculate Balances
+    final_balances = {}
+    for currency in currencies_to_track:
+        initial = initial_balances.get(currency, 0)
+        income = next((r['total'] for r in tx_results if r['_id']['type'] == 'income' and r['_id']['currency'] == currency), 0)
+        expense = next((r['total'] for r in tx_results if r['_id']['type'] == 'expense' and r['_id']['currency'] == currency), 0)
+        final_balances[currency] = initial + income - expense
 
-    # 3. Calculate Debts
+    # 4. Calculate Debts
     pipeline_debts = [
-        {'$match': {'status': 'open', 'user_id': user_id}},
+        {'$match': {
+            'status': 'open',
+            'user_id': user_id,
+            'currency': {'$in': currencies_to_track}
+        }},
         {'$group': {
             '_id': {'type': '$type', 'currency': '$currency'},
             'totalAmount': {'$sum': '$remainingAmount'}
         }}
     ]
     debt_results = list(db.debts.aggregate(pipeline_debts))
-    debts_owed_to_you = [d for d in debt_results if d['_id']['type'] == 'lent']
-    debts_owed_by_you = [d for d in debt_results if d['_id']['type'] == 'borrowed']
 
-    formatted_debts_to_you = [
+    debts_owed_to_you = [
         {'total': d['totalAmount'], '_id': d['_id']['currency']}
-        for d in debts_owed_to_you
+        for d in debt_results if d['_id']['type'] == 'lent'
     ]
-    formatted_debts_by_you = [
+    debts_owed_by_you = [
         {'total': d['totalAmount'], '_id': d['_id']['currency']}
-        for d in debts_owed_by_you
+        for d in debt_results if d['_id']['type'] == 'borrowed'
     ]
 
-    # 4. Calculate Period Summaries
+    # 5. Calculate Period Summaries
+
+    # Get user's rate for period calculations
+    rate_preference = settings.get('rate_preference', 'live')
+    user_rate = 4100.0
+    if rate_preference == 'fixed':
+        user_rate = settings.get('fixed_rate', 4100.0)
+    else:
+        user_rate = get_live_usd_to_khr_rate() # Simplified for summary
+
     date_ranges = get_date_ranges()
     period_summaries = {}
     for period, (start_utc, end_utc) in date_ranges.items():
         period_summaries[period] = calculate_period_summary(
-            start_utc, end_utc, db, user_id
+            start_utc, end_utc, db, user_id, user_rate
         )
 
-    # 5. Combine all data
+    # 6. Combine all data
     summary = {
-        'balances': {'KHR': khr_balance, 'USD': usd_balance},
-        'debts_owed_by_you': formatted_debts_by_you,
-        'debts_owed_to_you': formatted_debts_to_you,
+        'balances': final_balances,
+        'debts_owed_by_you': debts_owed_by_you,
+        'debts_owed_to_you': debts_owed_to_you,
         'periods': period_summaries
     }
 
