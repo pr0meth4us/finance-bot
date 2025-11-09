@@ -307,21 +307,15 @@ def get_db():
     Connects to the specific database.
     Uses Flask's 'g' to reuse the connection per-request.
     """
-    log.info("get_db() called.")
     if 'db_client' not in g:
         uri = current_app.config['MONGODB_URI']
-        log.info(f"Creating new MongoClient for 'g'. URI: {uri[:15]}...")
-        log.info(f"Connection args: {MONGO_CONNECTION_ARGS}")
         try:
             g.db_client = MongoClient(uri, **MONGO_CONNECTION_ARGS)
             g.db = g.db_client[current_app.config['DB_NAME']]
-            log.info("MongoClient created and attached to 'g'.")
         except Exception as e:
             log.error(f"Failed to create MongoClient: {e}", exc_info=True)
             # Re-raise to fail the request
             raise e
-    else:
-        log.info("Reusing existing MongoClient from 'g'.")
     return g.db
 
 
@@ -331,7 +325,6 @@ def close_db(e=None):
     if client is not None:
         client.close()
         g.pop('db', None)
-        log.info("MongoDB connection closed for this 'g' context.")
 
 
 # --- APP CREATION (Modified) ---
@@ -435,7 +428,6 @@ def create_app():
 
         try:
             log.info(f"Creating fresh MongoClient for ping. URI: {uri[:15]}...")
-            log.info(f"Ping Connection args: {MONGO_CONNECTION_ARGS}")
             client = MongoClient(uri, **MONGO_CONNECTION_ARGS)
 
             log.info("Pinging admin...")

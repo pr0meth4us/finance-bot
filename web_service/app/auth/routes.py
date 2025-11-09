@@ -45,6 +45,7 @@ def get_default_settings_for_user(telegram_id):
             "subscription_status": "active",
             "settings": {
                 "language": "en",
+                "currency_mode": "dual",  # Admin defaults to dual
                 "rate_preference": "live",
                 "fixed_rate": 4100,
                 "notification_chat_ids": {
@@ -67,6 +68,7 @@ def get_default_settings_for_user(telegram_id):
         "subscription_status": "inactive",
         "settings": {
             "language": "en",
+            "currency_mode": None,  # <-- NEW: Will be set during onboarding
             "rate_preference": "live",
             "fixed_rate": 4100,
             "notification_chat_ids": {

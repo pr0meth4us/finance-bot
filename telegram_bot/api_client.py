@@ -22,6 +22,7 @@ def find_or_create_user(telegram_id):
     try:
         res = requests.post(url, json=data, timeout=10)
         log.info(f"Auth request for {telegram_id} returned HTTP {res.status_code}")
+
         if res.status_code == 200:
             return res.json()
         if res.status_code == 403:
@@ -467,6 +468,28 @@ def update_initial_balance(user_id, currency, amount):
     except requests.exceptions.RequestException as e:
         log.error(f"API Error updating initial balance: {e}", exc_info=True)
         return None
+
+
+# --- NEW FUNCTION ---
+def update_user_mode(user_id, mode, language=None):
+    """Sets the user's currency mode and language during onboarding."""
+    try:
+        payload = {
+            'user_id': user_id,
+            'mode': mode,
+        }
+        if language:
+            payload['language'] = language
+
+        res = requests.post(
+            f"{BASE_URL}/settings/mode", json=payload, timeout=10
+        )
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        log.error(f"API Error updating user mode: {e}", exc_info=True)
+        return None
+# --- END NEW FUNCTION ---
 
 
 # --- NEW FUNCTION ---

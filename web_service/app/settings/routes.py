@@ -186,6 +186,47 @@ def get_khr_rate():
 
 
 # --- NEW ENDPOINT ---
+@settings_bp.route('/mode', methods=['POST'])
+def update_currency_mode():
+    """
+    Sets the user's currency mode (and language if 'single').
+    This is used during onboarding.
+    """
+    db = get_db()
+    user_id, error = get_user_id_from_request()
+    if error:
+        return error
+
+    data = request.json
+    mode = data.get('mode')
+    language = data.get('language')  # Optional language
+
+    if mode not in ['single', 'dual']:
+        return jsonify({'error': 'Invalid mode. Must be "single" or "dual".'}), 400
+
+    update_payload = {
+        'settings.currency_mode': mode
+    }
+
+    # As requested, if mode is "single", force language to "en"
+    if mode == 'single':
+        update_payload['settings.language'] = 'en'
+    elif language:  # If dual, we can set the language they chose
+        update_payload['settings.language'] = language
+
+    result = db.users.update_one(
+        {'_id': user_id},
+        {'$set': update_payload}
+    )
+
+    if result.matched_count == 0:
+        return jsonify({'error': 'User not found'}), 404
+
+    return jsonify({'message': f'Currency mode set to {mode}.'})
+# --- END NEW ENDPOINT ---
+
+
+# --- NEW ENDPOINT ---
 @settings_bp.route('/complete_onboarding', methods=['POST'])
 def complete_onboarding():
     """Marks the user's onboarding as complete."""
