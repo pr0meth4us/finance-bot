@@ -10,8 +10,8 @@ from zoneinfo import ZoneInfo
 import matplotlib.pyplot as plt
 import re
 from app import get_db
-# --- MODIFICATION: Import the new auth helper ---
 from app.utils.auth import get_user_id_from_request
+from app.utils.currency import get_live_usd_to_khr_rate
 
 analytics_bp = Blueprint('analytics', __name__, url_prefix='/analytics')
 
@@ -20,11 +20,43 @@ FINANCIAL_TRANSACTION_CATEGORIES = [
     'Debt Repayment',
     'Loan Received',
     'Debt Settled',
-    'Initial Balance'
+    'Initial Balance' # Kept for v1 data, but excluded from new reports
 ]
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 UTC_TZ = ZoneInfo("UTC")
+
+
+def _get_user_financial_base(db, user_id):
+    """
+    Helper to get the user's initial balance in USD and their preferred rate.
+    """
+    user = db.users.find_one(
+        {'_id': user_id},
+        {'settings': 1}
+    )
+    if not user:
+        raise Exception("User not found")
+
+    settings = user.get('settings', {})
+
+    # Get initial balances
+    initial_balances = settings.get('initial_balances', {})
+    initial_usd = initial_balances.get('USD', 0)
+    initial_khr = initial_balances.get('KHR', 0)
+
+    # Get rate
+    rate_preference = settings.get('rate_preference', 'live')
+    rate = 4100.0
+    if rate_preference == 'fixed':
+        rate = settings.get('fixed_rate', 4100.0)
+    else:
+        rate = get_live_usd_to_khr_rate()
+
+    # Calculate total initial balance in USD
+    initial_balance_in_usd = initial_usd + (initial_khr / rate)
+
+    return initial_balance_in_usd, rate
 
 
 def get_date_ranges_for_search():
@@ -56,13 +88,10 @@ def search_transactions():
     params = request.json
     db = get_db()
 
-    # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
     if error: return error
-    # ---
 
-    # 1. Build Match Stage
-    match_stage = {'user_id': user_id} # <-- MODIFICATION
+    match_stage = {'user_id': user_id}
 
     date_filter = {}
     if params.get('period'):
@@ -95,7 +124,6 @@ def search_transactions():
             regex_str = '|'.join([re.escape(k) for k in keywords])
             match_stage['description'] = re.compile(regex_str, re.IGNORECASE)
 
-    # 2. Build Aggregation Pipeline
     pipeline = []
     if match_stage:
         pipeline.append({'$match': match_stage})
@@ -114,7 +142,6 @@ def search_transactions():
 
     results = list(db.transactions.aggregate(pipeline))
 
-    # 3. Format Response
     if not results:
         return jsonify({'total_count': 0, 'totals_by_currency': []})
 
@@ -157,10 +184,8 @@ def get_detailed_report():
     """Generates a detailed report for the authenticated user."""
     db = get_db()
 
-    # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
     if error: return error
-    # ---
 
     start_date_str = request.args.get('start_date')
     end_date_str = request.args.get('end_date')
@@ -181,7 +206,13 @@ def get_detailed_report():
     except (ValueError, TypeError):
         return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
 
-    # Base match for user
+    # --- THIS IS THE FIX ---
+    try:
+        initial_balance_in_usd, user_rate = _get_user_financial_base(db, user_id)
+    except Exception as e:
+        return jsonify({"error": f"Could not load user settings: {str(e)}"}), 404
+    # --- END FIX ---
+
     user_match = {'user_id': user_id}
 
     add_fields_stage = {
@@ -192,9 +223,9 @@ def get_detailed_report():
                     'then': '$amount',
                     'else': {
                         '$let': {
-                            'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', 4100.0]}},
+                            'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', user_rate]}}, # Use user's rate
                             'in': {'$cond': {'if': {'$gt': ['$$rate', 0]}, 'then': {'$divide': ['$amount', '$$rate']},
-                                             'else': {'$divide': ['$amount', 4100.0]}}}
+                                             'else': {'$divide': ['$amount', user_rate]}}}
                         }
                     }
                 }
@@ -204,21 +235,25 @@ def get_detailed_report():
 
     # --- Balance at Start Calculation ---
     start_balance_pipeline = [
-        {'$match': {'timestamp': {'$lt': start_date_utc}, **user_match}}, # <-- MODIFICATION
+        {'$match': {'timestamp': {'$lt': start_date_utc}, **user_match}},
         add_fields_stage,
         {'$group': {'_id': '$type', 'totalUSD': {'$sum': '$amount_in_usd'}}}
     ]
     start_balance_data = list(db.transactions.aggregate(start_balance_pipeline))
     start_income = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'income'), 0)
     start_expense = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'expense'), 0)
-    balance_at_start_usd = start_income - start_expense
+
+    # --- THIS IS THE FIX ---
+    # The starting balance is the Initial Balance + all transactions before the start date
+    balance_at_start_usd = initial_balance_in_usd + start_income - start_expense
+    # --- END FIX ---
 
     # --- Pipelines for the selected period ---
     date_range_match = {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc}}
 
-    # Operational data
+    # Operational data (Exclude financial categories)
     operational_pipeline = [
-        {'$match': {**date_range_match, 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}}, # <-- MODIFICATION
+        {'$match': {**date_range_match, 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
         add_fields_stage,
         {'$group': {'_id': {'type': '$type', 'category': '$categoryId'}, 'total': {'$sum': '$amount_in_usd'}}},
         {'$sort': {'total': -1}}
@@ -226,21 +261,21 @@ def get_detailed_report():
 
     # Financial data
     financial_pipeline = [
-        {'$match': {**date_range_match, 'categoryId': {'$in': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}}, # <-- MODIFICATION
+        {'$match': {**date_range_match, 'categoryId': {'$in': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
         add_fields_stage,
         {'$group': {'_id': '$categoryId', 'total': {'$sum': '$amount_in_usd'}}}
     ]
 
-    # Total cash flow
+    # Total cash flow (Used for calculating end balance correctly)
     total_flow_pipeline = [
-        {'$match': {**date_range_match, **user_match}}, # <-- MODIFICATION
+        {'$match': {**date_range_match, **user_match}},
         add_fields_stage,
         {'$group': {'_id': '$type', 'totalUSD': {'$sum': '$amount_in_usd'}}}
     ]
 
     # Spending Over Time
     spending_over_time_pipeline = [
-        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}}, # <-- MODIFICATION
+        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
         add_fields_stage,
         {
             '$project': {
@@ -255,7 +290,7 @@ def get_detailed_report():
 
     # Daily Expense Stats
     daily_stats_pipeline = [
-        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}}, # <-- MODIFICATION
+        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
         add_fields_stage,
         {
             '$group': {
@@ -268,7 +303,7 @@ def get_detailed_report():
 
     # Top Expense Item
     top_expense_pipeline = [
-        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}}, # <-- MODIFICATION
+        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
         add_fields_stage,
         {'$sort': {'amount_in_usd': -1}},
         {'$limit': 1},
@@ -343,10 +378,8 @@ def get_spending_habits():
     """Analyzes spending habits for the authenticated user."""
     db = get_db()
 
-    # --- MODIFICATION: Authenticate user ---
     user_id, error = get_user_id_from_request()
     if error: return error
-    # ---
 
     start_date_str = request.args.get('start_date')
     end_date_str = request.args.get('end_date')
@@ -365,7 +398,11 @@ def get_spending_habits():
     except (ValueError, TypeError):
         return jsonify({"error": "Invalid date format."}), 400
 
-    # Base match for user
+    try:
+        _, user_rate = _get_user_financial_base(db, user_id)
+    except Exception as e:
+        return jsonify({"error": f"Could not load user settings: {str(e)}"}), 404
+
     user_match = {'user_id': user_id}
 
     add_fields_stage = {
@@ -376,9 +413,9 @@ def get_spending_habits():
                     'then': '$amount',
                     'else': {
                         '$let': {
-                            'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', 4100.0]}},
+                            'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', user_rate]}},
                             'in': {'$cond': {'if': {'$gt': ['$$rate', 0]}, 'then': {'$divide': ['$amount', '$$rate']},
-                                             'else': {'$divide': ['$amount', 4100.0]}}}
+                                             'else': {'$divide': ['$amount', user_rate]}}}
                         }
                     }
                 }
@@ -387,7 +424,7 @@ def get_spending_habits():
     }
 
     day_of_week_pipeline = [
-        {'$match': {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc}, 'type': 'expense', **user_match}}, # <-- MODIFICATION
+        {'$match': {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc}, 'type': 'expense', **user_match}},
         add_fields_stage,
         {'$group': {
             '_id': {'$dayOfWeek': {'date': '$timestamp', 'timezone': 'Asia/Phnom_Penh'}},
@@ -414,7 +451,7 @@ def get_spending_habits():
             'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc},
             'type': 'expense',
             'description': {'$exists': True, '$ne': ''},
-            **user_match # <-- MODIFICATION
+            **user_match
         }},
         {'$group': {
             '_id': {'category': '$categoryId', 'keyword': {'$toLower': '$description'}},
