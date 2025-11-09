@@ -70,7 +70,7 @@ async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_T㓩YPE):
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancels any active conversation."""
 
     # Preserve the user profile, clear everything else
