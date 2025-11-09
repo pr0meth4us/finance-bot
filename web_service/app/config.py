@@ -3,18 +3,10 @@
 import os
 
 class Config:
-    # Flask
-    SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
-
-    # Mongo
+    SECRET_KEY = os.getenv("SECRET_KEY")
     MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
     DB_NAME = os.getenv("DB_NAME", "expTracker").strip()
-
-    # DATA API Config
-    DATA_API_URL = os.getenv("DATA_API_URL", "").strip()
-    DATA_API_KEY = os.getenv("DATA_API_KEY", "").strip()
-
-    # Telegram
+    EXCHANGERATE_API_KEY = os.getenv("EXCHANGERATE_API_KEY", "").strip()
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
@@ -25,10 +17,7 @@ class Config:
             missing.append("MONGODB_URI")
         if not Config.DB_NAME:
             missing.append("DB_NAME")
-        if not Config.DATA_API_URL:
-            missing.append("DATA_API_URL")
-        if not Config.DATA_API_KEY:
-            missing.append("DATA_API_KEY")
-
+        if not Config.EXCHANGERATE_API_KEY:
+            missing.append("EXCHANGERATE_API_KEY")
         if missing:
             print(f"[Config] Missing env vars: {', '.join(missing)}")
