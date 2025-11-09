@@ -109,6 +109,7 @@ def main():  # <-- MODIFICATION: Changed back to synchronous
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cancel", cancel))
 
+
     # Conversations
     app.add_handler(tx_conversation_handler)
     app.add_handler(iou_conversation_handler)
@@ -120,8 +121,14 @@ def main():  # <-- MODIFICATION: Changed back to synchronous
     app.add_handler(habits_conversation_handler)
     app.add_handler(search_conversation_handler)
     app.add_handler(iou_edit_conversation_handler)
-    app.add_handler(onboarding_conversation_handler)
     app.add_handler(settings_conversation_handler)
+
+    # --- THIS IS THE FIX ---
+    # This handler MUST be added so the bot knows about the onboarding states
+    app.add_handler(onboarding_conversation_handler)
+    # --- END FIX ---
+
+    # IMPORTANT: The !command handler must be LAST
     app.add_handler(unified_message_conversation_handler)
 
     # Callback-only handlers
@@ -169,3 +176,5 @@ if __name__ == "__main__":
         logger.info("Bot shutting down...")
     except Exception as e:
         logger.critical(f"Bot failed to start: {e}", exc_info=True)
+
+# --- End of modified file ---

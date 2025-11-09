@@ -1,0 +1,37 @@
+# docker-compose.yml  (no version key)
+services:
+  web:
+    build:
+      context: .
+      dockerfile: ./web_service/Dockerfile
+    container_name: finance-bot-web
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: sync
+          path: ./web_service
+          target: /app
+          ignore:
+            - "**/__pycache__/**"
+            - "**/*.pyc"
+
+  telegram:
+    build:
+      context: .
+      dockerfile: ./telegram_bot/Dockerfile
+    container_name: finance-bot-telegram
+    env_file:
+      - .env
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: sync
+          path: ./telegram_bot
+          target: /app
+          ignore:
+            - "**/__pycache__/**"
+            - "**/*.pyc"

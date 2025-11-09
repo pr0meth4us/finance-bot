@@ -9,12 +9,14 @@ from telegram.ext import (
     filters,
     CommandHandler
 )
-
+import logging  # Import logging
 import api_client
 import keyboards
 from .common import start, cancel  # <-- THIS IS THE FIX
 from decorators import authenticate_user
 from utils.i18n import t
+
+log = logging.getLogger(__name__) # Add logger
 
 # Conversation states
 (
@@ -53,6 +55,8 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
 
     user_id = context.user_data['user_profile']['_id']
+    log.info(f"User {user_id} entering settings menu.")
+
     # Use the /settings/ endpoint which returns settings + names
     user_data = api_client.get_user_settings(user_id)
     rate_data = api_client.get_exchange_rate(user_id)
@@ -135,6 +139,7 @@ async def set_balance_start(update: Update,
     """Asks which account balance to set."""
     query = update.callback_query
     await query.answer()
+    log.info(f"User {context.user_data['user_profile']['_id']} starting set_balance flow.")
 
     mode, currencies = _get_user_settings_for_settings(context)
 
@@ -166,8 +171,10 @@ async def received_balance_amount(update: Update,
         user_id = context.user_data['user_profile']['_id']
         amount = float(update.message.text)
         currency = context.user_data.get('settings_currency')
+        log.info(f"User {user_id} setting balance for {currency} to {amount}.")
 
         if not currency:
+            log.warning(f"User {user_id} lost context in received_balance_amount.")
             raise ValueError("Context lost")
 
         api_client.update_initial_balance(user_id, currency, amount)
@@ -186,6 +193,7 @@ async def received_balance_amount(update: Update,
         )
         return SETBALANCE_AMOUNT
     except Exception as e:
+        log.error(f"Error in received_balance_amount: {e}", exc_info=True)
         await update.message.reply_text(t("common.error_generic", context))
         return await start(update, context)
 
@@ -197,6 +205,7 @@ async def update_rate_start(update: Update,
     """Asks for a new fixed exchange rate."""
     query = update.callback_query
     await query.answer()
+    log.info(f"User {context.user_data['user_profile']['_id']} starting update_rate flow.")
     await query.edit_message_text(t("settings.ask_rate", context))
     return NEW_RATE
 
@@ -206,6 +215,7 @@ async def received_new_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_id = context.user_data['user_profile']['_id']
         new_rate = float(update.message.text)
+        log.info(f"User {user_id} setting new fixed rate to {new_rate}.")
 
         api_client.update_exchange_rate(new_rate, user_id)
 
@@ -218,6 +228,7 @@ async def received_new_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t("settings.invalid_rate", context))
         return NEW_RATE
     except Exception as e:
+        log.error(f"Error in received_new_rate: {e}", exc_info=True)
         await update.message.reply_text(t("common.error_generic", context))
         return await start(update, context)
 
@@ -228,8 +239,9 @@ async def categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the category management menu."""
     query = update.callback_query
     await query.answer()
-
     user_id = context.user_data['user_profile']['_id']
+    log.info(f"User {user_id} entering categories menu.")
+
     user_data = api_client.get_user_settings(user_id)
     if not user_data:
         await query.edit_message_text(
@@ -307,6 +319,7 @@ async def received_category_add_name(update: Update,
         user_id = context.user_data['user_profile']['_id']
         cat_type = context.user_data['category_type']
         cat_name = update.message.text.strip().title()
+        log.info(f"User {user_id} adding category '{cat_name}' to {cat_type}.")
 
         api_client.add_category(user_id, cat_type, cat_name)
         await update.message.reply_text(
@@ -316,6 +329,7 @@ async def received_category_add_name(update: Update,
         return await settings_menu(update, context)
 
     except Exception as e:
+        log.error(f"Error in received_category_add_name: {e}", exc_info=True)
         await update.message.reply_text(t("common.error_generic", context))
         return await start(update, context)
 
@@ -327,6 +341,7 @@ async def received_category_remove_name(update: Update,
         user_id = context.user_data['user_profile']['_id']
         cat_type = context.user_data['category_type']
         cat_name = update.message.text.strip().title()
+        log.info(f"User {user_id} removing category '{cat_name}' from {cat_type}.")
 
         api_client.remove_category(user_id, cat_type, cat_name)
         await update.message.reply_text(
@@ -336,6 +351,7 @@ async def received_category_remove_name(update: Update,
         return await settings_menu(update, context)
 
     except Exception as e:
+        log.error(f"Error in received_category_remove_name: {e}", exc_info=True)
         await update.message.reply_text(t("common.error_generic", context))
         return await start(update, context)
 
@@ -346,6 +362,7 @@ async def switch_to_dual_confirm(update: Update, context: ContextTypes.DEFAULT_T
     """Asks the user to confirm switching to dual-currency mode."""
     query = update.callback_query
     await query.answer()
+    log.info(f"User {context.user_data['user_profile']['_id']} starting switch_to_dual flow.")
 
     await query.edit_message_text(
         t("settings.switch_to_dual_confirm", context),
@@ -373,6 +390,7 @@ async def received_km_name_for_switch(update: Update, context: ContextTypes.DEFA
     try:
         km_name = update.message.text.strip()
         user_id = context.user_data['user_profile']['_id']
+        log.info(f"User {user_id} completing switch_to_dual with KM name.")
 
         # Get existing English name
         name_en = context.user_data['user_profile'].get('name_en', 'User')
@@ -397,6 +415,7 @@ async def received_km_name_for_switch(update: Update, context: ContextTypes.DEFA
         return await settings_menu(update, context)
 
     except Exception as e:
+        log.error(f"Error in received_km_name_for_switch: {e}", exc_info=True)
         await update.message.reply_text(t("common.error_generic", context))
         return await start(update, context)
 

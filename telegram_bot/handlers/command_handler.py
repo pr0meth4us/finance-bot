@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 import logging
 import shlex
 from asteval import Interpreter
+import re  # <-- NEW IMPORT
 from utils.i18n import t
 
 logging.basicConfig(
@@ -79,7 +80,7 @@ def _get_user_settings_for_command(context: ContextTypes.DEFAULT_TYPE):
         primary_currency = settings.get('primary_currency', 'USD')
         return mode, primary_currency
 
-    return 'dual', 'USD' # Default primary for dual is USD
+    return 'dual', 'USD'  # Default primary for dual is USD
 
 
 def parse_amount_and_currency_dual(amount_str: str):
@@ -171,6 +172,8 @@ def _format_success_message(data):
     return "\n".join(lines)
 
 
+# --- MODIFICATION: Decorator added ---
+@authenticate_user
 async def handle_generic_transaction(update: Update,
                                      context: ContextTypes.DEFAULT_TYPE,
                                      command, args):
@@ -204,6 +207,8 @@ async def handle_generic_transaction(update: Update,
         return None, None
 
 
+# --- MODIFICATION: Decorator added ---
+@authenticate_user
 async def handle_generic_debt(update: Update,
                               context: ContextTypes.DEFAULT_TYPE,
                               command, args):
@@ -235,6 +240,8 @@ async def handle_generic_debt(update: Update,
         return None, None
 
 
+# --- MODIFICATION: Decorator added ---
+@authenticate_user
 async def handle_quick_command(update: Update,
                                context: ContextTypes.DEFAULT_TYPE,
                                command, args):
@@ -275,6 +282,8 @@ async def handle_quick_command(update: Update,
         return None, None
 
 
+# --- MODIFICATION: Decorator added ---
+@authenticate_user
 async def handle_repayment(update: Update, context: ContextTypes.DEFAULT_TYPE,
                            args, debt_type: str):
     """Handles parsing !paid and !repaid by commands."""
@@ -324,7 +333,7 @@ async def handle_repayment(update: Update, context: ContextTypes.DEFAULT_TYPE,
     )
 
 
-@authenticate_user
+# --- MODIFICATION: Decorator REMOVED from this entry point ---
 async def unified_message_router(update: Update,
                                  context: ContextTypes.DEFAULT_TYPE):
     """The main router for all text messages, now authenticated."""
@@ -367,30 +376,44 @@ async def unified_message_router(update: Update,
 
     command = parts[0].lower()
     args = parts[1:]
-    user_id = context.user_data['user_profile']['_id']
+
+    # --- MODIFICATION: We must get the user_id *here* to pass it down,
+    # but we can't block. We rely on the called functions to be decorated.
+    # We fetch it manually ONLY for the final summary.
+    user_profile = context.user_data.get('user_profile')
+    if not user_profile:
+        # This can happen if the user's first message is a command
+        # The decorated functions will handle the auth flow
+        logger.info("No user profile in context, decorated function will auth.")
+    # ---
 
     try:
         if full_text.lower().startswith("repaid by") or \
                 full_text.lower().startswith("paid by"):
             args = parts[2:]
+            # This function is now decorated, it will handle auth
             await handle_repayment(update, context, args, debt_type='lent')
             return ConversationHandler.END
 
         if command in ["paid", "repaid"]:
+            # This function is now decorated, it will handle auth
             await handle_repayment(update, context, args, debt_type='borrowed')
             return ConversationHandler.END
 
         tx_data, debt_data, base_text = None, None, None
 
         if command in ["expense", "income"]:
+            # This function is now decorated, it will handle auth
             tx_data, base_text = await handle_generic_transaction(
                 update, context, command, args
             )
         elif command in ["lent", "borrowed"]:
+            # This function is now decorated, it will handle auth
             debt_data, base_text = await handle_generic_debt(
                 update, context, command, args
             )
         elif command in COMMAND_MAP:
+            # This function is now decorated, it will handle auth
             tx_data, base_text = await handle_quick_command(
                 update, context, command, args
             )
@@ -398,18 +421,22 @@ async def unified_message_router(update: Update,
             context.user_data['unknown_command_data'] = {
                 'command': command, 'args': args
             }
+            # This function is now decorated, it will handle auth
             return await unknown_command_entry_point(update, context)
 
-        if tx_data:
-            response = api_client.add_transaction(tx_data, user_id)
-            if not response:
-                base_text = t("command.tx_fail", context)
-        elif debt_data:
-            response = api_client.add_debt(debt_data, user_id)
-            if not response:
-                base_text = t("command.debt_fail", context)
-
+        # If any of the above functions returned, it means auth is in progress
+        # or an error was sent. If they return data, we proceed.
         if (tx_data or debt_data) and base_text:
+            user_id = context.user_data['user_profile']['_id']
+            if tx_data:
+                response = api_client.add_transaction(tx_data, user_id)
+                if not response:
+                    base_text = t("command.tx_fail", context)
+            elif debt_data:
+                response = api_client.add_debt(debt_data, user_id)
+                if not response:
+                    base_text = t("command.debt_fail", context)
+
             summary_text = format_summary_message(
                 api_client.get_detailed_summary(user_id), context
             )
@@ -422,12 +449,19 @@ async def unified_message_router(update: Update,
         return ConversationHandler.END
 
     except Exception as e:
+        # This will catch errors if auth failed and context.user_data['user_profile'] is missing
+        if "user_profile" not in context.user_data:
+            logger.info("Action blocked, user is being onboarded.")
+            return ConversationHandler.END # Onboarding is active
+
         logger.error(f"Error in unified_message_router: {e}", exc_info=True)
         await update.message.reply_text(t("command.error_parsing", context))
         return ConversationHandler.END
 
 
 # --- UNKNOWN ITEM CONVERSATION ---
+# --- MODIFICATION: Decorator added ---
+@authenticate_user
 async def unknown_command_entry_point(update: Update,
                                       context: ContextTypes.DEFAULT_TYPE):
     """Entry point for handling unknown commands as potential expenses."""
