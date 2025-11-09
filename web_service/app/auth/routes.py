@@ -3,8 +3,7 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from bson import ObjectId
-# from app import get_db  <-- REMOVED PYMONGO
-from app.utils.data_api import call_data_api  # <-- NEW IMPORT
+from app import get_db
 from zoneinfo import ZoneInfo
 import logging
 
@@ -84,13 +83,9 @@ def get_default_settings_for_user(telegram_id):
 
 
 def serialize_user(user):
-    """
-    Serializes user document for JSON.
-    The Data API returns _id as {"$oid": "..."}
-    We must convert this to just the string.
-    """
-    if '_id' in user and isinstance(user['_id'], dict) and '$oid' in user['_id']:
-        user['_id'] = user['_id']['$oid']
+    """Serializes user document for JSON, converting ObjectId."""
+    if '_id' in user:
+        user['_id'] = str(user['_id'])
     return user
 
 
@@ -102,6 +97,13 @@ def find_or_create_user():
     """
     log.info("/auth/find_or_create POST request received.")
 
+    try:
+        db = get_db()
+        log.info("Database connection retrieved.")
+    except Exception as e:
+        log.error(f"CRITICAL: Failed to get DB connection in /auth: {e}", exc_info=True)
+        return jsonify({"error": "Failed to connect to database", "details": str(e)}), 500
+
     data = request.json
     log.info(f"Request data: {data}")
     telegram_user_id = data.get('telegram_user_id')
@@ -111,21 +113,19 @@ def find_or_create_user():
         return jsonify({"error": "telegram_user_id is required"}), 400
 
     telegram_user_id = str(telegram_user_id)
+    user = None
 
-    # --- REFACTOR: Use Data API to find user ---
-    find_payload = {
-        "collection": "users",
-        "filter": {"telegram_user_id": telegram_user_id}
-    }
-
-    response_json, status_code = call_data_api("findOne", find_payload)
-
-    if status_code != 200:
-        log.error(f"Data API findOne failed with status {status_code}")
-        return jsonify(response_json), status_code
-
-    user = response_json.get("document")
-    # --- END REFACTOR ---
+    # --- THIS IS THE CRITICAL STEP ---
+    try:
+        log.info(f"Attempting to find user: {telegram_user_id}")
+        log.info("Executing: db.users.find_one(...)")
+        user = db.users.find_one({"telegram_user_id": telegram_user_id})
+        log.info(f"db.users.find_one() result: {'User found' if user else 'User not found'}")
+    except Exception as e:
+        # This will catch the ServerSelectionTimeoutError
+        log.error(f"CRITICAL: db.users.find_one() FAILED: {e}", exc_info=True)
+        return jsonify({"error": "Database query failed", "details": str(e)}), 500
+    # --- END CRITICAL STEP ---
 
     if not user:
         log.info(f"User {telegram_user_id} not found. Creating new user...")
@@ -133,27 +133,20 @@ def find_or_create_user():
 
         new_user_doc = {
             "telegram_user_id": telegram_user_id,
-            "created_at": {"$date": datetime.now(UTC_TZ).isoformat().replace('+00:00', 'Z')}, # Use Data API date format
+            "created_at": datetime.now(UTC_TZ),
             "onboarding_complete": False,
             **default_profile
         }
 
-        # --- REFACTOR: Use Data API to insert user ---
-        insert_payload = {
-            "collection": "users",
-            "document": new_user_doc
-        }
-
-        insert_res, insert_status = call_data_api("insertOne", insert_payload)
-
-        if insert_status != 201: # 201 Created
-            log.error(f"Data API insertOne failed with status {insert_status}")
-            return jsonify(insert_res), insert_status
-
-        # Manually construct the user object after insert
-        user = new_user_doc
-        user['_id'] = insert_res.get('insertedId') # This is just the string
-        # --- END REFACTOR ---
+        try:
+            log.info("Executing: db.users.insert_one(...)")
+            result = db.users.insert_one(new_user_doc)
+            log.info("Executing: db.users.find_one(inserted_id)")
+            user = db.users.find_one({"_id": result.inserted_id})
+            log.info("New user created and fetched successfully.")
+        except Exception as e:
+            log.error(f"CRITICAL: db.users.insert_one() FAILED: {e}", exc_info=True)
+            return jsonify({"error": "Database insert failed", "details": str(e)}), 500
 
     if not user:
         log.error("CRITICAL: User is still None after insert logic.")
