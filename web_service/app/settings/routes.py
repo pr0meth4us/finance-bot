@@ -26,33 +26,6 @@ def get_user_settings():
     return jsonify(user.get('settings', {}))
 
 
-# --- NEW ENDPOINT ---
-@settings_bp.route('/language', methods=['POST'])
-def update_user_language():
-    """Updates the preferred language for a user."""
-    db = get_db()
-    user_id, error = get_user_id_from_request()
-    if error:
-        return error
-
-    data = request.json
-    lang = data.get('language')
-
-    if lang not in ['en', 'km']:
-        return jsonify({'error': 'Invalid language code. Must be "en" or "km".'}), 400
-
-    result = db.users.update_one(
-        {'_id': user_id},
-        {'$set': {'settings.language': lang}}
-    )
-
-    if result.matched_count == 0:
-        return jsonify({'error': 'User not found'}), 404
-
-    return jsonify({'message': f'Language updated to {lang}'})
-# --- END NEW ENDPOINT ---
-
-
 @settings_bp.route('/balance', methods=['POST'])
 def update_initial_balance():
     """Updates the initial balance for a specific currency for a user."""
