@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import logging
 from flask import Flask, jsonify, g, current_app
 from pymongo import MongoClient
+from pymongo.server_api import ServerApi  # <-- 1. IMPORT ADDED
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from .config import Config
@@ -29,13 +30,11 @@ FINANCIAL_TRANSACTION_CATEGORIES = [
     'Loan Lent', 'Debt Repayment', 'Loan Received', 'Debt Settled', 'Initial Balance'
 ]
 
-# --- Default Connection Arguments ---
-MONGO_CONNECTION_ARGS = {
-    "tls": True,
-    "serverSelectionTimeoutMS": 30000,
-    "connectTimeoutMS": 20000,
-    "socketTimeoutMS": 20000,
-    "tlsCAFile": certifi.where(),
+# --- 2. MONGO_CONNECTION_ARGS REMOVED ---
+# It's not needed for 'mongodb+srv://'
+# We now use ServerApi instead:
+SERVER_API_ARGS = {
+    "server_api": ServerApi("1", strict=True, deprecation_errors=True)
 }
 
 
@@ -208,7 +207,8 @@ def run_scheduled_report(period):
     log.info(f"Running {period} scheduled report job...")
 
     try:
-        client = MongoClient(Config.MONGODB_URI, **MONGO_CONNECTION_ARGS)
+        # 3. USE THE CORRECT CONNECTION METHOD HERE TOO
+        client = MongoClient(Config.MONGODB_URI, **SERVER_API_ARGS)
         db = client[Config.DB_NAME]
         token = Config.TELEGRAM_TOKEN
     except Exception as e:
@@ -269,7 +269,8 @@ def run_scheduled_report(period):
 def send_daily_reminder_job():
     log.info("Running daily reminder job...")
     try:
-        client = MongoClient(Config.MONGODB_URI, **MONGO_CONNECTION_ARGS)
+        # 3. USE THE CORRECT CONNECTION METHOD HERE TOO
+        client = MongoClient(Config.MONGODB_URI, **SERVER_API_ARGS)
         db = client[Config.DB_NAME]
     except Exception as e:
         log.error(f"Failed to create MongoClient for daily job: {e}", exc_info=True)
@@ -310,7 +311,9 @@ def get_db():
     if 'db_client' not in g:
         uri = current_app.config['MONGODB_URI']
         try:
-            g.db_client = MongoClient(uri, **MONGO_CONNECTION_ARGS)
+            # --- 4. THIS IS THE KEY FIX ---
+            # Use the correct connection args for Atlas SRV
+            g.db_client = MongoClient(uri, **SERVER_API_ARGS)
             g.db = g.db_client[current_app.config['DB_NAME']]
         except Exception as e:
             log.error(f"Failed to create MongoClient: {e}", exc_info=True)
@@ -428,7 +431,8 @@ def create_app():
 
         try:
             log.info(f"Creating fresh MongoClient for ping. URI: {uri[:15]}...")
-            client = MongoClient(uri, **MONGO_CONNECTION_ARGS)
+            # --- 5. USE THE CORRECT CONNECTION METHOD HERE TOO ---
+            client = MongoClient(uri, **SERVER_API_ARGS)
 
             log.info("Pinging admin...")
             admin_ok = client.admin.command("ping").get("ok", 0) == 1
