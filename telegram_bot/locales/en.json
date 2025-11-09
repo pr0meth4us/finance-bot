@@ -52,7 +52,7 @@
     "setup_complete": "🎉 Setup Complete!\n\nYou're all set. Here is the main menu."
   },
   "settings": {
-    "menu_header": "<b>⚙️ Bot Settings</b>\n\nHere you can manage your preferences and initial data.\n\n<b>Initial Balances:</b>\n  💵 ${usd_bal:,.2f} USD\n  ៛ {khr_bal:,.0f} KHR\n\n<b>Exchange Rate:</b> {rate_text}\n",
+    "menu_header": "<b>⚙️ Bot Settings</b>\n\nHere you can manage your preferences and initial data.\n\n<b>Currency Mode:</b> {mode}\n\n<b>Initial Balances:</b>\n{balance_text}\n\n<b>Exchange Rate:</b> {rate_text}\n",
     "ask_balance_account": "Which initial balance do you want to set/update?",
     "ask_balance_amount": "Account: <b>{currency}</b>\n\nWhat is the new initial balance? (This will NOT create a transaction).",
     "balance_set_success": "✅ Initial balance for {currency} updated to {amount:,.2f}.",
@@ -64,7 +64,10 @@
     "category_ask_remove": "What type of category do you want to remove?",
     "category_ask_name": "Please type the name of the new **{cat_type}** category to {action}:",
     "category_add_success": "✅ Category '{name}' added to {type}.",
-    "category_remove_success": "✅ Category '{name}' removed from {type}."
+    "category_remove_success": "✅ Category '{name}' removed from {type}.",
+    "switch_to_dual_confirm": "This will switch your account to dual-currency (USD & KHR) mode. This allows you to log transactions in both currencies and cannot be undone.\n\nAre you sure?",
+    "ask_name_km_switch": "Great. Please reply with your name in Khmer (e.g., ចន ដូ).",
+    "switch_to_dual_success": "✅ Success! Your account is now in dual-currency mode and your language is set to Khmer. You can change the language back in settings."
   },
   "tx": {
     "ask_amount": "{emoji} Enter the amount:",
@@ -111,6 +114,7 @@
     "edit_ask_new_amount": "Please enter the new amount:",
     "edit_ask_new_desc": "Please enter the new description:",
     "edit_ask_new_category": "Please select the new category:",
+    "edit_no_currency_single": "You are in single-currency mode and cannot edit the currency.",
     "edit_invalid_amount": "Invalid amount. Please enter a valid number.",
     "edit_invalid_date": "Invalid date format. Please use YYYY-MM-DD.",
     "edit_success": "✅ Transaction successfully updated!",

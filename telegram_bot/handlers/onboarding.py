@@ -14,8 +14,8 @@ from utils.i18n import t
 
 # Conversation states
 (
-    ASK_CURRENCY_MODE,
     ASK_LANGUAGE,
+    ASK_CURRENCY_MODE,
     ASK_NAME_EN,
     ASK_NAME_KM,
     ASK_SINGLE_CURRENCY,
@@ -35,12 +35,31 @@ async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['user_profile'] = user_profile
     context.user_data['onboarding_data'] = {}
 
+    # This is the new first question, sent bilingually
     await (update.message or update.callback_query.message).reply_text(
-        t("onboarding.welcome", context)
+        "Welcome to FinanceBot! Please select your language.\n\n"
+        "សូមស្វាគមន៍មកកាន់ FinanceBot! សូមជ្រើសរើសភាសារបស់អ្នក។\n\n"
+        "(Reply with: en or km)"
     )
-    await (update.message or update.callback_query.message).reply_text(
-        t("onboarding.ask_mode", context)
-    )
+    return ASK_LANGUAGE
+
+
+async def received_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles language selection and asks for currency mode."""
+    choice = update.message.text.strip().lower()
+    data = context.user_data['onboarding_data']
+
+    if choice not in ['en', 'km']:
+        await update.message.reply_text(
+            "Invalid choice. Please reply with en or km.\n\n"
+            "ការជ្រើសរើសមិនត្រឹមត្រូវ។ សូមឆ្លើយតបជាមួយ en ឬ km ។"
+        )
+        return ASK_LANGUAGE
+
+    data['language'] = choice
+    context.user_data['user_profile']['settings']['language'] = choice
+
+    await update.message.reply_text(t("onboarding.ask_mode", context))
     return ASK_CURRENCY_MODE
 
 
@@ -51,34 +70,19 @@ async def received_currency_mode(update: Update, context: ContextTypes.DEFAULT_T
 
     if choice == '1':
         data['mode'] = 'single'
-        data['language'] = 'en'
+        # For single mode, we now only ask for EN name
         await update.message.reply_text(t("onboarding.ask_name_en", context))
         return ASK_NAME_EN
 
     elif choice == '2':
         data['mode'] = 'dual'
-        await update.message.reply_text(t("onboarding.ask_language", context))
-        return ASK_LANGUAGE
+        # For dual mode, we ask for both names
+        await update.message.reply_text(t("onboarding.ask_name_en", context))
+        return ASK_NAME_EN
 
     else:
         await update.message.reply_text(t("onboarding.invalid_mode", context))
         return ASK_CURRENCY_MODE
-
-
-async def received_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles language selection for dual-currency mode."""
-    choice = update.message.text.strip().lower()
-    data = context.user_data['onboarding_data']
-
-    if choice not in ['en', 'km']:
-        await update.message.reply_text(t("onboarding.invalid_language", context))
-        return ASK_LANGUAGE
-
-    data['language'] = choice
-    context.user_data['user_profile']['settings']['language'] = choice
-
-    await update.message.reply_text(t("onboarding.ask_name_en", context))
-    return ASK_NAME_EN
 
 
 async def received_name_en(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -247,11 +251,11 @@ onboarding_conversation_handler = ConversationHandler(
         # This handler is entered programmatically by the decorator
     ],
     states={
-        ASK_CURRENCY_MODE: [MessageHandler(
-            filters.TEXT & ~filters.COMMAND, received_currency_mode
-        )],
         ASK_LANGUAGE: [MessageHandler(
             filters.TEXT & ~filters.COMMAND, received_language
+        )],
+        ASK_CURRENCY_MODE: [MessageHandler(
+            filters.TEXT & ~filters.COMMAND, received_currency_mode
         )],
         ASK_NAME_EN: [MessageHandler(
             filters.TEXT & ~filters.COMMAND, received_name_en
