@@ -4,7 +4,9 @@
     "quick_check_header": "🔍 Here is your quick summary:",
     "cancel": "Operation cancelled.",
     "cancel_onboarding": "Onboarding cancelled. Type /start to try again when you're ready.",
-    "error_generic": "An error occurred. Please try again later."
+    "error_generic": "An error occurred.\n    Please try again later.",
+    "expense_word": "Expense",
+    "income_word": "Income"
   },
   "summary": {
     "status_header": "\n\n--- Your Current Status ---",

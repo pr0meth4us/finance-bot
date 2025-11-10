@@ -140,7 +140,12 @@ def parse_date_from_args(args):
 def _format_success_message(data, context: ContextTypes.DEFAULT_TYPE):
     """Formats a detailed success message for logged items."""
     lines = [t("command.success_header", context)]
-    lines.append(t("command.success_type", context, type=data['type'].title()))
+
+    # --- THIS IS THE FIX for "Expense" ---
+    type_key = "common.expense_word" if data['type'] == 'expense' else "common.income_word"
+    type_val = t(type_key, context)
+    lines.append(t("command.success_type", context, type=type_val))
+    # --- END FIX ---
 
     amount = data.get('amount') or data.get('iou_amount')
     currency = data.get('currency') or data.get('iou_currency')
@@ -196,7 +201,10 @@ async def handle_generic_transaction(update: Update,
         amount_str = remaining_args[-1]
         amount, currency = parse_amount_and_currency_for_mode(amount_str, mode, primary_curr)
 
-        category = remaining_args[0]
+        # --- THIS IS THE FIX for "categories.utilities" ---
+        category = remaining_args[0].strip().title()
+        # --- END FIX ---
+
         description = " ".join(remaining_args[1:-1])
 
         tx_data = {
