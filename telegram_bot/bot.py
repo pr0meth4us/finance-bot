@@ -7,7 +7,8 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from dotenv import load_dotenv
 
 from handlers import (
-    start, quick_check, cancel,
+    # start, # <-- REMOVED
+    quick_check, cancel,
     tx_conversation_handler,
     iou_conversation_handler,
     repay_lump_conversation_handler,
@@ -106,7 +107,7 @@ def main():  # <-- MODIFICATION: Changed back to synchronous
     app.add_error_handler(on_error)
 
     # System commands
-    app.add_handler(CommandHandler("start", start))
+    # app.add_handler(CommandHandler("start", start)) # <-- REMOVED
     app.add_handler(CommandHandler("cancel", cancel))
 
 
@@ -124,7 +125,8 @@ def main():  # <-- MODIFICATION: Changed back to synchronous
     app.add_handler(settings_conversation_handler)
 
     # --- THIS IS THE FIX ---
-    # This handler MUST be added so the bot knows about the onboarding states
+    # This handler is now the main entry for /start AND all onboarding
+    # It MUST be registered before the unified_message_conversation_handler
     app.add_handler(onboarding_conversation_handler)
     # --- END FIX ---
 
@@ -132,7 +134,7 @@ def main():  # <-- MODIFICATION: Changed back to synchronous
     app.add_handler(unified_message_conversation_handler)
 
     # Callback-only handlers
-    app.add_handler(CallbackQueryHandler(start, pattern="^start$"))
+    # app.add_handler(CallbackQueryHandler(start, pattern="^start$")) # <-- REMOVED
     app.add_handler(CallbackQueryHandler(quick_check, pattern="^quick_check$"))
     app.add_handler(CallbackQueryHandler(history_menu, pattern="^history$"))
     app.add_handler(CallbackQueryHandler(manage_transaction, pattern="^manage_tx_"))

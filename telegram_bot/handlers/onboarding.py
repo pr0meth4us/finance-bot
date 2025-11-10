@@ -1,4 +1,4 @@
-# --- Start of modified file: telegram_bot/handlers/onboarding.py ---
+# --- telegram_bot/handlers/onboarding.py (FULL) ---
 
 from telegram import Update
 from telegram.ext import (
@@ -104,15 +104,22 @@ async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     message_interface = update.message
     if update.callback_query:
+        # If started from a callback (like 'Back to Main Menu'), edit the message
+        await update.callback_query.answer()
         message_interface = update.callback_query.message
+    else:
+        # If started from /start, just use the message
+        message_interface = update.message
 
+    # --- THIS IS THE MODIFIED WELCOME MESSAGE ---
     await message_interface.reply_text(
         "Welcome to FinanceBot! Please select your language.\n"
-        "Write `en` for English.\n\n"
-        "សូមស្វាគមន៍មកកាន់ FinanceBot! សូមជ្រើសរើសភាសារបស់អ្នក។\n"
-        "សរសេរ `km` សម្រាប់ភាសាខ្មែរ។",
-        parse_mode='Markdown'
+        "➡️ For English, reply: en\n\n"
+        "សូមស្វាគមន៍មកកាន់ FinanceBot! សូមជ្រើសរើសភាសា។\n"
+        "➡️ សម្រាប់ភាសាខ្មែរ សូមឆ្លើយតប៖ km"
     )
+    # --- END MODIFICATION ---
+
     log.info(f"User {user_id}: Sent language prompt. Awaiting state ASK_LANGUAGE.")
     return ASK_LANGUAGE
 
@@ -350,8 +357,8 @@ async def cancel_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 onboarding_conversation_handler = ConversationHandler(
     entry_points=[
-        CommandHandler('start', onboarding_start),  # <-- MODIFIED
-        CallbackQueryHandler(onboarding_start, pattern='^start$')  # <-- NEW
+        CommandHandler('start', onboarding_start),  # <-- MODIFIED: This is now the main entry
+        CallbackQueryHandler(onboarding_start, pattern='^start$')  # <-- NEW: Catches 'back' buttons
     ],
     states={
         ASK_LANGUAGE: [MessageHandler(
@@ -380,6 +387,9 @@ onboarding_conversation_handler = ConversationHandler(
         )],
     },
     fallbacks=[
+        # Allow /cancel during onboarding
+        CommandHandler('cancel', cancel_onboarding),
+        # Also catch any other command
         MessageHandler(filters.COMMAND, cancel_onboarding)
     ],
     per_message=False

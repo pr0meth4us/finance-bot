@@ -1,4 +1,4 @@
-# --- Start of modified file: telegram_bot/decorators.py ---
+# --- telegram_bot/decorators.py (FULL) ---
 from functools import wraps
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
@@ -62,4 +62,3 @@ def authenticate_user(func):
         return await func(update, context, *args, **kwargs)
 
     return wrapped
-# --- End of modified file ---
