@@ -6,20 +6,18 @@ from telegram.ext import (
     ConversationHandler,
     MessageHandler,
     CallbackQueryHandler,
-    filters
+    filters,
+    CommandHandler  # <-- IMPORT THIS
 )
 import logging
 import api_client
-from utils.i18n import t
+import keyboards  # <-- IMPORT THIS
+from .helpers import format_summary_message  # <-- IMPORT THIS
+from utils.i18n import t  # <-- IMPORT THIS
 
 log = logging.getLogger(__name__)
 
 # Conversation states
-# --- THIS IS THE FIX ---
-# Offset states by 100 to prevent collision with other handlers' states (which start at 0).
-# The decorator on other handlers returns ASK_LANGUAGE (now 100),
-# which other handlers (like unified_message_conversation_handler) will not
-# confuse with their own state 0 (SELECT_CATEGORY).
 (
     ASK_LANGUAGE,
     ASK_CURRENCY_MODE,
@@ -30,32 +28,91 @@ log = logging.getLogger(__name__)
     ASK_KHR_BALANCE,
     ASK_SINGLE_BALANCE
 ) = range(100, 108)
-# --- END FIX ---
 
 
 async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Starts the mandatory onboarding flow for new users.
-    This is triggered by the @authenticate_user decorator.
+    Starts the mandatory onboarding flow OR shows the main menu.
+    This is the main entry point for /start.
     """
     user_id = update.effective_user.id
-    log.info(f"User {user_id}: Entering onboarding_start.")
+    log.info(f"User {user_id}: Entering onboarding_start (from /start or callback).")
 
+    if not update.effective_user:
+        log.warning("onboarding_start received update with no effective_user.")
+        return ConversationHandler.END
+
+    cached = context.user_data.get("user_profile")
+    if not cached:
+        log.info(f"User {user_id}: No profile in cache. Fetching from API.")
+        profile = api_client.find_or_create_user(user_id)
+        if not profile or profile.get("error"):
+            msg = profile.get("error", "Auth failed.")
+            log.error(f"User {user_id}: Auth failed or API error: {msg}")
+            if update.message:
+                await update.message.reply_text(f"🚫 {msg}")
+            elif update.callback_query:
+                await context.bot.answer_callback_query(update.callback_query.id, f"🚫 {msg}", show_alert=True)
+            return ConversationHandler.END
+        context.user_data["user_profile"] = profile
+        log.info(f"User {user_id}: Profile fetched and cached.")
+    else:
+        log.info(f"User {user_id}: Profile found in cache.")
+
+    is_complete = context.user_data["user_profile"].get("onboarding_complete")
+
+    if is_complete:
+        # --- REPLICATE common.start LOGIC ---
+        # User is onboarded, just call the normal start handler logic
+        log.info(f"User {user_id}: Already onboarded. Showing main menu.")
+        user_profile = context.user_data['user_profile']
+        user_id_obj = user_profile['_id']  # Get the object ID
+
+        lang = user_profile.get('settings', {}).get('language', 'en')
+        user_name = user_profile.get('name_en', 'User')
+        if lang == 'km' and user_profile.get('name_km'):
+            user_name = user_profile.get('name_km')
+
+        text = t("common.welcome", context, name=user_name)
+        keyboard = keyboards.main_menu_keyboard(context)
+        chat_id = update.effective_chat.id
+
+        summary_data = api_client.get_detailed_summary(user_id_obj)
+        summary_text = format_summary_message(summary_data, context)
+
+        if update.callback_query:
+            await update.callback_query.answer()
+            try:
+                await update.callback_query.edit_message_text(
+                    text + summary_text, parse_mode='HTML', reply_markup=keyboard
+                )
+            except Exception:
+                pass  # Message might be identical
+        else:
+            await context.bot.send_message(
+                chat_id=chat_id, text=text + summary_text, parse_mode='HTML', reply_markup=keyboard
+            )
+        return ConversationHandler.END  # End the conversation
+        # --- END REPLICATE ---
+
+    # --- START ONBOARDING FLOW ---
+    log.info(f"User {user_id}: Not onboarded. Starting flow.")
     user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
     context.user_data['user_profile'] = user_profile
     context.user_data['onboarding_data'] = {}
 
-    # --- THIS IS THE V3 FIX ---
-    # New first question, hardcoded bilingually, with explicit instructions.
-    await (update.message or update.callback_query.message).reply_text(
+    message_interface = update.message
+    if update.callback_query:
+        message_interface = update.callback_query.message
+
+    await message_interface.reply_text(
         "Welcome to FinanceBot! Please select your language.\n"
         "Write `en` for English.\n\n"
         "សូមស្វាគមន៍មកកាន់ FinanceBot! សូមជ្រើសរើសភាសារបស់អ្នក។\n"
         "សរសេរ `km` សម្រាប់ភាសាខ្មែរ។",
         parse_mode='Markdown'
     )
-    # --- END FIX ---
     log.info(f"User {user_id}: Sent language prompt. Awaiting state ASK_LANGUAGE.")
     return ASK_LANGUAGE
 
@@ -164,8 +221,6 @@ async def received_single_currency(update: Update, context: ContextTypes.DEFAULT
     data['primary_currency'] = update.message.text.strip().upper()
     log.info(f"User {user_id}: Received single currency '{data['primary_currency']}'.")
 
-    # Save mode, language, name, and currency to DB
-    # --- THIS IS THE FIX for SyntaxError ---
     api_client.update_user_mode(
         user_id,
         mode=data['mode'],
@@ -173,7 +228,6 @@ async def received_single_currency(update: Update, context: ContextTypes.DEFAULT
         name_en=data['name_en'],
         primary_currency=data['primary_currency']
     )
-    # --- END FIX ---
     log.info(f"User {user_id}: Saved mode/names/currency to DB.")
 
     # Update local cache
@@ -219,10 +273,6 @@ async def received_khr_balance(update: Update, context: ContextTypes.DEFAULT_TYP
     """Handles receiving the initial KHR balance (dual mode) and ends onboarding."""
     user_id = update.effective_user.id
     try:
-        # --- THIS IS THE FIX for circular import ---
-        # from .common import start # <-- REMOVED
-        # --- END FIX ---
-
         amount = float(update.message.text)
         log.info(f"User {user_id}: Received KHR balance '{amount}'.")
 
@@ -237,9 +287,8 @@ async def received_khr_balance(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(
             t("onboarding.setup_complete", context)
         )
-        # --- THIS IS THE FIX for circular import ---
-        return ConversationHandler.END # <-- MODIFIED
-        # --- END FIX ---
+        # Manually call the start logic again to show the main menu
+        return await onboarding_start(update, context)
 
     except (ValueError, TypeError):
         log.warning(f"User {user_id}: Invalid KHR balance input.")
@@ -257,10 +306,6 @@ async def received_single_balance(update: Update, context: ContextTypes.DEFAULT_
     """Handles receiving the initial balance (single mode) and ends onboarding."""
     user_id = update.effective_user.id
     try:
-        # --- THIS IS THE FIX for circular import ---
-        # from .common import start # <-- REMOVED
-        # --- END FIX ---
-
         amount = float(update.message.text)
         currency = context.user_data['onboarding_data']['primary_currency']
         log.info(f"User {user_id}: Received single balance '{amount} {currency}'.")
@@ -276,9 +321,8 @@ async def received_single_balance(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text(
             t("onboarding.setup_complete", context)
         )
-        # --- THIS IS THE FIX for circular import ---
-        return ConversationHandler.END # <-- MODIFIED
-        # --- END FIX ---
+        # Manually call the start logic again to show the main menu
+        return await onboarding_start(update, context)
 
 
     except (ValueError, TypeError):
@@ -306,7 +350,8 @@ async def cancel_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 onboarding_conversation_handler = ConversationHandler(
     entry_points=[
-        # This handler is entered programmatically by the decorator
+        CommandHandler('start', onboarding_start),  # <-- MODIFIED
+        CallbackQueryHandler(onboarding_start, pattern='^start$')  # <-- NEW
     ],
     states={
         ASK_LANGUAGE: [MessageHandler(
@@ -339,5 +384,4 @@ onboarding_conversation_handler = ConversationHandler(
     ],
     per_message=False
 )
-
 # --- End of modified file ---

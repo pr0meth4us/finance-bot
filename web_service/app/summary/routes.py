@@ -8,6 +8,7 @@ from datetime import datetime, time, date, timedelta
 from zoneinfo import ZoneInfo
 from app import get_db
 from app.utils.auth import get_user_id_from_request
+from app.utils.currency import get_live_usd_to_khr_rate # <-- ADDED THIS FIX
 
 summary_bp = Blueprint('summary', __name__, url_prefix='/summary')
 

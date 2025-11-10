@@ -1,12 +1,13 @@
-# --- telegram_bot/decorators.py (FULL) ---
+# --- Start of modified file: telegram_bot/decorators.py ---
 from functools import wraps
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 import api_client
-from handlers.onboarding import onboarding_start
+# from handlers.onboarding import onboarding_start # --- REMOVED
 import logging
 
 log = logging.getLogger(__name__)
+
 
 def authenticate_user(func):
     @wraps(func)
@@ -38,41 +39,27 @@ def authenticate_user(func):
         else:
             log.info(f"User {user_id}: Profile found in cache.")
 
-        # --- Onboarding redirect for first-time users ---
+        # --- MODIFIED ONBOARDING REDIRECT ---
         is_complete = context.user_data["user_profile"].get("onboarding_complete")
         if not is_complete:
-            log.info(f"User {user_id}: Onboarding_complete=False. Redirecting to onboarding.")
+            # Don't redirect. Just block the handler and tell the user what to do.
+            # This prevents the decorator from returning a state to the wrong handler.
+            log.info(f"User {user_id}: Onboarding_complete=False. Blocking handler '{func.__name__}'.")
 
-            # --- THIS IS THE FIX ---
-            # This list must contain every function used inside the onboarding handler
-            onboarding_functions = [
-                "onboarding_start",
-                "received_language",
-                "received_currency_mode",
-                "received_name_en",
-                "received_name_km",
-                "received_single_currency",
-                "received_usd_balance",
-                "received_khr_balance",
-                "received_single_balance",
-                "cancel_onboarding" # Don't forget the fallback
-            ]
-            # --- END FIX ---
+            if update.message:
+                await update.message.reply_text("Please complete the setup first. Type /start to begin.")
+            elif update.callback_query:
+                await context.bot.answer_callback_query(
+                    callback_query_id=update.callback_query.id,
+                    text="Please complete the setup first. Type /start to begin.",
+                    show_alert=True,
+                )
 
-            # Only start onboarding if we're not already inside it
-            if func.__name__ not in onboarding_functions:
-                log.info(f"User {user_id}: Handler '{func.__name__}' is not part of onboarding. Starting flow.")
-                if update.message:
-                    return await onboarding_start(update, context)
-                if update.callback_query:
-                    await context.bot.send_message(
-                        chat_id=update.effective_chat.id,
-                        text="Welcome! Let's start with some setup." # This is a fallback
-                    )
-                    return await onboarding_start(update.callback_query, context)
-            else:
-                log.info(f"User {user_id}: Already in onboarding handler '{func.__name__}'. Proceeding.")
+            # Cleanly end the current conversation/handler
+            return ConversationHandler.END
+        # --- END MODIFICATION ---
 
         return await func(update, context, *args, **kwargs)
 
     return wrapped
+# --- End of modified file ---
