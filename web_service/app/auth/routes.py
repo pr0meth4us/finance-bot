@@ -12,9 +12,6 @@ log = logging.getLogger(__name__)
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 UTC_TZ = ZoneInfo("UTC")
 
-# --- ADMIN CONSTANTS REMOVED ---
-# All users are now treated equally upon creation.
-
 DEFAULT_EXPENSE_CATEGORIES = [
     "Food", "Drink", "Transport", "Shopping", "Bills", "Utilities",
     "Entertainment", "Personal Care", "Work", "Alcohol", "For Others",
@@ -29,13 +26,12 @@ DEFAULT_INCOME_CATEGORIES = [
 def get_default_settings_for_user():
     """
     Generates the default user profile document for any new user.
-    All users start as 'user' and 'inactive'.
+    All users start as 'inactive'.
     """
-    # No more admin check. Everyone gets the same default document.
+    # No more role field. Everyone gets the same default document.
     return {
         "name_en": None,
         "name_km": None,
-        "role": "user",
         "subscription_status": "inactive",
         "settings": {
             "language": None,
@@ -109,9 +105,7 @@ def find_or_create_user():
     if not user:
         return jsonify({"error": "Failed to find or create user"}), 500
 
-    # --- MODIFIED ACCESS CHECK ---
-    # We no longer check for 'admin' role. All bot access, for all users,
-    # is gated *only* by the subscription_status.
+    # Access is gated *only* by the subscription_status.
     if user['subscription_status'] != 'active':
         error_msg = (
             "🚫 Subscription not active.\n"
@@ -120,7 +114,6 @@ def find_or_create_user():
             "For subscription info, please contact: @pr0meth4us"
         )
         return jsonify({"error": error_msg}), 403
-    # --- END MODIFICATION ---
 
     return jsonify(serialize_user(user))
 # --- End of file ---

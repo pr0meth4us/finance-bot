@@ -7,13 +7,13 @@ from telegram.ext import (
     MessageHandler,
     CallbackQueryHandler,
     filters,
-    CommandHandler  # <-- IMPORT THIS
+    CommandHandler
 )
 import logging
 import api_client
-import keyboards  # <-- IMPORT THIS
-from .helpers import format_summary_message  # <-- IMPORT THIS
-from utils.i18n import t  # <-- IMPORT THIS
+import keyboards
+from .helpers import format_summary_message
+from utils.i18n import t
 
 log = logging.getLogger(__name__)
 
@@ -35,8 +35,8 @@ async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Starts the mandatory onboarding flow OR shows the main menu.
     This is the main entry point for /start.
     """
-    user_id = update.effective_user.id
-    log.info(f"User {user_id}: Entering onboarding_start (from /start or callback).")
+    user_id_str = update.effective_user.id
+    log.info(f"User {user_id_str}: Entering onboarding_start (from /start or callback).")
 
     if not update.effective_user:
         log.warning("onboarding_start received update with no effective_user.")
@@ -44,29 +44,32 @@ async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     cached = context.user_data.get("user_profile")
     if not cached:
-        log.info(f"User {user_id}: No profile in cache. Fetching from API.")
-        profile = api_client.find_or_create_user(user_id)
+        log.info(f"User {user_id_str}: No profile in cache. Fetching from API.")
+        # Use the Telegram ID (string) for auth
+        profile = api_client.find_or_create_user(user_id_str)
         if not profile or profile.get("error"):
             msg = profile.get("error", "Auth failed.")
-            log.error(f"User {user_id}: Auth failed or API error: {msg}")
+            log.error(f"User {user_id_str}: Auth failed or API error: {msg}")
             if update.message:
                 await update.message.reply_text(f"🚫 {msg}")
             elif update.callback_query:
                 await context.bot.answer_callback_query(update.callback_query.id, f"🚫 {msg}", show_alert=True)
             return ConversationHandler.END
         context.user_data["user_profile"] = profile
-        log.info(f"User {user_id}: Profile fetched and cached.")
+        log.info(f"User {user_id_str}: Profile fetched and cached.")
     else:
-        log.info(f"User {user_id}: Profile found in cache.")
+        log.info(f"User {user_id_str}: Profile found in cache.")
 
     is_complete = context.user_data["user_profile"].get("onboarding_complete")
 
     if is_complete:
         # --- REPLICATE common.start LOGIC ---
-        # User is onboarded, just call the normal start handler logic
-        log.info(f"User {user_id}: Already onboarded. Showing main menu.")
+        log.info(f"User {user_id_str}: Already onboarded. Showing main menu.")
         user_profile = context.user_data['user_profile']
-        user_id_obj = user_profile['_id']  # Get the object ID
+        # --- THIS IS THE KEY ---
+        # Get the MONGO _id for API calls
+        user_id_obj = user_profile['_id']
+        # ---
 
         lang = user_profile.get('settings', {}).get('language', 'en')
         user_name = user_profile.get('name_en', 'User')
@@ -77,6 +80,7 @@ async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = keyboards.main_menu_keyboard(context)
         chat_id = update.effective_chat.id
 
+        # Use the Mongo _id for the summary call
         summary_data = api_client.get_detailed_summary(user_id_obj)
         summary_text = format_summary_message(summary_data, context)
 
@@ -96,7 +100,7 @@ async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # --- END REPLICATE ---
 
     # --- START ONBOARDING FLOW ---
-    log.info(f"User {user_id}: Not onboarded. Starting flow.")
+    log.info(f"User {user_id_str}: Not onboarded. Starting flow.")
     user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
     context.user_data['user_profile'] = user_profile
@@ -104,35 +108,31 @@ async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     message_interface = update.message
     if update.callback_query:
-        # If started from a callback (like 'Back to Main Menu'), edit the message
         await update.callback_query.answer()
         message_interface = update.callback_query.message
     else:
-        # If started from /start, just use the message
         message_interface = update.message
 
-    # --- THIS IS THE MODIFIED WELCOME MESSAGE ---
     await message_interface.reply_text(
         "Welcome to FinanceBot! Please select your language.\n"
         "➡️ For English, reply: en\n\n"
         "សូមស្វាគមន៍មកកាន់ FinanceBot! សូមជ្រើសរើសភាសា។\n"
         "➡️ សម្រាប់ភាសាខ្មែរ សូមឆ្លើយតប៖ km"
     )
-    # --- END MODIFICATION ---
 
-    log.info(f"User {user_id}: Sent language prompt. Awaiting state ASK_LANGUAGE.")
+    log.info(f"User {user_id_str}: Sent language prompt. Awaiting state ASK_LANGUAGE.")
     return ASK_LANGUAGE
 
 
 async def received_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles language selection and asks for currency mode."""
-    user_id = update.effective_user.id
+    user_id_str = update.effective_user.id
     choice = update.message.text.strip().lower()
     data = context.user_data['onboarding_data']
-    log.info(f"User {user_id}: In state ASK_LANGUAGE. Received: '{choice}'")
+    log.info(f"User {user_id_str}: In state ASK_LANGUAGE. Received: '{choice}'")
 
     if choice not in ['en', 'km']:
-        log.warning(f"User {user_id}: Invalid language choice.")
+        log.warning(f"User {user_id_str}: Invalid language choice.")
         await update.message.reply_text(
             "Invalid choice. Please reply with `en` or `km`.\n\n"
             "ការជ្រើសរើសមិនត្រឹមត្រូវ។ សូមឆ្លើយតបជាមួយ `en` ឬ `km` ។",
@@ -142,47 +142,44 @@ async def received_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data['language'] = choice
     context.user_data['user_profile']['settings']['language'] = choice
-    log.info(f"User {user_id}: Set language to '{choice}'.")
+    log.info(f"User {user_id_str}: Set language to '{choice}'.")
 
-    # Now that language is set, we can use the t() function
     await update.message.reply_text(t("onboarding.ask_mode", context))
-    log.info(f"User {user_id}: Sent currency mode prompt. Awaiting state ASK_CURRENCY_MODE.")
+    log.info(f"User {user_id_str}: Sent currency mode prompt. Awaiting state ASK_CURRENCY_MODE.")
     return ASK_CURRENCY_MODE
 
 
 async def received_currency_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the '1' or '2' currency mode choice."""
-    user_id = update.effective_user.id
+    user_id_str = update.effective_user.id
     choice = update.message.text.strip()
     data = context.user_data['onboarding_data']
-    log.info(f"User {user_id}: In state ASK_CURRENCY_MODE. Received: '{choice}'")
+    log.info(f"User {user_id_str}: In state ASK_CURRENCY_MODE. Received: '{choice}'")
 
     if choice == '1':
         data['mode'] = 'single'
-        log.info(f"User {user_id}: Set mode to 'single'.")
-        # For single mode, we now only ask for EN name
+        log.info(f"User {user_id_str}: Set mode to 'single'.")
         await update.message.reply_text(t("onboarding.ask_name_en", context))
         return ASK_NAME_EN
 
     elif choice == '2':
         data['mode'] = 'dual'
-        log.info(f"User {user_id}: Set mode to 'dual'.")
-        # For dual mode, we ask for both names
+        log.info(f"User {user_id_str}: Set mode to 'dual'.")
         await update.message.reply_text(t("onboarding.ask_name_en", context))
         return ASK_NAME_EN
 
     else:
-        log.warning(f"User {user_id}: Invalid currency mode choice.")
+        log.warning(f"User {user_id_str}: Invalid currency mode choice.")
         await update.message.reply_text(t("onboarding.invalid_mode", context))
         return ASK_CURRENCY_MODE
 
 
 async def received_name_en(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles receiving the user's English name."""
-    user_id = update.effective_user.id
+    user_id_str = update.effective_user.id
     data = context.user_data['onboarding_data']
     data['name_en'] = update.message.text.strip()
-    log.info(f"User {user_id}: Received EN name '{data['name_en']}'. Mode is '{data['mode']}'.")
+    log.info(f"User {user_id_str}: Received EN name '{data['name_en']}'. Mode is '{data['mode']}'.")
 
     if data['mode'] == 'single':
         await update.message.reply_text(t("onboarding.ask_primary_currency", context))
@@ -195,14 +192,17 @@ async def received_name_en(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def received_name_km(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles receiving the user's Khmer name (dual mode)."""
-    user_id = update.effective_user.id
+    # --- THIS IS THE FIX ---
+    # Get the MONGO _id from the cache
+    user_id = context.user_data['user_profile']['_id']
+    # ---
     data = context.user_data['onboarding_data']
     data['name_km'] = update.message.text.strip()
     log.info(f"User {user_id}: Received KM name '{data['name_km']}'.")
 
     # Save mode, language, and names to DB
     api_client.update_user_mode(
-        user_id,
+        user_id,  # Use Mongo _id
         mode=data['mode'],
         language=data['language'],
         name_en=data['name_en'],
@@ -223,13 +223,16 @@ async def received_name_km(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def received_single_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles receiving the primary currency (single mode)."""
-    user_id = update.effective_user.id
+    # --- THIS IS THE FIX ---
+    # Get the MONGO _id from the cache
+    user_id = context.user_data['user_profile']['_id']
+    # ---
     data = context.user_data['onboarding_data']
     data['primary_currency'] = update.message.text.strip().upper()
     log.info(f"User {user_id}: Received single currency '{data['primary_currency']}'.")
 
     api_client.update_user_mode(
-        user_id,
+        user_id,  # Use Mongo _id
         mode=data['mode'],
         language=data['language'],
         name_en=data['name_en'],
@@ -251,12 +254,15 @@ async def received_single_currency(update: Update, context: ContextTypes.DEFAULT
 
 async def received_usd_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles receiving the initial USD balance (dual mode)."""
-    user_id = update.effective_user.id
+    # --- THIS IS THE FIX ---
+    # Get the MONGO _id from the cache
+    user_id = context.user_data['user_profile']['_id']
+    # ---
     try:
         amount = float(update.message.text)
         log.info(f"User {user_id}: Received USD balance '{amount}'.")
 
-        api_client.update_initial_balance(user_id, 'USD', amount)
+        api_client.update_initial_balance(user_id, 'USD', amount)  # Use Mongo _id
         context.user_data['user_profile']['settings']['initial_balances']['USD'] = amount
 
         await update.message.reply_text(
@@ -278,17 +284,20 @@ async def received_usd_balance(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def received_khr_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles receiving the initial KHR balance (dual mode) and ends onboarding."""
-    user_id = update.effective_user.id
+    # --- THIS IS THE FIX ---
+    # Get the MONGO _id from the cache
+    user_id = context.user_data['user_profile']['_id']
+    # ---
     try:
         amount = float(update.message.text)
         log.info(f"User {user_id}: Received KHR balance '{amount}'.")
 
-        api_client.update_initial_balance(user_id, 'KHR', amount)
+        api_client.update_initial_balance(user_id, 'KHR', amount)  # Use Mongo _id
         context.user_data['user_profile']['settings']['initial_balances']['KHR'] = amount
 
         # Mark onboarding as complete in the DB and local cache
         log.info(f"User {user_id}: Completing onboarding.")
-        api_client.complete_onboarding(user_id)
+        api_client.complete_onboarding(user_id)  # Use Mongo _id
         context.user_data['user_profile']['onboarding_complete'] = True
 
         await update.message.reply_text(
@@ -311,18 +320,21 @@ async def received_khr_balance(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def received_single_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles receiving the initial balance (single mode) and ends onboarding."""
-    user_id = update.effective_user.id
+    # --- THIS IS THE FIX ---
+    # Get the MONGO _id from the cache
+    user_id = context.user_data['user_profile']['_id']
+    # ---
     try:
         amount = float(update.message.text)
         currency = context.user_data['onboarding_data']['primary_currency']
         log.info(f"User {user_id}: Received single balance '{amount} {currency}'.")
 
-        api_client.update_initial_balance(user_id, currency, amount)
+        api_client.update_initial_balance(user_id, currency, amount)  # Use Mongo _id
         context.user_data['user_profile']['settings']['initial_balances'][currency] = amount
 
         # Mark onboarding as complete in the DB and local cache
         log.info(f"User {user_id}: Completing onboarding.")
-        api_client.complete_onboarding(user_id)
+        api_client.complete_onboarding(user_id)  # Use Mongo _id
         context.user_data['user_profile']['onboarding_complete'] = True
 
         await update.message.reply_text(

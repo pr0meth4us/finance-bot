@@ -39,11 +39,12 @@ def authenticate_user(func):
         else:
             log.info(f"User {user_id}: Profile found in cache.")
 
-        # --- MODIFIED ONBOARDING REDIRECT ---
+        # --- THIS IS THE FIX ---
+        # We check if onboarding is complete. If not, we just
+        # block the handler and tell the user what to do,
+        # instead of trying to redirect (which caused the crash).
         is_complete = context.user_data["user_profile"].get("onboarding_complete")
         if not is_complete:
-            # Don't redirect. Just block the handler and tell the user what to do.
-            # This prevents the decorator from returning a state to the wrong handler.
             log.info(f"User {user_id}: Onboarding_complete=False. Blocking handler '{func.__name__}'.")
 
             if update.message:
@@ -57,7 +58,7 @@ def authenticate_user(func):
 
             # Cleanly end the current conversation/handler
             return ConversationHandler.END
-        # --- END MODIFICATION ---
+        # --- END FIX ---
 
         return await func(update, context, *args, **kwargs)
 
