@@ -30,8 +30,12 @@ log = logging.getLogger(__name__) # Add logger
     CATEGORY_REMOVE_START,
     CATEGORY_REMOVE_GET_NAME,
     SWITCH_TO_DUAL_CONFIRM,
-    SWITCH_TO_DUAL_GET_KM_NAME
-) = range(11)
+    SWITCH_TO_DUAL_GET_KM_NAME,
+    # --- NEW STATES ---
+    ASK_NEW_LANGUAGE,
+    GET_MISSING_NAME
+    # --- END NEW STATES ---
+) = range(13) # <-- MODIFIED COUNT
 
 
 def _get_user_settings_for_settings(context: ContextTypes.DEFAULT_TYPE):
@@ -53,6 +57,12 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query:
         await query.answer()
+
+    # --- MODIFICATION: Use message if no query (e.g., returning from a sub-flow) ---
+    message_interface = update.message
+    if query:
+        message_interface = query.message
+    # ---
 
     user_id = context.user_data['user_profile']['_id']
     log.info(f"User {user_id} entering settings menu.")
@@ -116,18 +126,20 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = keyboards.settings_menu_keyboard(context)
 
+    # --- MODIFICATION: Use message_interface ---
     if query:
-        await query.edit_message_text(
+        await message_interface.edit_text(
             text=text,
             parse_mode='HTML',
             reply_markup=keyboard
         )
     else:
-        await update.message.reply_text(
+        await message_interface.reply_text(
             text=text,
             parse_mode='HTML',
             reply_markup=keyboard
         )
+    # ---
 
     return SETTINGS_MENU
 
@@ -420,6 +432,124 @@ async def received_km_name_for_switch(update: Update, context: ContextTypes.DEFA
         return await start(update, context)
 
 
+# --- NEW: Change Language Flow ---
+
+async def change_language_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Asks the user which language they want to switch to."""
+    query = update.callback_query
+    await query.answer()
+    log.info(f"User {context.user_data['user_profile']['_id']} starting change_language flow.")
+
+    await query.edit_message_text(
+        t("settings.ask_new_language", context),
+        reply_markup=keyboards.change_language_keyboard(context)
+    )
+    return ASK_NEW_LANGUAGE
+
+
+async def received_new_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Receives the new language choice.
+    If in dual-mode and the corresponding name is missing, asks for it.
+    Otherwise, just updates the language setting.
+    """
+    query = update.callback_query
+    await query.answer()
+
+    new_lang = query.data.split(':')[-1]
+    user_id = context.user_data['user_profile']['_id']
+    profile = context.user_data['user_profile']
+    mode = profile.get('settings', {}).get('currency_mode', 'dual')
+
+    context.user_data['new_lang'] = new_lang # Store for next step if needed
+
+    # Check if we need to ask for a missing name
+    if mode == 'dual':
+        if new_lang == 'km' and not profile.get('name_km'):
+            log.info(f"User {user_id} switching to KM, but name_km is missing. Asking.")
+            # Set lang in context so the prompt is in Khmer
+            context.user_data['user_profile']['settings']['language'] = 'km'
+            await query.edit_message_text(t("settings.ask_missing_name_km", context))
+            return GET_MISSING_NAME
+
+        if new_lang == 'en' and not profile.get('name_en'):
+            log.info(f"User {user_id} switching to EN, but name_en is missing. Asking.")
+            # Set lang in context so the prompt is in English
+            context.user_data['user_profile']['settings']['language'] = 'en'
+            await query.edit_message_text(t("settings.ask_missing_name_en", context))
+            return GET_MISSING_NAME
+
+    # If in single-mode OR in dual-mode with both names present, just switch
+    log.info(f"User {user_id} switching language to {new_lang}. No name needed.")
+    api_client.update_user_mode(
+        user_id,
+        mode=mode, # Keep existing mode
+        language=new_lang,
+        name_en=profile.get('name_en'), # Pass existing names
+        name_km=profile.get('name_km'),
+        primary_currency=profile.get('settings', {}).get('primary_currency') # Pass existing currency
+    )
+
+    # Update local cache
+    context.user_data['user_profile']['settings']['language'] = new_lang
+
+    await query.edit_message_text(
+        t("settings.language_switch_success", context),
+        reply_markup=keyboards.main_menu_keyboard(context) # Go to main menu
+    )
+    return ConversationHandler.END
+
+
+async def received_missing_name_for_switch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Receives the missing name (EN or KM) and finalizes the language switch.
+    """
+    try:
+        new_name = update.message.text.strip()
+        user_id = context.user_data['user_profile']['_id']
+        new_lang = context.user_data['new_lang']
+        profile = context.user_data['user_profile']
+        mode = profile.get('settings', {}).get('currency_mode', 'dual')
+
+        name_en = profile.get('name_en')
+        name_km = profile.get('name_km')
+
+        if new_lang == 'km':
+            name_km = new_name
+            log.info(f"User {user_id} provided missing KM name. Saving.")
+        else:
+            name_en = new_name
+            log.info(f"User {user_id} provided missing EN name. Saving.")
+
+        # Save the full profile update
+        api_client.update_user_mode(
+            user_id,
+            mode=mode,
+            language=new_lang,
+            name_en=name_en,
+            name_km=name_km,
+            primary_currency=profile.get('settings', {}).get('primary_currency')
+        )
+
+        # Update local cache
+        context.user_data['user_profile']['settings']['language'] = new_lang
+        context.user_data['user_profile']['name_en'] = name_en
+        context.user_data['user_profile']['name_km'] = name_km
+
+        await update.message.reply_text(
+            t("settings.language_switch_success", context),
+            reply_markup=keyboards.main_menu_keyboard(context) # Go to main menu
+        )
+        return ConversationHandler.END
+
+    except Exception as e:
+        log.error(f"Error in received_missing_name_for_switch: {e}", exc_info=True)
+        await update.message.reply_text(t("common.error_generic", context))
+        return await start(update, context)
+
+# --- END NEW FLOW ---
+
+
 settings_conversation_handler = ConversationHandler(
     entry_points=[
         CallbackQueryHandler(settings_menu, pattern='^settings_menu$')
@@ -438,6 +568,11 @@ settings_conversation_handler = ConversationHandler(
             CallbackQueryHandler(
                 switch_to_dual_confirm, pattern='^settings_switch_to_dual$'
             ),
+            # --- NEW HANDLER ---
+            CallbackQueryHandler(
+                change_language_start, pattern='^settings_change_language$'
+            ),
+            # ---
             CallbackQueryHandler(start, pattern='^start$'),
         ],
         SETBALANCE_ACCOUNT: [
@@ -489,6 +624,17 @@ settings_conversation_handler = ConversationHandler(
             MessageHandler(filters.TEXT & ~filters.COMMAND,
                            received_km_name_for_switch)
         ],
+        # --- NEW STATES ---
+        ASK_NEW_LANGUAGE: [
+            CallbackQueryHandler(
+                received_new_language, pattern='^change_lang:'
+            )
+        ],
+        GET_MISSING_NAME: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND,
+                           received_missing_name_for_switch)
+        ],
+        # --- END NEW STATES ---
     },
     fallbacks=[
         CommandHandler('start', start),

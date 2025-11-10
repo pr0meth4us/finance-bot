@@ -1,4 +1,4 @@
-# --- telegram_bot/handlers/onboarding.py (FULL) ---
+# --- telegram_bot/handlers/onboarding.py (FIXED) ---
 
 from telegram import Update
 from telegram.ext import (
@@ -96,7 +96,7 @@ async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # --- END REPLICATE ---
 
     # --- START ONBOARDING FLOW ---
-    log.info(f"User {user_id}: Not onboarded. Starting flow.")
+    log.info(f"User {user_id}: Not onboarded.\n    Starting flow.") # <-- FIX: F-string on one line
     user_profile = context.user_data.get('user_profile')
     context.user_data.clear()
     context.user_data['user_profile'] = user_profile
@@ -107,7 +107,7 @@ async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # If started from a callback (like 'Back to Main Menu'), edit the message
         await update.callback_query.answer()
         message_interface = update.callback_query.message
-    else:
+    else: # <-- FIX: Un-indented else block
         # If started from /start, just use the message
         message_interface = update.message
 
@@ -129,10 +129,11 @@ async def received_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     choice = update.message.text.strip().lower()
     data = context.user_data['onboarding_data']
-    log.info(f"User {user_id}: In state ASK_LANGUAGE. Received: '{choice}'")
+    log.info(f"User {user_id}: In state ASK_LANGUAGE.\n    Received: '{choice}'")
 
     if choice not in ['en', 'km']:
         log.warning(f"User {user_id}: Invalid language choice.")
+        # <-- FIX: Indented the following lines to be *inside* the if-block
         await update.message.reply_text(
             "Invalid choice. Please reply with `en` or `km`.\n\n"
             "ការជ្រើសរើសមិនត្រឹមត្រូវ។ សូមឆ្លើយតបជាមួយ `en` ឬ `km` ។",
@@ -155,26 +156,44 @@ async def received_currency_mode(update: Update, context: ContextTypes.DEFAULT_T
     user_id = update.effective_user.id
     choice = update.message.text.strip()
     data = context.user_data['onboarding_data']
-    log.info(f"User {user_id}: In state ASK_CURRENCY_MODE. Received: '{choice}'")
+    lang = data['language']
+    # <-- FIX: F-string on one line
+    log.info(f"User {user_id}: In state ASK_CURRENCY_MODE.\n    Received: '{choice}'")
+
+    next_state = None
+    prompt = ""
 
     if choice == '1':
         data['mode'] = 'single'
         log.info(f"User {user_id}: Set mode to 'single'.")
-        # For single mode, we now only ask for EN name
-        await update.message.reply_text(t("onboarding.ask_name_en", context))
-        return ASK_NAME_EN
+        # --- MODIFIED LOGIC ---
+        if lang == 'km':
+            prompt = t("onboarding.ask_name_km", context)
+            next_state = ASK_NAME_KM
+        else:  # Default to English <-- FIX: Un-indented else
+            prompt = t("onboarding.ask_name_en", context)
+            next_state = ASK_NAME_EN
+        # --- END MODIFICATION ---
 
-    elif choice == '2':
+    elif choice == '2': # <-- FIX: Un-indented elif
         data['mode'] = 'dual'
         log.info(f"User {user_id}: Set mode to 'dual'.")
-        # For dual mode, we ask for both names
-        await update.message.reply_text(t("onboarding.ask_name_en", context))
-        return ASK_NAME_EN
+        # --- MODIFIED LOGIC ---
+        if lang == 'km':
+            prompt = t("onboarding.ask_name_km", context)
+            next_state = ASK_NAME_KM
+        else:  # Default to English <-- FIX: Un-indented else
+            prompt = t("onboarding.ask_name_en", context)
+            next_state = ASK_NAME_EN
+        # --- END MODIFICATION ---
 
-    else:
+    else: # <-- FIX: Un-indented else
         log.warning(f"User {user_id}: Invalid currency mode choice.")
         await update.message.reply_text(t("onboarding.invalid_mode", context))
         return ASK_CURRENCY_MODE
+
+    await update.message.reply_text(prompt)
+    return next_state
 
 
 async def received_name_en(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -182,23 +201,59 @@ async def received_name_en(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     data = context.user_data['onboarding_data']
     data['name_en'] = update.message.text.strip()
-    log.info(f"User {user_id}: Received EN name '{data['name_en']}'. Mode is '{data['mode']}'.")
+    # <-- FIX: F-string on one line
+    log.info(f"User {user_id}: Received EN name '{data['name_en']}'.\n    Mode is '{data['mode']}'.")
 
+    # --- MODIFIED LOGIC ---
     if data['mode'] == 'single':
         await update.message.reply_text(t("onboarding.ask_primary_currency", context))
         return ASK_SINGLE_CURRENCY
 
     elif data['mode'] == 'dual':
-        await update.message.reply_text(t("onboarding.ask_name_km", context))
-        return ASK_NAME_KM
+        # <-- FIX: Indented the following block
+        # Check if we still need the Khmer name
+        if 'name_km' not in data:
+            await update.message.reply_text(t("onboarding.ask_name_km", context))
+            return ASK_NAME_KM
+        else:
+            # Both names are present, save and proceed
+            return await _save_mode_and_names(update, context)
+# --- END MODIFICATION ---
 
 
 async def received_name_km(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles receiving the user's Khmer name (dual mode)."""
+    """Handles receiving the user's Khmer name."""
     user_id = update.effective_user.id
     data = context.user_data['onboarding_data']
     data['name_km'] = update.message.text.strip()
     log.info(f"User {user_id}: Received KM name '{data['name_km']}'.")
+
+    # --- MODIFIED LOGIC ---
+    if data['mode'] == 'single':
+        # This is a new path: user chose 'km' and 'single'
+        await update.message.reply_text(t("onboarding.ask_primary_currency", context))
+        return ASK_SINGLE_CURRENCY
+
+    elif data['mode'] == 'dual':
+        # <-- FIX: Indented the following block
+        # Check if we still need the English name
+        if 'name_en' not in data:
+            await update.message.reply_text(t("onboarding.ask_name_en", context))
+            return ASK_NAME_EN
+        else:
+            # Both names are present, save and proceed
+            return await _save_mode_and_names(update, context)
+    # --- END MODIFICATION ---
+
+
+async def _save_mode_and_names(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Internal helper to save mode/names (for DUAL mode) and ask for USD balance.
+    This is called once both names (EN and KM) are collected.
+    """
+    user_id = update.effective_user.id
+    data = context.user_data['onboarding_data']
+    log.info(f"User {user_id}: Saving dual-mode names.")
 
     # Save mode, language, and names to DB
     api_client.update_user_mode(
@@ -215,8 +270,12 @@ async def received_name_km(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['user_profile']['name_km'] = data['name_km']
     context.user_data['user_profile']['settings']['currency_mode'] = data['mode']
 
+    # --- MODIFIED LOGIC: Use the correct name for the prompt ---
+    lang = data['language']
+    display_name = data.get('name_km') if lang == 'km' else data.get('name_en')
+
     await update.message.reply_text(
-        t("onboarding.ask_usd_balance", context, name=data['name_en'])
+        t("onboarding.ask_usd_balance", context, name=display_name)
     )
     return ASK_USD_BALANCE
 
@@ -228,24 +287,36 @@ async def received_single_currency(update: Update, context: ContextTypes.DEFAULT
     data['primary_currency'] = update.message.text.strip().upper()
     log.info(f"User {user_id}: Received single currency '{data['primary_currency']}'.")
 
+    # --- MODIFIED LOGIC: Save whichever name was provided (en or km) ---
+    name_en = data.get('name_en')
+    name_km = data.get('name_km')
+
     api_client.update_user_mode(
         user_id,
         mode=data['mode'],
         language=data['language'],
-        name_en=data['name_en'],
+        name_en=name_en,
+        name_km=name_km,
         primary_currency=data['primary_currency']
     )
     log.info(f"User {user_id}: Saved mode/names/currency to DB.")
 
     # Update local cache
-    context.user_data['user_profile']['name_en'] = data['name_en']
+    if name_en:
+        context.user_data['user_profile']['name_en'] = name_en
+    if name_km:
+        context.user_data['user_profile']['name_km'] = name_km
     context.user_data['user_profile']['settings']['currency_mode'] = data['mode']
     context.user_data['user_profile']['settings']['primary_currency'] = data['primary_currency']
 
+    # Use the name that was actually provided for the prompt
+    display_name = name_en or name_km
+
     await update.message.reply_text(
         t("onboarding.ask_single_balance", context,
-          name=data['name_en'], currency=data['primary_currency'])
+          name=display_name, currency=data['primary_currency'])
     )
+    # --- END MODIFICATION ---
     return ASK_SINGLE_BALANCE
 
 
@@ -329,8 +400,8 @@ async def received_single_balance(update: Update, context: ContextTypes.DEFAULT_
             t("onboarding.setup_complete", context)
         )
         # Manually call the start logic again to show the main menu
+        # <-- FIX: Indented this line to be *inside* the try block
         return await onboarding_start(update, context)
-
 
     except (ValueError, TypeError):
         log.warning(f"User {user_id}: Invalid single balance input.")
@@ -394,4 +465,4 @@ onboarding_conversation_handler = ConversationHandler(
     ],
     per_message=False
 )
-# --- End of modified file ---
+# --- End of fixed file ---

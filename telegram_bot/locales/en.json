@@ -4,7 +4,7 @@
     "quick_check_header": "🔍 Here is your quick summary:",
     "cancel": "Operation cancelled.",
     "cancel_onboarding": "Onboarding cancelled. Type /start to try again when you're ready.",
-    "error_generic": "An error occurred.\nPlease try again later."
+    "error_generic": "An error occurred. Please try again later."
   },
   "summary": {
     "status_header": "\n\n--- Your Current Status ---",
@@ -67,6 +67,7 @@
     "settings_manage_categories": "🏷️ Manage Categories",
     "settings_update_rate": "📈 Update Fixed Rate",
     "settings_switch_to_dual": "🔄 Switch to Dual-Currency Mode",
+    "settings_change_language": "🌍 Change Language",
     "usd_account": "💵 USD Account",
     "khr_account": "៛ KHR Account",
     "update_balance": "Update {currency} Balance",
@@ -107,37 +108,41 @@
     "delete_cancel": "❌ No, Cancel"
   },
   "onboarding": {
-    "welcome": "Welcome to FinanceBot!\nLet’s set up your account.",
+    "welcome": "Welcome to FinanceBot!\n    Let’s set up your account.",
     "ask_mode": "Would you like to track ONE currency or TWO currencies (USD & KHR)?\n\n(Reply with: `1` or `2`)",
-    "invalid_mode": "Invalid choice.\nPlease reply with `1` or `2`.",
-    "ask_language": "You've chosen 2 currencies.\nWhat is your preferred language?\n\n(Reply with: `en` or `km`)",
-    "invalid_language": "Invalid choice.\nPlease reply with `en` or `km`.",
+    "invalid_mode": "Invalid choice.\n    Please reply with `1` or `2`.",
+    "ask_language": "You've chosen 2 currencies.\n    What is your preferred language?\n\n(Reply with: `en` or `km`)",
+    "invalid_language": "Invalid choice.\n    Please reply with `en` or `km`.",
     "ask_name_en": "What is your name (in English)?\n\n(e.g., John Doe)",
     "ask_name_km": "What is your name (in Khmer)?\n\n(e.g., ចន ដូ)",
-    "ask_primary_currency": "You've chosen 1 currency.\nWhich currency will be your primary one?\n\n(Reply with a currency code, e.g.: `USD`, `KHR`, `CNY`)",
-    "ask_usd_balance": "Great, {name}.\nLet's set your starting balances.\n\nWhat is your current **USD** balance?\n\n(Reply with a number, e.g.: `100.50`)",
-    "ask_khr_balance": "Got it.\nNow, what is your current **KHR** balance?\n\n(Reply with a number, e.g.: `50000`)",
-    "ask_single_balance": "Great, {name}.\nLet's set your starting balance.\n\nWhat is your current **{currency}** balance?\n\n(Reply with a number, e.g.: `150.50`)",
-    "invalid_amount": "That doesn't look like a valid number.\nPlease try again (e.g., `100.50`).",
-    "setup_complete": "🎉 Setup Complete!\n\nYou're all set.\nHere is the main menu."
+    "ask_primary_currency": "You've chosen 1 currency.\n    Which currency will be your primary one?\n\n(Reply with a currency code, e.g.: `USD`, `KHR`, `CNY`)",
+    "ask_usd_balance": "Great, {name}.\n    Let's set your starting balances.\n\nWhat is your current **USD** balance?\n\n(Reply with a number, e.g.: `100.50`)",
+    "ask_khr_balance": "Got it.\n    Now, what is your current **KHR** balance?\n\n(Reply with a number, e.g.: `50000`)",
+    "ask_single_balance": "Great, {name}.\n    Let's set your starting balance.\n\nWhat is your current **{currency}** balance?\n\n(Reply with a number, e.g.: `150.50`)",
+    "invalid_amount": "That doesn't look like a valid number.\n    Please try again (e.g., `100.50`).",
+    "setup_complete": "🎉 Setup Complete!\n\nYou're all set.\n    Here is the main menu."
   },
   "settings": {
     "menu_header": "<b>⚙️ Bot Settings</b>\n\nHere you can manage your preferences and initial data.\n\n<b>Currency Mode:</b> {mode}\n\n<b>Initial Balances:</b>\n{balance_text}\n\n<b>Exchange Rate:</b> {rate_text}\n",
     "ask_balance_account": "Which initial balance do you want to set/update?",
-    "ask_balance_amount": "Account: <b>{currency}</b>\n\nWhat is the new initial balance?\n(This will NOT create a transaction).",
+    "ask_balance_amount": "Account: <b>{currency}</b>\n\nWhat is the new initial balance?\n    (This will NOT create a transaction).",
     "balance_set_success": "✅ Initial balance for {currency} updated to {amount:,.2f}.",
     "ask_rate": "Please enter your new **fixed** exchange rate for 1 USD to KHR (e.g., `4100`).\n\nThis will also set your preference to 'fixed'.",
     "rate_set_success": "✅ Your fixed exchange rate is now set to {rate}.",
-    "invalid_rate": "Invalid number.\nPlease enter a valid rate.",
+    "invalid_rate": "Invalid number.\n    Please enter a valid rate.",
     "categories_header": "<b>🏷️ Manage Categories</b>\n\n<b>Expense:</b>\n  {expense_cats}\n\n<b>Income:</b>\n  {income_cats}\n",
     "category_ask_add": "What type of category do you want to add?",
     "category_ask_remove": "What type of category do you want to remove?",
     "category_ask_name": "Please type the name of the new **{cat_type}** category to {action}:",
     "category_add_success": "✅ Category '{name}' added to {type}.",
     "category_remove_success": "✅ Category '{name}' removed from {type}.",
-    "switch_to_dual_confirm": "This will switch your account to dual-currency (USD & KHR) mode.\nThis allows you to log transactions in both currencies and cannot be undone.\n\nAre you sure?",
-    "ask_name_km_switch": "Great.\nPlease reply with your name in Khmer (e.g., ចន ដូ).",
-    "switch_to_dual_success": "✅ Success!\nYour account is now in dual-currency mode and your language is set to Khmer.\nYou can change the language back in settings."
+    "switch_to_dual_confirm": "This will switch your account to dual-currency (USD & KHR) mode.\n    This allows you to log transactions in both currencies and cannot be undone.\n\nAre you sure?",
+    "ask_name_km_switch": "Great.\n    Please reply with your name in Khmer (e.g., ចន ដូ).",
+    "switch_to_dual_success": "✅ Success!\n    Your account is now in dual-currency mode and your language is set to Khmer.\n    You can change the language back in settings.",
+    "ask_new_language": "Please select your new preferred language:",
+    "ask_missing_name_km": "You are switching to Khmer, but your Khmer name is not set.\n\nPlease reply with your name in Khmer (e.g., ចន ដូ):",
+    "ask_missing_name_en": "You are switching to English, but your English name is not set.\n\nPlease reply with your name in English (e.g., John Doe):",
+    "language_switch_success": "✅ Language successfully updated!"
   },
   "tx": {
     "ask_amount": "{emoji} Enter the amount:",
@@ -154,9 +159,9 @@
   "forgot": {
     "ask_day": "Which day did you forget to log?",
     "ask_date": "Please enter the date in `YYYY-MM-DD` format.",
-    "ask_type": "Got it.\nWas it an expense or an income?",
+    "ask_type": "Got it.\n    Was it an expense or an income?",
     "ask_amount": "Type: <b>{type}</b>\n\nEnter the amount:",
-    "invalid_date": "Invalid format.\nPlease use `YYYY-MM-DD`."
+    "invalid_date": "Invalid format.\n    Please use `YYYY-MM-DD`."
   },
   "utility": {
     "rate_header": "📈 Using **{source}** rate:\n<b>1 USD = {rate:,.0f} KHR</b>",
@@ -164,8 +169,8 @@
     "remind_what": "What would you like to be reminded of?",
     "remind_when": "When should I remind you?",
     "remind_ask_date": "Please enter the date in `YYYY-MM-DD` format.",
-    "remind_ask_time": "Got it.\nAnd at what time? (e.g., `09:00`, `17:30`)",
-    "remind_success": "✅ Got it!\nI will remind you on {date_time}.",
+    "remind_ask_time": "Got it.\n    And at what time? (e.g., `09:00`, `17:30`)",
+    "remind_success": "✅ Got it!\n    I will remind you on {date_time}.",
     "remind_invalid_date": "Invalid format.\nPlease use `YYYY-MM-DD`.",
     "remind_invalid_time": "Invalid time format.\nPlease use `HH:MM` (24-hour)."
   },
@@ -206,7 +211,15 @@
     "unknown_prompt": "New expense '{description}' for {amount_display}.\nWhich category?",
     "unknown_ask_custom": "Please type your new custom category name:",
     "unknown_fail": "I'm not sure what you mean.\nPlease provide an amount (e.g., '!coffee 2.50').",
-    "parse_error": "⚠️ Parsing error.\nCheck your quotes: {error}"
+    "parse_error": "⚠️ Parsing error.\nCheck your quotes: {error}",
+    "success_header": "<b>✅ Recorded:</b>",
+    "success_type": "  - <b>Type:</b> {type}",
+    "success_amount": "  - <b>Amount:</b> {amount_display}",
+    "success_category": "  - <b>Category:</b> {category}",
+    "success_description": "  - <b>Description:</b> {description}",
+    "success_person": "  - <b>Person:</b> {person}",
+    "success_purpose": "  - <b>Purpose:</b> {purpose}",
+    "success_date": "  - <b>Date:</b> {date}"
   },
   "iou": {
     "menu_header": "🤝 Let's manage your IOUs.",
@@ -306,5 +319,40 @@
     "no_results": "No transactions found matching your criteria.",
     "one_result": "Found 1 matching transaction:",
     "many_results": "Found {count} matching transactions.\nSelect one to manage:"
+  },
+  "categories": {
+    "Food": "💸 Food",
+    "Drink": "☕️ Drink",
+    "Transport": "🚗 Transport",
+    "Shopping": "🛍️ Shopping",
+    "Bills": "🧾 Bills",
+    "Utilities": "💡 Utilities",
+    "Entertainment": "🎬 Entertainment",
+    "Personal Care": "🧴 Personal Care",
+    "Work": "💼 Work",
+    "Alcohol": "🍺 Alcohol",
+    "For Others": "👥 For Others",
+    "Health": "🩺 Health",
+    "Investment": "📈 Investment",
+    "Forgot": "🤔 Forgot",
+    "Rent": "🏠 Rent",
+    "Subscriptions": "🔄 Subscriptions",
+    "Insurance": "🛡️ Insurance",
+    "Education": "🎓 Education",
+    "Gifts": "🎁 Gifts",
+    "Donations": "❤️ Donations",
+    "Family": "👨‍👩‍👧‍👦 Family",
+    "Travel": "✈️ Travel",
+    "Pets": "🐾 Pets",
+    "Electronics": "📱 Electronics",
+    "Car Maintenance": "🛠️ Car Maintenance",
+    "Salary": "💰 Salary",
+    "Bonus": "🎉 Bonus",
+    "Freelance": "💻 Freelance",
+    "Commission": "🤝 Commission",
+    "Allowance": "🧑‍🎓 Allowance",
+    "Gift": "🎁 Gift",
+    "Investment Income": "📈 Investment Income",
+    "Other Income": " miscellaneous Income"
   }
 }

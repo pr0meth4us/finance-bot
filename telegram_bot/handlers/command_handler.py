@@ -137,37 +137,41 @@ def parse_date_from_args(args):
     return tx_datetime.isoformat(), args[:-1]
 
 
-def _format_success_message(data):
+def _format_success_message(data, context: ContextTypes.DEFAULT_TYPE):
     """Formats a detailed success message for logged items."""
-    lines = ["<b>✅ Recorded:</b>"]
-    lines.append(f"  - <b>Type:</b> {data['type'].title()}")
+    lines = [t("command.success_header", context)]
+    lines.append(t("command.success_type", context, type=data['type'].title()))
 
     amount = data.get('amount') or data.get('iou_amount')
     currency = data.get('currency') or data.get('iou_currency')
 
     if currency:
         amount_format = ",.0f" if currency == 'KHR' else ",.2f"
-        lines.append(f"  - <b>Amount:</b> {amount:{amount_format}} {currency}")
+        amount_display = f"{amount:{amount_format}} {currency}"
+        lines.append(t("command.success_amount", context, amount_display=amount_display))
     else:
-        lines.append(f"  - <b>Amount:</b> {amount}")
+        lines.append(t("command.success_amount", context, amount_display=str(amount)))
 
     if 'categoryId' in data:
-        lines.append(f"  - <b>Category:</b> {data['categoryId']}")
+        # Also translate the category name from the map
+        category_text = t(f"categories.{data['categoryId']}", context)
+        lines.append(t("command.success_category", context, category=category_text))
+
         if data.get('description'):
-            lines.append(f"  - <b>Description:</b> {data['description']}")
+            lines.append(t("command.success_description", context, description=data['description']))
+
     elif 'person' in data:
-        lines.append(f"  - <b>Person:</b> {data['person']}")
+        lines.append(t("command.success_person", context, person=data['person']))
         if data.get('purpose'):
-            lines.append(f"  - <b>Purpose:</b> {data['purpose']}")
+            lines.append(t("command.success_purpose", context, purpose=data['purpose']))
 
     if data.get('timestamp'):
         date_obj = datetime.fromisoformat(data['timestamp'])
         date_str = date_obj.strftime('%Y-%m-%d')
-        lines.append(f"  - <b>Date:</b> {date_str}")
+        lines.append(t("command.success_date", context, date=date_str))
     else:
-        lines.append(
-            f"  - <b>Date:</b> {datetime.now(PHNOM_PENH_TZ).strftime('%Y-%m-%d')}"
-        )
+        date_str = datetime.now(PHNOM_PENH_TZ).strftime('%Y-%m-%d')
+        lines.append(t("command.success_date", context, date=date_str))
 
     return "\n".join(lines)
 
@@ -200,7 +204,7 @@ async def handle_generic_transaction(update: Update,
             "accountName": f"{currency} Account", "categoryId": category,
             "description": description, "timestamp": tx_date
         }
-        return tx_data, _format_success_message(tx_data)
+        return tx_data, _format_success_message(tx_data, context)
     except Exception as e:
         logger.error(f"Error parsing generic transaction: {e}", exc_info=True)
         await update.message.reply_text(error_message, parse_mode='Markdown')
@@ -233,7 +237,7 @@ async def handle_generic_debt(update: Update,
             "type": command, "person": person, "amount": amount,
             "currency": currency, "purpose": purpose, "timestamp": tx_date
         }
-        return debt_data, _format_success_message(debt_data)
+        return debt_data, _format_success_message(debt_data, context)
     except Exception as e:
         logger.error(f"Error parsing generic debt: {e}", exc_info=True)
         await update.message.reply_text(error_message, parse_mode='Markdown')
@@ -273,7 +277,7 @@ async def handle_quick_command(update: Update,
             "categoryId": details['categoryId'],
             "description": description, "timestamp": tx_date
         }
-        return tx_data, _format_success_message(tx_data)
+        return tx_data, _format_success_message(tx_data, context)
     except Exception as e:
         logger.error(f"Error in quick_command_handler: {e}", exc_info=True)
         await update.message.reply_text(
@@ -563,7 +567,7 @@ async def save_and_end_unknown(message, context: ContextTypes.DEFAULT_TYPE):
 
     response = api_client.add_transaction(tx_data, user_id)
 
-    base_text = (_format_success_message(tx_data)
+    base_text = (_format_success_message(tx_data, context)
                  if response else t("command.tx_fail", context))
     summary_text = format_summary_message(
         api_client.get_detailed_summary(user_id), context

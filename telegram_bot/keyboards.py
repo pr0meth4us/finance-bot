@@ -264,6 +264,14 @@ def settings_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
                 callback_data='settings_manage_categories'
             )
         ],
+        # --- NEW BUTTON ---
+        [
+            InlineKeyboardButton(
+                t("keyboards.settings_change_language", context),
+                callback_data='settings_change_language'
+            )
+        ],
+        # --- END NEW BUTTON ---
     ]
 
     # Only show rate and mode-switch options to dual-currency users
@@ -325,6 +333,25 @@ def switch_to_dual_confirm_keyboard(context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
+
+
+# --- NEW KEYBOARD ---
+def change_language_keyboard(context: ContextTypes.DEFAULT_TYPE):
+    """Shows language options for switching."""
+    keyboard = [
+        [
+            InlineKeyboardButton("English", callback_data='change_lang:en'),
+            InlineKeyboardButton("ភាសាខ្មែរ", callback_data='change_lang:km')
+        ],
+        [
+            InlineKeyboardButton(
+                t("keyboards.back_to_settings", context),
+                callback_data="settings_menu"
+            )
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+# --- END NEW KEYBOARD ---
 
 
 def manage_categories_keyboard(context: ContextTypes.DEFAULT_TYPE):
@@ -564,7 +591,7 @@ def iou_cancel_confirm_keyboard(debt_id, person, is_settled_str,
 def currency_keyboard(context: ContextTypes.DEFAULT_TYPE):
     """
     Returns a currency keyboard, always showing USD and KHR.
-This is only used in dual-currency mode.
+    This is only used in dual-currency mode.
     """
     keyboard = [
         [
@@ -581,8 +608,10 @@ def expense_categories_keyboard(categories: list,
     keyboard = []
     row = []
     for category in categories:
+        # Use the category as a KEY to get the translated emoji + text
+        translated_text = t(f"categories.{category}", context)
         row.append(
-            InlineKeyboardButton(category, callback_data=f'cat_{category}')
+            InlineKeyboardButton(translated_text, callback_data=f'cat_{category}')
         )
         if len(row) == 2:
             keyboard.append(row)
@@ -606,8 +635,10 @@ def income_categories_keyboard(categories: list,
     keyboard = []
     row = []
     for category in categories:
+        # Use the category as a KEY to get the translated emoji + text
+        translated_text = t(f"categories.{category}", context)
         row.append(
-            InlineKeyboardButton(category, callback_data=f'cat_{category}')
+            InlineKeyboardButton(translated_text, callback_data=f'cat_{category}')
         )
         if len(row) == 2:
             keyboard.append(row)
