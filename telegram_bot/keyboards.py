@@ -91,10 +91,11 @@ def report_actions_keyboard(start_date, end_date,
     keyboard = [
         [
             InlineKeyboardButton(
-                "📄 Download Report CSV", callback_data=callback_data
+                t("keyboards.download_report_csv", context), # <-- MODIFIED
+                callback_data=callback_data
             )
         ],
-        [InlineKeyboardButton("‹ Back to Main Menu", callback_data='start')],
+        [InlineKeyboardButton(t("keyboards.back_to_main", context), callback_data='start')], # <-- MODIFIED
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -104,10 +105,11 @@ def debt_analysis_actions_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton(
-                "📄 Download Open Debts CSV", callback_data="debt_analysis_csv"
+                t("keyboards.download_open_debts_csv", context), # <-- MODIFIED
+                callback_data="debt_analysis_csv"
             )
         ],
-        [InlineKeyboardButton("‹ Back to IOU Menu", callback_data='iou_menu')],
+        [InlineKeyboardButton(t("keyboards.back_to_iou", context), callback_data='iou_menu')], # <-- MODIFIED
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -115,13 +117,14 @@ def debt_analysis_actions_keyboard(context: ContextTypes.DEFAULT_TYPE):
 def search_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton(
-            "✍️ Find & Manage Transactions",
+            t("keyboards.search_manage", context), # <-- MODIFIED
             callback_data='start_search_manage'
         )],
         [InlineKeyboardButton(
-            "📈 Calculate Totals", callback_data='start_search_sum'
+            t("keyboards.search_sum", context), # <-- MODIFIED
+            callback_data='start_search_sum'
         )],
-        [InlineKeyboardButton("‹ Back to Main Menu", callback_data='start')],
+        [InlineKeyboardButton(t("keyboards.back_to_main", context), callback_data='start')], # <-- MODIFIED
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -129,13 +132,13 @@ def search_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
 def reminder_date_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
-            InlineKeyboardButton("Tomorrow", callback_data='remind_date_1'),
-            InlineKeyboardButton("In 3 Days", callback_data='remind_date_3'),
-            InlineKeyboardButton("In 1 Week", callback_data='remind_date_7')
+            InlineKeyboardButton(t("keyboards.tomorrow", context), callback_data='remind_date_1'), # <-- MODIFIED
+            InlineKeyboardButton(t("keyboards.in_3_days", context), callback_data='remind_date_3'), # <-- MODIFIED
+            InlineKeyboardButton(t("keyboards.in_1_week", context), callback_data='remind_date_7') # <-- MODIFIED
         ],
-        [InlineKeyboardButton("🗓️ Custom Date",
+        [InlineKeyboardButton(t("keyboards.custom_date", context), # <-- MODIFIED
                               callback_data='remind_date_custom')],
-        [InlineKeyboardButton("❌ Cancel",
+        [InlineKeyboardButton(t("keyboards.cancel", context), # <-- MODIFIED
                               callback_data='cancel_conversation')]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -144,12 +147,12 @@ def reminder_date_keyboard(context: ContextTypes.DEFAULT_TYPE):
 def forgot_day_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
-            InlineKeyboardButton("Yesterday", callback_data='forgot_day_1'),
-            InlineKeyboardButton("2 Days Ago", callback_data='forgot_day_2')
+            InlineKeyboardButton(t("keyboards.yesterday", context), callback_data='forgot_day_1'), # <-- MODIFIED
+            InlineKeyboardButton(t("keyboards.days_ago", context, days=2), callback_data='forgot_day_2') # <-- MODIFIED
         ],
-        [InlineKeyboardButton("🗓️ Custom Date",
+        [InlineKeyboardButton(t("keyboards.custom_date", context), # <-- MODIFIED
                               callback_data='forgot_day_custom')],
-        [InlineKeyboardButton("❌ Cancel",
+        [InlineKeyboardButton(t("keyboards.cancel", context), # <-- MODIFIED
                               callback_data='cancel_conversation')]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -158,13 +161,13 @@ def forgot_day_keyboard(context: ContextTypes.DEFAULT_TYPE):
 def iou_date_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
-            InlineKeyboardButton("Today", callback_data='iou_date_today'),
-            InlineKeyboardButton("Yesterday",
+            InlineKeyboardButton(t("keyboards.today", context), callback_data='iou_date_today'), # <-- MODIFIED
+            InlineKeyboardButton(t("keyboards.yesterday", context), # <-- MODIFIED
                                  callback_data='iou_date_yesterday'),
         ],
-        [InlineKeyboardButton("🗓️ Custom Date",
+        [InlineKeyboardButton(t("keyboards.custom_date", context), # <-- MODIFIED
                               callback_data='iou_date_custom')],
-        [InlineKeyboardButton("❌ Cancel",
+        [InlineKeyboardButton(t("keyboards.cancel", context), # <-- MODIFIED
                               callback_data='cancel_conversation')]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -173,9 +176,9 @@ def iou_date_keyboard(context: ContextTypes.DEFAULT_TYPE):
 def forgot_type_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
-            InlineKeyboardButton("💸 Expense",
+            InlineKeyboardButton(t("keyboards.expense", context), # <-- MODIFIED
                                  callback_data='forgot_type_expense'),
-            InlineKeyboardButton("💰 Income",
+            InlineKeyboardButton(t("keyboards.income", context), # <-- MODIFIED
                                  callback_data='forgot_type_income')
         ],
     ]
@@ -185,49 +188,50 @@ def forgot_type_keyboard(context: ContextTypes.DEFAULT_TYPE):
 def report_period_keyboard(context: ContextTypes.DEFAULT_TYPE, is_search=False):
     keyboard = [
         [
-            InlineKeyboardButton("🗓️ Today",
+            InlineKeyboardButton(t("keyboards.period_today", context), # <-- MODIFIED
                                  callback_data='report_period_today'),
-            InlineKeyboardButton("🗓️ This Week",
+            InlineKeyboardButton(t("keyboards.period_this_week", context), # <-- MODIFIED
                                  callback_data='report_period_this_week'),
         ],
         [
-            InlineKeyboardButton("🗓️ Last Week",
+            InlineKeyboardButton(t("keyboards.period_last_week", context), # <-- MODIFIED
                                  callback_data='report_period_last_week'),
-            InlineKeyboardButton("🗓️ This Month",
+            InlineKeyboardButton(t("keyboards.period_this_month", context), # <-- MODIFIED
                                  callback_data='report_period_this_month'),
         ],
         [
-            InlineKeyboardButton("🗓️ Last Month",
+            InlineKeyboardButton(t("keyboards.period_last_month", context), # <-- MODIFIED
                                  callback_data='report_period_last_month'),
-            InlineKeyboardButton("🗓️ Custom Range",
+            InlineKeyboardButton(t("keyboards.period_custom", context), # <-- MODIFIED
                                  callback_data='report_period_custom'),
         ],
     ]
     if is_search:
         keyboard.append([InlineKeyboardButton(
-            "♾️ All Time", callback_data='report_period_all_time'
+            t("keyboards.period_all_time", context), # <-- MODIFIED
+            callback_data='report_period_all_time'
         )])
 
-    keyboard.append([InlineKeyboardButton("‹ Back", callback_data='start')])
+    keyboard.append([InlineKeyboardButton(t("keyboards.back", context), callback_data='start')]) # <-- MODIFIED
     return InlineKeyboardMarkup(keyboard)
 
 
 def search_type_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
-            InlineKeyboardButton("💸 Expense",
+            InlineKeyboardButton(t("keyboards.expense", context), # <-- MODIFIED
                                  callback_data='search_type_expense'),
-            InlineKeyboardButton("💰 Income",
+            InlineKeyboardButton(t("keyboards.income", context), # <-- MODIFIED
                                  callback_data='search_type_income')
         ],
-        [InlineKeyboardButton("🌐 All Types", callback_data='search_type_all')],
+        [InlineKeyboardButton(t("keyboards.all_types", context), callback_data='search_type_all')], # <-- MODIFIED
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
 def skip_keyboard(context: ContextTypes.DEFAULT_TYPE, callback_data):
     keyboard = [
-        [InlineKeyboardButton("⏩ Skip", callback_data=callback_data)],
+        [InlineKeyboardButton(t("keyboards.skip", context), callback_data=callback_data)], # <-- MODIFIED
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -235,9 +239,9 @@ def skip_keyboard(context: ContextTypes.DEFAULT_TYPE, callback_data):
 def search_keyword_logic_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
-            InlineKeyboardButton("Must contain ALL (AND)",
+            InlineKeyboardButton(t("keyboards.search_logic_and", context), # <-- MODIFIED
                                  callback_data='search_logic_and'),
-            InlineKeyboardButton("Contains ANY (OR)",
+            InlineKeyboardButton(t("keyboards.search_logic_or", context), # <-- MODIFIED
                                  callback_data='search_logic_or')
         ]
     ]
@@ -250,16 +254,24 @@ def settings_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton(
-                "💸 Update Initial Balances",
+                t("keyboards.settings_update_balances", context), # <-- MODIFIED
                 callback_data='settings_set_balance'
             )
         ],
         [
             InlineKeyboardButton(
-                "🏷️ Manage Categories",
+                t("keyboards.settings_manage_categories", context), # <-- MODIFIED
                 callback_data='settings_manage_categories'
             )
         ],
+        # --- NEW BUTTON ---
+        [
+            InlineKeyboardButton(
+                t("keyboards.settings_change_language", context),
+                callback_data='settings_change_language'
+            )
+        ],
+        # --- END NEW BUTTON ---
     ]
 
     # Only show rate and mode-switch options to dual-currency users
@@ -267,18 +279,18 @@ def settings_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
     if mode == 'dual':
         keyboard.append([
             InlineKeyboardButton(
-                "📈 Update Fixed Rate", callback_data='settings_set_rate'
+                t("keyboards.settings_update_rate", context), callback_data='settings_set_rate' # <-- MODIFIED
             )
         ])
     elif mode == 'single':
         keyboard.append([
             InlineKeyboardButton(
-                "🔄 Switch to Dual-Currency Mode",
+                t("keyboards.settings_switch_to_dual", context), # <-- MODIFIED
                 callback_data='settings_switch_to_dual'
             )
         ])
 
-    keyboard.append([InlineKeyboardButton("‹ Back to Main Menu", callback_data='start')])
+    keyboard.append([InlineKeyboardButton(t("keyboards.back_to_main", context), callback_data='start')]) # <-- MODIFIED
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -287,20 +299,20 @@ def set_balance_account_keyboard(context: ContextTypes.DEFAULT_TYPE, mode: str, 
 
     if mode == 'dual':
         keyboard.append([
-            InlineKeyboardButton("💵 USD Account",
+            InlineKeyboardButton(t("keyboards.usd_account", context), # <-- MODIFIED
                                  callback_data='set_balance_USD'),
-            InlineKeyboardButton("៛ KHR Account",
+            InlineKeyboardButton(t("keyboards.khr_account", context), # <-- MODIFIED
                                  callback_data='set_balance_KHR')
         ])
     else:
         # Single currency mode
         curr = currencies[0]
         keyboard.append([
-            InlineKeyboardButton(f"Update {curr} Balance",
+            InlineKeyboardButton(t("keyboards.update_balance", context, currency=curr), # <-- MODIFIED
                                  callback_data=f'set_balance_{curr}'),
         ])
 
-    keyboard.append([InlineKeyboardButton("‹ Back to Settings",
+    keyboard.append([InlineKeyboardButton(t("keyboards.back_to_settings", context), # <-- MODIFIED
                                           callback_data='settings_menu')])
     return InlineKeyboardMarkup(keyboard)
 
@@ -309,13 +321,13 @@ def switch_to_dual_confirm_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton(
-                "✅ Yes, Switch Me",
+                t("keyboards.switch_dual_confirm", context), # <-- MODIFIED
                 callback_data='confirm_switch_dual'
             )
         ],
         [
             InlineKeyboardButton(
-                "‹ No, Go Back",
+                t("keyboards.switch_dual_cancel", context), # <-- MODIFIED
                 callback_data="settings_menu"
             )
         ]
@@ -323,15 +335,34 @@ def switch_to_dual_confirm_keyboard(context: ContextTypes.DEFAULT_TYPE):
     return InlineKeyboardMarkup(keyboard)
 
 
+# --- NEW KEYBOARD ---
+def change_language_keyboard(context: ContextTypes.DEFAULT_TYPE):
+    """Shows language options for switching."""
+    keyboard = [
+        [
+            InlineKeyboardButton("English", callback_data='change_lang:en'),
+            InlineKeyboardButton("ភាសាខ្មែរ", callback_data='change_lang:km')
+        ],
+        [
+            InlineKeyboardButton(
+                t("keyboards.back_to_settings", context),
+                callback_data="settings_menu"
+            )
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+# --- END NEW KEYBOARD ---
+
+
 def manage_categories_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
-            InlineKeyboardButton("➕ Add Category",
+            InlineKeyboardButton(t("keyboards.category_add", context), # <-- MODIFIED
                                  callback_data='category_add'),
-            InlineKeyboardButton("➖ Remove Category",
+            InlineKeyboardButton(t("keyboards.category_remove", context), # <-- MODIFIED
                                  callback_data='category_remove')
         ],
-        [InlineKeyboardButton("‹ Back to Settings",
+        [InlineKeyboardButton(t("keyboards.back_to_settings", context), # <-- MODIFIED
                               callback_data='settings_menu')]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -342,15 +373,15 @@ def category_type_keyboard(context: ContextTypes.DEFAULT_TYPE, action: str):
     keyboard = [
         [
             InlineKeyboardButton(
-                "💸 Expense", callback_data=f'cat_type:{action}:expense'
+                t("keyboards.expense", context), callback_data=f'cat_type:{action}:expense' # <-- MODIFIED
             ),
             InlineKeyboardButton(
-                "💰 Income", callback_data=f'cat_type:{action}:income'
+                t("keyboards.income", context), callback_data=f'cat_type:{action}:income' # <-- MODIFIED
             )
         ],
         [
             InlineKeyboardButton(
-                "‹ Back", callback_data='settings_manage_categories'
+                t("keyboards.back", context), callback_data='settings_manage_categories' # <-- MODIFIED
             )
         ]
     ]
@@ -359,15 +390,15 @@ def category_type_keyboard(context: ContextTypes.DEFAULT_TYPE, action: str):
 
 def iou_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("➡️ I Lent Money", callback_data='iou_lent')],
-        [InlineKeyboardButton("⬅️ I Borrowed Money",
+        [InlineKeyboardButton(t("keyboards.iou_lent", context), callback_data='iou_lent')], # <-- MODIFIED
+        [InlineKeyboardButton(t("keyboards.iou_borrowed", context), # <-- MODIFIED
                               callback_data='iou_borrowed')],
-        [InlineKeyboardButton("📖 View Open Debts", callback_data='iou_view')],
-        [InlineKeyboardButton("✅ View Settled Debts",
+        [InlineKeyboardButton(t("keyboards.iou_view_open", context), callback_data='iou_view')], # <-- MODIFIED
+        [InlineKeyboardButton(t("keyboards.iou_view_settled", context), # <-- MODIFIED
                               callback_data='iou_view_settled')],
-        [InlineKeyboardButton("🔬 Debt Analysis",
+        [InlineKeyboardButton(t("keyboards.iou_analysis", context), # <-- MODIFIED
                               callback_data='debt_analysis')],
-        [InlineKeyboardButton("‹ Back to Main Menu", callback_data='start')],
+        [InlineKeyboardButton(t("keyboards.back_to_main", context), callback_data='start')], # <-- MODIFIED
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -398,7 +429,7 @@ def iou_list_keyboard(grouped_debts, context: ContextTypes.DEFAULT_TYPE,
         for debt in lent:
             formatted_total = format_totals(debt['totals'])
             if formatted_total: # Only show if there's a relevant total
-                label = f"Owed by {debt['person']}: {formatted_total}"
+                label = t("keyboards.iou_person_lent", context, person=debt['person'], totals=formatted_total) # <-- MODIFIED
                 keyboard.append(
                     [InlineKeyboardButton(
                         label,
@@ -409,7 +440,7 @@ def iou_list_keyboard(grouped_debts, context: ContextTypes.DEFAULT_TYPE,
         for debt in borrowed:
             formatted_total = format_totals(debt['totals'])
             if formatted_total: # Only show if there's a relevant total
-                label = f"You owe {debt['person']}: {formatted_total}"
+                label = t("keyboards.iou_person_borrowed", context, person=debt['person'], totals=formatted_total) # <-- MODIFIED
                 keyboard.append(
                     [InlineKeyboardButton(
                         label,
@@ -417,7 +448,7 @@ def iou_list_keyboard(grouped_debts, context: ContextTypes.DEFAULT_TYPE,
                     )]
                 )
 
-    keyboard.append([InlineKeyboardButton("‹ Back", callback_data='iou_menu')])
+    keyboard.append([InlineKeyboardButton(t("keyboards.back", context), callback_data='iou_menu')]) # <-- MODIFIED
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -430,18 +461,18 @@ def iou_person_actions_keyboard(person_name, debt_type,
     if not is_settled:
         keyboard.append([
             InlineKeyboardButton(
-                "💰 Record Repayment",
+                t("keyboards.iou_record_repayment", context), # <-- MODIFIED
                 callback_data=f"iou:repay:{person_name}:{debt_type}"
             ),
             InlineKeyboardButton(
-                "✏️ Manage Individual Debts",
+                t("keyboards.iou_manage_individual", context), # <-- MODIFIED
                 callback_data=f"iou:manage:list:{person_name}:{debt_type}:False"
             )
         ])
 
     back_callback = 'iou_view_settled' if is_settled else 'iou_view'
     keyboard.append([InlineKeyboardButton(
-        "‹ Back to Summary", callback_data=back_callback
+        t("keyboards.back_to_summary", context), callback_data=back_callback # <-- MODIFIED
     )])
     return InlineKeyboardMarkup(keyboard)
 
@@ -480,7 +511,7 @@ def iou_manage_list_keyboard(person_debts, person_name,
         else f"iou:person:open:{person_name}"
     )
     keyboard.append([InlineKeyboardButton(
-        "‹ Back to Ledger", callback_data=back_callback
+        t("keyboards.back_to_ledger", context), callback_data=back_callback # <-- MODIFIED
     )])
     return InlineKeyboardMarkup(keyboard)
 
@@ -494,7 +525,7 @@ def iou_detail_actions_keyboard(debt_id, person_name, debt_type,
     if status == 'open':
         keyboard.append([
             InlineKeyboardButton(
-                "✏️ Edit/Cancel",
+                t("keyboards.iou_edit_cancel", context), # <-- MODIFIED
                 callback_data=f"iou:manage:detail:{debt_id}:{person_name}:"
                               f"{is_settled}"
             )
@@ -502,7 +533,7 @@ def iou_detail_actions_keyboard(debt_id, person_name, debt_type,
 
     back_callback = f"iou:manage:list:{person_name}:{debt_type}:{is_settled}"
     keyboard.append([InlineKeyboardButton(
-        "‹ Back to List", callback_data=back_callback
+        t("keyboards.back_to_list", context), callback_data=back_callback # <-- MODIFIED
     )])
     return InlineKeyboardMarkup(keyboard)
 
@@ -513,22 +544,22 @@ def iou_manage_keyboard(debt_id, person, is_settled_str,
     keyboard = [
         [
             InlineKeyboardButton(
-                "✏️ Edit Person", callback_data=f"iou:edit:person:{debt_id}"
+                t("keyboards.iou_edit_person", context), callback_data=f"iou:edit:person:{debt_id}" # <-- MODIFIED
             ),
             InlineKeyboardButton(
-                "✏️ Edit Purpose", callback_data=f"iou:edit:purpose:{debt_id}"
+                t("keyboards.iou_edit_purpose", context), callback_data=f"iou:edit:purpose:{debt_id}" # <-- MODIFIED
             )
         ],
         [
             InlineKeyboardButton(
-                "❌ Cancel Debt",
+                t("keyboards.iou_cancel_debt", context), # <-- MODIFIED
                 callback_data=f"iou:cancel:prompt:{debt_id}:{person}:"
                               f"{is_settled_str}"
             )
         ],
         [
             InlineKeyboardButton(
-                "‹ Back",
+                t("keyboards.back", context), # <-- MODIFIED
                 callback_data=f"iou:detail:{debt_id}:{person}:{is_settled_str}"
             )
         ]
@@ -542,13 +573,13 @@ def iou_cancel_confirm_keyboard(debt_id, person, is_settled_str,
     keyboard = [
         [
             InlineKeyboardButton(
-                "✅ Yes, Cancel Debt",
+                t("keyboards.iou_cancel_confirm", context), # <-- MODIFIED
                 callback_data=f"iou:cancel:confirm:{debt_id}"
             )
         ],
         [
             InlineKeyboardButton(
-                "‹ No, Go Back",
+                t("keyboards.iou_cancel_go_back", context), # <-- MODIFIED
                 callback_data=f"iou:manage:detail:{debt_id}:{person}:"
                               f"{is_settled_str}"
             )
@@ -577,8 +608,10 @@ def expense_categories_keyboard(categories: list,
     keyboard = []
     row = []
     for category in categories:
+        # Use the category as a KEY to get the translated emoji + text
+        translated_text = t(f"categories.{category}", context)
         row.append(
-            InlineKeyboardButton(category, callback_data=f'cat_{category}')
+            InlineKeyboardButton(translated_text, callback_data=f'cat_{category}')
         )
         if len(row) == 2:
             keyboard.append(row)
@@ -602,8 +635,10 @@ def income_categories_keyboard(categories: list,
     keyboard = []
     row = []
     for category in categories:
+        # Use the category as a KEY to get the translated emoji + text
+        translated_text = t(f"categories.{category}", context)
         row.append(
-            InlineKeyboardButton(category, callback_data=f'cat_{category}')
+            InlineKeyboardButton(translated_text, callback_data=f'cat_{category}')
         )
         if len(row) == 2:
             keyboard.append(row)
@@ -624,8 +659,8 @@ def income_categories_keyboard(categories: list,
 def ask_remark_keyboard(context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
-            InlineKeyboardButton("✅ Add Remark", callback_data='remark_yes'),
-            InlineKeyboardButton("⏩ Skip", callback_data='remark_no')
+            InlineKeyboardButton(t("keyboards.add_remark", context), callback_data='remark_yes'), # <-- MODIFIED
+            InlineKeyboardButton(t("keyboards.skip", context), callback_data='remark_no') # <-- MODIFIED
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -658,7 +693,7 @@ def history_keyboard(transactions, context: ContextTypes.DEFAULT_TYPE,
         keyboard.append([InlineKeyboardButton(label, callback_data=callback)])
 
     keyboard.append([InlineKeyboardButton(
-        "‹ Back to Main Menu", callback_data='start'
+        t("keyboards.back_to_main", context), callback_data='start' # <-- MODIFIED
     )])
     return InlineKeyboardMarkup(keyboard)
 
@@ -666,11 +701,11 @@ def history_keyboard(transactions, context: ContextTypes.DEFAULT_TYPE,
 def manage_tx_keyboard(tx_id, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
-            InlineKeyboardButton("✏️ Edit", callback_data=f'edit_tx_{tx_id}'),
-            InlineKeyboardButton("🗑️ Delete",
+            InlineKeyboardButton(t("keyboards.edit", context), callback_data=f'edit_tx_{tx_id}'), # <-- MODIFIED
+            InlineKeyboardButton(t("keyboards.delete", context), # <-- MODIFIED
                                  callback_data=f'delete_tx_{tx_id}')
         ],
-        [InlineKeyboardButton("‹ Back to History", callback_data='history')],
+        [InlineKeyboardButton(t("keyboards.back_to_history", context), callback_data='history')], # <-- MODIFIED
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -682,19 +717,19 @@ def edit_tx_options_keyboard(tx_id, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton(
-                "💰 Amount", callback_data=f'edit_field_amount_{tx_id}'
+                t("keyboards.edit_amount", context), callback_data=f'edit_field_amount_{tx_id}' # <-- MODIFIED
             ),
             InlineKeyboardButton(
-                "🏷️ Category", callback_data=f'edit_field_categoryId_{tx_id}'
+                t("keyboards.edit_category", context), callback_data=f'edit_field_categoryId_{tx_id}' # <-- MODIFIED
             ),
         ],
         [
             InlineKeyboardButton(
-                "📝 Description",
+                t("keyboards.edit_description", context), # <-- MODIFIED
                 callback_data=f'edit_field_description_{tx_id}'
             ),
             InlineKeyboardButton(
-                "🗓️ Date", callback_data=f'edit_field_timestamp_{tx_id}'
+                t("keyboards.edit_date", context), callback_data=f'edit_field_timestamp_{tx_id}' # <-- MODIFIED
             ),
         ],
     ]
@@ -703,12 +738,12 @@ def edit_tx_options_keyboard(tx_id, context: ContextTypes.DEFAULT_TYPE):
     if mode == 'dual':
         keyboard.append([
             InlineKeyboardButton(
-                "🪙 Currency", callback_data=f'edit_field_currency_{tx_id}'
+                t("keyboards.edit_currency", context), callback_data=f'edit_field_currency_{tx_id}' # <-- MODIFIED
             )
         ])
 
     keyboard.append([InlineKeyboardButton(
-        "‹ Cancel Edit", callback_data=f'manage_tx_{tx_id}'
+        t("keyboards.edit_cancel", context), callback_data=f'manage_tx_{tx_id}' # <-- MODIFIED
     )])
 
     return InlineKeyboardMarkup(keyboard)
@@ -717,9 +752,9 @@ def edit_tx_options_keyboard(tx_id, context: ContextTypes.DEFAULT_TYPE):
 def confirm_delete_keyboard(tx_id, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
-            InlineKeyboardButton("✅ Yes, Delete",
+            InlineKeyboardButton(t("keyboards.delete_confirm", context), # <-- MODIFIED
                                  callback_data=f'confirm_delete_{tx_id}'),
-            InlineKeyboardButton("❌ No, Cancel",
+            InlineKeyboardButton(t("keyboards.delete_cancel", context), # <-- MODIFIED
                                  callback_data=f'manage_tx_{tx_id}')
         ]
     ]
