@@ -1,38 +1,43 @@
-# --- Start of file: web_service/app/settings/routes.py ---
+# --- web_service/app/settings/routes.py (Refactored) ---
 """
 Handles user-specific settings.
 All endpoints are multi-tenant and require a valid user_id.
 """
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from app.utils.currency import get_live_usd_to_khr_rate
-from app import get_db
-from app.utils.auth import get_user_id_from_request
+from app.utils.db import settings_collection
+# --- REFACTOR: Import new auth decorator ---
+from app.utils.auth import auth_required
 
 settings_bp = Blueprint('settings', __name__, url_prefix='/settings')
 
 
 @settings_bp.route('/', methods=['GET'])
+@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
 def get_user_settings():
     """Fetches all settings for the authenticated user."""
-    db = get_db()
-    user_id, error = get_user_id_from_request()
-    if error:
-        return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
+    # ---
 
-    user = db.users.find_one({'_id': user_id}, {'_id': 0, 'settings': 1, 'name_en': 1, 'name_km': 1})
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
+    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
+    user_settings = settings_collection().find_one(
+        {'account_id': account_id},
+        {'_id': 0, 'settings': 1, 'name_en': 1, 'name_km': 1}
+    )
+    if not user_settings:
+        return jsonify({'error': 'User settings not found'}), 404
 
-    return jsonify(user)
+    return jsonify(user_settings)
 
 
 @settings_bp.route('/balance', methods=['POST'])
+@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
 def update_initial_balance():
     """Updates the initial balance for a specific currency for a user."""
-    db = get_db()
-    user_id, error = get_user_id_from_request()
-    if error:
-        return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
+    # ---
 
     data = request.json
     if 'currency' not in data or 'amount' not in data:
@@ -45,13 +50,14 @@ def update_initial_balance():
         return jsonify({'error': 'Invalid currency or amount format'}), 400
 
     update_key = f"settings.initial_balances.{currency}"
-    result = db.users.update_one(
-        {'_id': user_id},
+    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
+    result = settings_collection().update_one(
+        {'account_id': account_id},
         {'$set': {update_key: amount}}
     )
 
     if result.matched_count == 0:
-        return jsonify({'error': 'User not found'}), 404
+        return jsonify({'error': 'User settings not found'}), 404
 
     return jsonify({
         'message': f'Initial balance for {currency} updated to {amount}'
@@ -59,12 +65,12 @@ def update_initial_balance():
 
 
 @settings_bp.route('/category', methods=['POST'])
+@auth_required(min_role="premium_user")  # --- REFACTOR: Add decorator ---
 def add_user_category():
     """Adds a new custom category for a user."""
-    db = get_db()
-    user_id, error = get_user_id_from_request()
-    if error:
-        return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
+    # ---
 
     data = request.json
     if 'type' not in data or 'name' not in data:
@@ -79,13 +85,14 @@ def add_user_category():
         return jsonify({'error': 'Category name cannot be empty'}), 400
 
     update_key = f"settings.categories.{category_type}"
-    result = db.users.update_one(
-        {'_id': user_id},
+    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
+    result = settings_collection().update_one(
+        {'account_id': account_id},
         {'$addToSet': {update_key: category_name}}
     )
 
     if result.matched_count == 0:
-        return jsonify({'error': 'User not found'}), 404
+        return jsonify({'error': 'User settings not found'}), 404
 
     return jsonify({
         'message': f'Category "{category_name}" added.'
@@ -93,12 +100,12 @@ def add_user_category():
 
 
 @settings_bp.route('/category', methods=['DELETE'])
+@auth_required(min_role="premium_user")  # --- REFACTOR: Add decorator ---
 def remove_user_category():
     """Removes a custom category for a user."""
-    db = get_db()
-    user_id, error = get_user_id_from_request()
-    if error:
-        return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
+    # ---
 
     data = request.json
     if 'type' not in data or 'name' not in data:
@@ -111,13 +118,14 @@ def remove_user_category():
         return jsonify({'error': 'Invalid type'}), 400
 
     update_key = f"settings.categories.{category_type}"
-    result = db.users.update_one(
-        {'_id': user_id},
+    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
+    result = settings_collection().update_one(
+        {'account_id': account_id},
         {'$pull': {update_key: category_name}}
     )
 
     if result.matched_count == 0:
-        return jsonify({'error': 'User not found'}), 404
+        return jsonify({'error': 'User settings not found'}), 404
 
     if result.modified_count == 0:
         return jsonify({'error': 'Category not found or not removed'}), 400
@@ -128,14 +136,13 @@ def remove_user_category():
 
 
 @settings_bp.route('/rate', methods=['POST'])
+@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
 def update_khr_rate():
     """Updates the user-specific fixed exchange rate."""
     data = request.json
-    db = get_db()
-
-    user_id, error = get_user_id_from_request()
-    if error:
-        return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
+    # ---
 
     if 'rate' not in data:
         return jsonify({'error': 'Rate is required'}), 400
@@ -145,8 +152,9 @@ def update_khr_rate():
     except ValueError:
         return jsonify({'error': 'Rate must be a number'}), 400
 
-    db.users.update_one(
-        {'_id': user_id},
+    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
+    settings_collection().update_one(
+        {'account_id': account_id},
         {'$set': {
             'settings.rate_preference': 'fixed',
             'settings.fixed_rate': new_rate
@@ -159,20 +167,21 @@ def update_khr_rate():
 
 
 @settings_bp.route('/rate', methods=['GET'])
+@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
 def get_khr_rate():
     """
     Fetches the KHR exchange rate based on the user's preference.
     """
-    db = get_db()
-    user_id, error = get_user_id_from_request()
-    if error:
-        return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
+    # ---
 
-    user = db.users.find_one({'_id': user_id})
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
+    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
+    user_settings_doc = settings_collection().find_one({'account_id': account_id})
+    if not user_settings_doc:
+        return jsonify({'error': 'User settings not found'}), 404
 
-    user_settings = user.get('settings', {})
+    user_settings = user_settings_doc.get('settings', {})
     preference = user_settings.get('rate_preference', 'live')
 
     if preference == 'fixed':
@@ -184,75 +193,75 @@ def get_khr_rate():
 
 
 @settings_bp.route('/mode', methods=['POST'])
+@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
 def update_user_mode():
     """
     Sets the user's currency mode, language, and names during onboarding.
     """
-    db = get_db()
-    user_id, error = get_user_id_from_request()
-    if error:
-        return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
+    # ---
 
     data = request.json
     mode = data.get('mode')
+
+    # --- REFACTOR: name_en is not required, name_km/language are optional ---
     name_en = data.get('name_en')
+    name_km = data.get('name_km')
+    language = data.get('language')
 
     if not mode or mode not in ['single', 'dual']:
         return jsonify({'error': 'Invalid mode. Must be "single" or "dual".'}), 400
 
-    if not name_en:
-        return jsonify({'error': 'name_en is required.'}), 400
-
     update_payload = {
         'settings.currency_mode': mode,
-        'name_en': name_en
     }
+
+    if name_en:
+        update_payload['name_en'] = name_en
+    if name_km:
+        update_payload['name_km'] = name_km
+    if language:
+        update_payload['settings.language'] = language
 
     if mode == 'single':
         primary_currency = data.get('primary_currency')
         if not primary_currency:
             return jsonify({'error': 'primary_currency is required for single mode.'}), 400
-
-        update_payload['settings.language'] = 'en'
         update_payload['settings.primary_currency'] = primary_currency.upper()
 
     elif mode == 'dual':
-        language = data.get('language')
-        name_km = data.get('name_km')
-        if not language or language not in ['en', 'km']:
-            return jsonify({'error': 'Invalid language for dual mode.'}), 400
-        if not name_km:
-            return jsonify({'error': 'name_km is required for dual mode.'}), 400
+        # No longer require language/name_km, they can be set separately
+        if 'settings.primary_currency' not in update_payload:
+            update_payload['settings.primary_currency'] = 'USD'  # Default for dual
 
-        update_payload['settings.language'] = language
-        update_payload['name_km'] = name_km
-        update_payload['settings.primary_currency'] = 'USD' # Default for dual
-
-    result = db.users.update_one(
-        {'_id': user_id},
+    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
+    result = settings_collection().update_one(
+        {'account_id': account_id},
         {'$set': update_payload}
     )
 
     if result.matched_count == 0:
-        return jsonify({'error': 'User not found'}), 404
+        return jsonify({'error': 'User settings not found'}), 404
 
-    return jsonify({'message': f'User mode set to {mode}.'})
+    return jsonify({'message': f'User settings updated.'})
 
 
 @settings_bp.route('/complete_onboarding', methods=['POST'])
+@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
 def complete_onboarding():
     """Marks the user's onboarding as complete."""
-    db = get_db()
-    user_id, error = get_user_id_from_request()
-    if error:
-        return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
+    # ---
 
-    result = db.users.update_one(
-        {'_id': user_id},
+    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
+    result = settings_collection().update_one(
+        {'account_id': account_id},
         {'$set': {'onboarding_complete': True}}
     )
 
     if result.matched_count == 0:
-        return jsonify({'error': 'User not found'}), 404
+        return jsonify({'error': 'User settings not found'}), 404
 
     return jsonify({'message': 'Onboarding complete.'})

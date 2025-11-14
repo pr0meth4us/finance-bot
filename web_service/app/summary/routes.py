@@ -1,14 +1,15 @@
-# --- web_service/app/summary/routes.py (FULL) ---
+# --- web_service/app/summary/routes.py (Refactored) ---
 """
 Handles the main summary endpoint for the bot.
 All endpoints are multi-tenant and require a valid user_id.
 """
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, g
 from datetime import datetime, time, date, timedelta
 from zoneinfo import ZoneInfo
-from app import get_db
-from app.utils.auth import get_user_id_from_request
-from app.utils.currency import get_live_usd_to_khr_rate  # <-- ADD THIS IMPORT
+from app.utils.db import get_db, settings_collection, transactions_collection, debts_collection
+# --- REFACTOR: Import new auth decorator ---
+from app.utils.auth import auth_required
+from app.utils.currency import get_live_usd_to_khr_rate
 
 summary_bp = Blueprint('summary', __name__, url_prefix='/summary')
 
@@ -57,13 +58,13 @@ def get_date_ranges():
     }
 
 
-def calculate_period_summary(start_date, end_date, db, user_id, user_rate):
+def calculate_period_summary(start_date, end_date, db, account_id, user_rate):
     """Helper to run aggregation for a specific time period for a user."""
     pipeline = [
         {'$match': {
             'timestamp': {'$gte': start_date, '$lte': end_date},
             'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES},
-            'user_id': user_id
+            'account_id': account_id # <-- REFACTOR
         }},
         {
             '$addFields': {
@@ -95,7 +96,7 @@ def calculate_period_summary(start_date, end_date, db, user_id, user_rate):
             }
         }
     ]
-    results = list(db.transactions.aggregate(pipeline))
+    results = list(transactions_collection().aggregate(pipeline))
 
     period_summary = {
         'income': {}, 'expense': {}, 'net_usd': 0
@@ -119,22 +120,24 @@ def calculate_period_summary(start_date, end_date, db, user_id, user_rate):
 
 
 @summary_bp.route('/detailed', methods=['GET'])
+@auth_required(min_role="user") # --- REFACTOR: Add decorator ---
 def get_detailed_summary():
     """Generates the detailed summary for the authenticated user."""
     db = get_db()
-    user_id, error = get_user_id_from_request()
-    if error:
-        return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
+    # ---
 
     # 1. Get User's Settings (Initial Balances, Mode, Currencies)
-    user = db.users.find_one(
-        {'_id': user_id},
+    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
+    user_settings_doc = settings_collection().find_one(
+        {'account_id': account_id},
         {'settings': 1}
     )
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
+    if not user_settings_doc:
+        return jsonify({'error': 'User settings not found'}), 404
 
-    settings = user.get('settings', {})
+    settings = user_settings_doc.get('settings', {})
     initial_balances = settings.get('initial_balances', {})
     mode = settings.get('currency_mode', 'dual')
 
@@ -147,7 +150,7 @@ def get_detailed_summary():
     # 2. Calculate Total Transaction Flow (Income & Expense)
     pipeline_transactions = [
         {'$match': {
-            'user_id': user_id,
+            'account_id': account_id, # <-- REFACTOR
             'currency': {'$in': currencies_to_track}
         }},
         {'$group': {
@@ -155,7 +158,7 @@ def get_detailed_summary():
             'total': {'$sum': '$amount'}
         }}
     ]
-    tx_results = list(db.transactions.aggregate(pipeline_transactions))
+    tx_results = list(transactions_collection().aggregate(pipeline_transactions))
 
     # 3. Calculate Balances
     final_balances = {}
@@ -169,7 +172,7 @@ def get_detailed_summary():
     pipeline_debts = [
         {'$match': {
             'status': 'open',
-            'user_id': user_id,
+            'account_id': account_id, # <-- REFACTOR
             'currency': {'$in': currencies_to_track}
         }},
         {'$group': {
@@ -177,7 +180,7 @@ def get_detailed_summary():
             'totalAmount': {'$sum': '$remainingAmount'}
         }}
     ]
-    debt_results = list(db.debts.aggregate(pipeline_debts))
+    debt_results = list(debts_collection().aggregate(pipeline_debts))
 
     debts_owed_to_you = [
         {'total': d['totalAmount'], '_id': d['_id']['currency']}
@@ -202,7 +205,7 @@ def get_detailed_summary():
     period_summaries = {}
     for period, (start_utc, end_utc) in date_ranges.items():
         period_summaries[period] = calculate_period_summary(
-            start_utc, end_utc, db, user_id, user_rate
+            start_utc, end_utc, db, account_id, user_rate
         )
 
     # 6. Combine all data
@@ -214,5 +217,3 @@ def get_detailed_summary():
     }
 
     return jsonify(summary)
-
-# --- End of file ---

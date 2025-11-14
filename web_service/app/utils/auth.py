@@ -1,37 +1,107 @@
-# --- Start of new file: web_service/app/utils/auth.py ---
-"""
-Reusable authentication utility functions for the web service.
-"""
-from flask import request, jsonify
-from bson import ObjectId
+# --- web_service/app/utils/auth.py (New) ---
+
+import os
+import requests
+from functools import wraps
+from flask import request, jsonify, g, current_app
+from requests.auth import HTTPBasicAuth
+
+# Define role hierarchy for gating
+ROLE_HIERARCHY = {
+    "user": 1,
+    "premium_user": 2,
+    "admin": 99  # Bifrost 'admin' role, not used for gating but good to have
+}
 
 
-def get_user_id_from_request():
+def _get_role_level(role_name):
+    """Returns the numerical level for a given role name."""
+    return ROLE_HIERARCHY.get(role_name, 0)
+
+
+def auth_required(min_role="user"):
     """
-    Gets the user_id from the request body (JSON) or query parameters.
-
-    This function ensures a 'user_id' is present and valid in all
-    user-specific API calls.
-
-    Returns:
-        tuple: (user_id_obj, None) on success, or (None, error_response) on failure.
+    Decorator to protect routes.
+    Validates a JWT against the Bifrost /internal/validate-token endpoint.
+    Populates g.account_id and g.role on success.
     """
-    user_id_str = None
-    if request.is_json:
-        user_id_str = request.json.get('user_id')
 
-    if not user_id_str:
-        user_id_str = request.args.get('user_id')
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            auth_header = request.headers.get("Authorization")
+            token = None
 
-    if not user_id_str:
-        # 401 Unauthorized is the appropriate code for missing credentials
-        return None, (jsonify({'error': 'user_id is required'}), 401)
+            if not auth_header:
+                return jsonify({"error": "Authorization header is missing"}), 401
 
-    try:
-        # Validate that it's a proper ObjectId and return the object
-        user_id_obj = ObjectId(user_id_str)
-        return user_id_obj, None
-    except Exception:
-        # 400 Bad Request for malformed ID
-        return None, (jsonify({'error': 'Invalid user_id format'}), 400)
-# --- End of new file ---
+            parts = auth_header.split()
+            if len(parts) == 2 and parts[0].lower() == "bearer":
+                token = parts[1]
+
+            if not token:
+                return jsonify({"error": "Invalid Authorization header format"}), 401
+
+            # --- Server-to-Server Bifrost Call ---
+            bifrost_url = current_app.config.get("BIFROST_URL")
+            client_id = current_app.config.get("BIFROST_CLIENT_ID")
+            client_secret = current_app.config.get("BIFROST_CLIENT_SECRET")
+
+            if not bifrost_url or not client_id or not client_secret:
+                current_app.logger.error("Bifrost env vars (URL, ID, SECRET) are not set.")
+                return jsonify({"error": "Authentication system is misconfigured"}), 500
+
+            validate_url = f"{bifrost_url}/internal/validate-token"
+
+            try:
+                # Authenticate this service (FinanceBot) to Bifrost using Basic Auth
+                auth = HTTPBasicAuth(client_id, client_secret)
+
+                # Send the *user's* JWT in the payload to be validated
+                payload = {"token": token}
+
+                response = requests.post(validate_url, auth=auth, json=payload, timeout=5)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("is_valid"):
+                        # --- SUCCESS ---
+                        # Check role level
+                        user_role = data.get("app_specific_role", "user")
+                        user_level = _get_role_level(user_role)
+                        min_level = _get_role_level(min_role)
+
+                        if user_level < min_level:
+                            current_app.logger.warning(
+                                f"Auth denied for {data.get('account_id')}: "
+                                f"Role '{user_role}' < min_role '{min_role}'"
+                            )
+                            return jsonify({"error": "Forbidden: Insufficient role"}), 403
+
+                        # Populate g for this request context
+                        g.account_id = data.get("account_id")
+                        g.role = user_role
+                        return f(*args, **kwargs)
+
+                    else:
+                        # Token was processed but found invalid
+                        current_app.logger.warning(f"Bifrost validation failed: {data.get('error')}")
+                        return jsonify({"error": "Invalid or expired token"}), 401
+
+                elif response.status_code == 401:
+                    # Error with *this service's* credentials
+                    current_app.logger.error("Bifrost auth failed (401). Check CLIENT_ID/SECRET.")
+                    return jsonify({"error": "Authentication service auth failed"}), 500
+
+                else:
+                    # Other Bifrost error
+                    current_app.logger.error(f"Bifrost error {response.status_code}: {response.text}")
+                    return jsonify({"error": "Authentication service unavailable"}), 503
+
+            except requests.exceptions.RequestException as e:
+                current_app.logger.error(f"Could not connect to Bifrost: {e}", exc_info=True)
+                return jsonify({"error": "Authentication service connection error"}), 503
+
+        return decorated_function
+
+    return decorator

@@ -1,40 +1,19 @@
-# --- Start of modified file: web_service/app/transactions/routes.py ---
+# --- web_service/app/transactions/routes.py (Refactored) ---
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from datetime import datetime, time, timedelta
 from bson import ObjectId
 from app.utils.currency import get_live_usd_to_khr_rate
 import re
 from zoneinfo import ZoneInfo
-from app import get_db  # <-- IMPORT THE NEW FUNCTION
+from app.utils.db import get_db, transactions_collection
+# --- REFACTOR: Import new auth decorator ---
+from app.utils.auth import auth_required
 
 transactions_bp = Blueprint('transactions', __name__, url_prefix='/transactions')
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 UTC_TZ = ZoneInfo("UTC")
-
-
-# --- NEW: Helper to get user_id and check for it ---
-def get_user_id_from_request():
-    """
-    Gets user_id from request.json or request.args.
-    Returns (user_id, error_response)
-    """
-    user_id = None
-    if request.is_json:
-        user_id = request.json.get('user_id')
-
-    if not user_id:
-        user_id = request.args.get('user_id')
-
-    if not user_id:
-        return None, (jsonify({'error': 'user_id is required'}), 401) # 401 Unauthorized
-
-    try:
-        # Validate that it's a proper ObjectId
-        return ObjectId(user_id), None
-    except Exception:
-        return None, (jsonify({'error': 'Invalid user_id format'}), 400)
 
 
 def get_date_ranges_for_search():
@@ -70,21 +49,21 @@ def serialize_tx(tx):
     if 'timestamp' in tx and isinstance(tx['timestamp'], datetime):
         tx['timestamp'] = tx['timestamp'].isoformat()
 
-    # --- MODIFICATION: Also serialize user_id if present ---
-    if 'user_id' in tx:
-        tx['user_id'] = str(tx['user_id'])
+    # --- REFACTOR: Use account_id ---
+    if 'account_id' in tx:
+        tx['account_id'] = str(tx['account_id'])
 
     return tx
 
 
 @transactions_bp.route('/', methods=['POST'])
+@auth_required(min_role="user") # --- REFACTOR: Add decorator ---
 def add_transaction():
     """Adds a transaction for an authenticated user."""
     db = get_db()
 
-    # --- MODIFICATION: Authenticate user ---
-    user_id, error = get_user_id_from_request()
-    if error: return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
     # ---
 
     data = request.json
@@ -95,7 +74,7 @@ def add_transaction():
     timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now(UTC_TZ)
 
     tx = {
-        "user_id": user_id, # <-- MODIFICATION: Add user_id
+        "account_id": account_id, # <-- REFACTOR
         "type": data['type'],
         "amount": float(data['amount']),
         "currency": data['currency'],
@@ -108,42 +87,42 @@ def add_transaction():
     if tx['currency'] == 'KHR':
         tx['exchangeRateAtTime'] = get_live_usd_to_khr_rate()
 
-    result = db.transactions.insert_one(tx)
+    result = transactions_collection().insert_one(tx)
     return jsonify({'message': 'Transaction added', 'id': str(result.inserted_id)}), 201
 
 
 @transactions_bp.route('/recent', methods=['GET'])
+@auth_required(min_role="user") # --- REFACTOR: Add decorator ---
 def get_recent_transactions():
     """Fetches recent transactions for an authenticated user."""
     db = get_db()
 
-    # --- MODIFICATION: Authenticate user ---
-    user_id, error = get_user_id_from_request()
-    if error: return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
     # ---
 
     limit = int(request.args.get('limit', 20))
 
-    # --- MODIFICATION: Query is now user-specific ---
-    txs = list(db.transactions.find({'user_id': user_id}).sort('timestamp', -1).limit(limit))
+    # --- REFACTOR: Query is now user-specific ---
+    txs = list(transactions_collection().find({'account_id': account_id}).sort('timestamp', -1).limit(limit))
     # ---
 
     return jsonify([serialize_tx(tx) for tx in txs])
 
 
 @transactions_bp.route('/search', methods=['POST'])
+@auth_required(min_role="user") # --- REFACTOR: Add decorator ---
 def search_transactions():
     """Performs an advanced search for an authenticated user."""
     params = request.json
     db = get_db()
 
-    # --- MODIFICATION: Authenticate user ---
-    user_id, error = get_user_id_from_request()
-    if error: return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
     # ---
 
-    # --- MODIFICATION: Add user_id to match_stage ---
-    match_stage = {'user_id': user_id}
+    # --- REFACTOR: Add account_id to match_stage ---
+    match_stage = {'account_id': account_id}
     # ---
 
     date_filter = {}
@@ -181,23 +160,23 @@ def search_transactions():
             regex_str = '|'.join([re.escape(k) for k in keywords])
             match_stage['description'] = re.compile(regex_str, re.IGNORECASE)
 
-    results = list(db.transactions.find(match_stage).sort('timestamp', -1).limit(50))
+    results = list(transactions_collection().find(match_stage).sort('timestamp', -1).limit(50))
     return jsonify([serialize_tx(tx) for tx in results])
 
 
 @transactions_bp.route('/<tx_id>', methods=['GET'])
+@auth_required(min_role="user") # --- REFACTOR: Add decorator ---
 def get_transaction(tx_id):
     """Fetches a single transaction for an authenticated user."""
     db = get_db()
 
-    # --- MODIFICATION: Authenticate user ---
-    user_id, error = get_user_id_from_request()
-    if error: return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
     # ---
 
     try:
-        # --- MODIFICATION: Query is now user-specific ---
-        transaction = db.transactions.find_one({'_id': ObjectId(tx_id), 'user_id': user_id})
+        # --- REFACTOR: Query is now user-specific ---
+        transaction = transactions_collection().find_one({'_id': ObjectId(tx_id), 'account_id': account_id})
         # ---
 
         if transaction:
@@ -209,14 +188,14 @@ def get_transaction(tx_id):
 
 
 @transactions_bp.route('/<tx_id>', methods=['PUT'])
+@auth_required(min_role="user") # --- REFACTOR: Add decorator ---
 def update_transaction(tx_id):
     """Updates a transaction for an authenticated user."""
     data = request.json
     db = get_db()
 
-    # --- MODIFICATION: Authenticate user ---
-    user_id, error = get_user_id_from_request()
-    if error: return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
     # ---
 
     if not data:
@@ -246,9 +225,9 @@ def update_transaction(tx_id):
         return jsonify({'error': 'No valid fields to update'}), 400
 
     try:
-        # --- MODIFICATION: Query is now user-specific ---
-        result = db.transactions.update_one(
-            {'_id': ObjectId(tx_id), 'user_id': user_id},
+        # --- REFACTOR: Query is now user-specific ---
+        result = transactions_collection().update_one(
+            {'_id': ObjectId(tx_id), 'account_id': account_id},
             {'$set': update_fields}
         )
         # ---
@@ -262,19 +241,18 @@ def update_transaction(tx_id):
 
 
 @transactions_bp.route('/<tx_id>', methods=['DELETE'])
+@auth_required(min_role="user") # --- REFACTOR: Add decorator ---
 def delete_transaction(tx_id):
     """Deletes a transaction for an authenticated user."""
     db = get_db()
 
-    # --- MODIFICATION: Authenticate user ---
-    # Note: user_id for DELETE comes from JSON body, not query param
-    user_id, error = get_user_id_from_request()
-    if error: return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
     # ---
 
     try:
-        # --- MODIFICATION: Query is now user-specific ---
-        result = db.transactions.delete_one({'_id': ObjectId(tx_id), 'user_id': user_id})
+        # --- REFACTOR: Query is now user-specific ---
+        result = transactions_collection().delete_one({'_id': ObjectId(tx_id), 'account_id': account_id})
         # ---
 
         if result.deleted_count:
@@ -283,4 +261,3 @@ def delete_transaction(tx_id):
             return jsonify({'error': 'Transaction not found or access denied'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 400
-# --- End of modified file ---

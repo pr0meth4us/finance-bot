@@ -1,17 +1,18 @@
-# --- Start of modified file: web_service/app/analytics/routes.py ---
+# --- web_service/app/analytics/routes.py (Refactored) ---
 """
 Handles all analytics and report generation endpoints.
 All endpoints are multi-tenant and require a valid user_id.
 """
 import io
-from flask import Blueprint, Response, request, jsonify
+from flask import Blueprint, Response, request, jsonify, g
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 import matplotlib.pyplot as plt
 import re
-from app import get_db
-from app.utils.auth import get_user_id_from_request
+from app.utils.db import get_db, settings_collection
 from app.utils.currency import get_live_usd_to_khr_rate
+# --- REFACTOR: Import new auth decorator ---
+from app.utils.auth import auth_required
 
 analytics_bp = Blueprint('analytics', __name__, url_prefix='/analytics')
 
@@ -27,18 +28,19 @@ PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 UTC_TZ = ZoneInfo("UTC")
 
 
-def _get_user_financial_base(db, user_id):
+def _get_user_financial_base(db, account_id):
     """
     Helper to get the user's initial balance in USD and their preferred rate.
     """
-    user = db.users.find_one(
-        {'_id': user_id},
+    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
+    user_settings_doc = settings_collection().find_one(
+        {'account_id': account_id},
         {'settings': 1}
     )
-    if not user:
-        raise Exception("User not found")
+    if not user_settings_doc:
+        raise Exception("User settings not found")
 
-    settings = user.get('settings', {})
+    settings = user_settings_doc.get('settings', {})
 
     # Get initial balances
     initial_balances = settings.get('initial_balances', {})
@@ -77,21 +79,23 @@ def get_date_ranges_for_search():
         "this_week": create_utc_range(start_of_week, start_of_week + timedelta(days=6)),
         "last_week": create_utc_range(start_of_last_week, end_of_last_week),
         "this_month": create_utc_range(start_of_month,
-                                       (start_of_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(
+                                     (start_of_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(
                                            days=1))
     }
 
 
 @analytics_bp.route('/search', methods=['POST'])
+@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
 def search_transactions():
     """Performs an advanced search and sums up matching transactions for a user."""
     params = request.json
     db = get_db()
 
-    user_id, error = get_user_id_from_request()
-    if error: return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
+    # ---
 
-    match_stage = {'user_id': user_id}
+    match_stage = {'account_id': account_id} # --- REFACTOR: Use account_id
 
     date_filter = {}
     if params.get('period'):
@@ -180,12 +184,14 @@ def search_transactions():
 
 
 @analytics_bp.route('/report/detailed', methods=['GET'])
+@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
 def get_detailed_report():
     """Generates a detailed report for the authenticated user."""
     db = get_db()
 
-    user_id, error = get_user_id_from_request()
-    if error: return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
+    # ---
 
     start_date_str = request.args.get('start_date')
     end_date_str = request.args.get('end_date')
@@ -206,14 +212,14 @@ def get_detailed_report():
     except (ValueError, TypeError):
         return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
 
-    # --- THIS IS THE FIX ---
     try:
-        initial_balance_in_usd, user_rate = _get_user_financial_base(db, user_id)
+        # --- REFACTOR: Pass account_id ---
+        initial_balance_in_usd, user_rate = _get_user_financial_base(db, account_id)
     except Exception as e:
         return jsonify({"error": f"Could not load user settings: {str(e)}"}), 404
-    # --- END FIX ---
 
-    user_match = {'user_id': user_id}
+    # --- REFACTOR: Use account_id ---
+    user_match = {'account_id': account_id}
 
     add_fields_stage = {
         '$addFields': {
@@ -225,7 +231,7 @@ def get_detailed_report():
                         '$let': {
                             'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', user_rate]}}, # Use user's rate
                             'in': {'$cond': {'if': {'$gt': ['$$rate', 0]}, 'then': {'$divide': ['$amount', '$$rate']},
-                                             'else': {'$divide': ['$amount', user_rate]}}}
+                                            'else': {'$divide': ['$amount', user_rate]}}}
                         }
                     }
                 }
@@ -243,10 +249,8 @@ def get_detailed_report():
     start_income = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'income'), 0)
     start_expense = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'expense'), 0)
 
-    # --- THIS IS THE FIX ---
     # The starting balance is the Initial Balance + all transactions before the start date
     balance_at_start_usd = initial_balance_in_usd + start_income - start_expense
-    # --- END FIX ---
 
     # --- Pipelines for the selected period ---
     date_range_match = {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc}}
@@ -374,12 +378,14 @@ def get_detailed_report():
 
 
 @analytics_bp.route('/habits', methods=['GET'])
+@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
 def get_spending_habits():
     """Analyzes spending habits for the authenticated user."""
     db = get_db()
 
-    user_id, error = get_user_id_from_request()
-    if error: return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
+    # ---
 
     start_date_str = request.args.get('start_date')
     end_date_str = request.args.get('end_date')
@@ -399,11 +405,13 @@ def get_spending_habits():
         return jsonify({"error": "Invalid date format."}), 400
 
     try:
-        _, user_rate = _get_user_financial_base(db, user_id)
+        # --- REFACTOR: Pass account_id ---
+        _, user_rate = _get_user_financial_base(db, account_id)
     except Exception as e:
         return jsonify({"error": f"Could not load user settings: {str(e)}"}), 404
 
-    user_match = {'user_id': user_id}
+    # --- REFACTOR: Use account_id ---
+    user_match = {'account_id': account_id}
 
     add_fields_stage = {
         '$addFields': {
@@ -415,7 +423,7 @@ def get_spending_habits():
                         '$let': {
                             'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', user_rate]}},
                             'in': {'$cond': {'if': {'$gt': ['$$rate', 0]}, 'then': {'$divide': ['$amount', '$$rate']},
-                                             'else': {'$divide': ['$amount', user_rate]}}}
+                                            'else': {'$divide': ['$amount', user_rate]}}}
                         }
                     }
                 }
@@ -473,4 +481,3 @@ def get_spending_habits():
         'keywordsByCategory': list(db.transactions.aggregate(keywords_pipeline))
     }
     return jsonify(habits)
-# --- End of modified file ---

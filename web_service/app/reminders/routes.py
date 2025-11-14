@@ -1,26 +1,26 @@
-# --- Start of modified file: web_service/app/reminders/routes.py ---
+# --- web_service/app/reminders/routes.py (Refactored) ---
 """
 Handles scheduling reminders for users.
 All endpoints are multi-tenant and require a valid user_id.
 """
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, g
 from datetime import datetime
-from app import send_telegram_message, get_db
-# --- MODIFICATION: Import the new auth helper ---
-from app.utils.auth import get_user_id_from_request
+from app import send_telegram_message
+from app.utils.db import reminders_collection
+# --- REFACTOR: Import new auth decorator ---
+from app.utils.auth import auth_required
 
 reminders_bp = Blueprint('reminders', __name__, url_prefix='/reminders')
 
 
 @reminders_bp.route('/', methods=['POST'])
+@auth_required(min_role="user") # --- REFACTOR: Add decorator ---
 def add_reminder():
     """Schedules a new reminder for the authenticated user."""
-    db = get_db()
     data = request.json
 
-    # --- MODIFICATION: Authenticate user ---
-    user_id, error = get_user_id_from_request()
-    if error: return error
+    # --- REFACTOR: Get account_id from g ---
+    account_id = g.account_id
     # ---
 
     if not all(k in data for k in ['purpose', 'reminder_datetime', 'chat_id']):
@@ -41,21 +41,18 @@ def add_reminder():
         trigger='date',
         run_date=reminder_datetime,
         args=[data['chat_id'], message_text, token],
-        id=f"reminder_{user_id}_{datetime.now().timestamp()}",  # Unique job ID
-        name=f"Reminder for user {user_id}"
+        id=f"reminder_{account_id}_{datetime.now().timestamp()}",  # Unique job ID
+        name=f"Reminder for user {account_id}"
     )
 
-    # --- MODIFICATION: Log the reminder in the database ---
-    # This isn't strictly necessary for scheduling, but good for tracking.
-    db.reminders.insert_one({
-        "user_id": user_id,
+    # Log the reminder in the database
+    reminders_collection().insert_one({
+        "account_id": account_id, # <-- REFACTOR
         "purpose": data['purpose'],
         "chat_id": data['chat_id'],
         "reminder_datetime": reminder_datetime,
         "created_at": datetime.now()
     })
-    # ---
 
-    print(f"Scheduled a reminder for user {user_id} at {reminder_datetime}")
+    print(f"Scheduled a reminder for user {account_id} at {reminder_datetime}")
     return jsonify({'message': 'Reminder scheduled successfully'}), 201
-# --- End of modified file ---

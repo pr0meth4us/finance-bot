@@ -1,4 +1,4 @@
-# --- web_service/app/__init__.py (FULL) ---
+# --- web_service/app/__init__.py (Refactored) ---
 
 import certifi
 import io
@@ -14,6 +14,8 @@ from .config import Config
 from datetime import datetime, time, timedelta, date
 from zoneinfo import ZoneInfo
 from bson import ObjectId
+# --- REFACTOR: Import new db utils ---
+from app.utils.db import get_db, close_db, settings_collection, MONGO_CONNECTION_ARGS
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,13 +29,9 @@ FINANCIAL_TRANSACTION_CATEGORIES = [
     'Loan Lent', 'Debt Repayment', 'Loan Received', 'Debt Settled', 'Initial Balance'
 ]
 
-MONGO_CONNECTION_ARGS = {
-    "tls": True,
-    "serverSelectionTimeoutMS": 30000,
-    "connectTimeoutMS": 20000,
-    "socketTimeoutMS": 20000,
-    "tlsCAFile": certifi.where(),
-}
+
+# --- REFACTOR: Connection args moved to db.py ---
+# MONGO_CONNECTION_ARGS = { ... }
 
 
 def send_telegram_message(chat_id, text, token, parse_mode='HTML'):
@@ -206,46 +204,58 @@ def run_scheduled_report(period):
         return
 
     try:
-        users_to_report = db.users.find({
-            "settings.report_chat_id": {"$exists": True, "$ne": None},
-            "subscription_status": "active"
+        # --- REFACTOR: Use 'db.settings' (was 'db.users') ---
+        # We find users who have a report_chat_id set in their profile
+        users_to_report = db.settings.find({
+            "settings.notification_chat_ids.report": {"$exists": True, "$ne": None},
         })
     except Exception as e:
         log.error(f"Scheduled job failed to query users: {e}", exc_info=True)
         client.close()
         return
 
-    for user in users_to_report:
-        chat_id = user['settings']['report_chat_id']
-        log.info(f"Generating {period} report for user {user['name']} (ChatID: {chat_id})...")
-
-    chat_id = Config.TELEGRAM_CHAT_ID
-    if not token or not chat_id:
-        client.close()
-        return
-
     today = datetime.now(PHNOM_PENH_TZ).date()
+    start_date, end_date = None, None
+
     if period == 'weekly':
         end_date = today - timedelta(days=today.weekday() + 1)
         start_date = end_date - timedelta(days=6)
-        _send_report_job('previous week', start_date, end_date, db, token, chat_id)
     elif period == 'monthly':
         end_date = today.replace(day=1) - timedelta(days=1)
         start_date = end_date.replace(day=1)
-        _send_report_job('previous month', start_date, end_date, db, token, chat_id)
     elif period == 'semesterly':
         if today.month == 1:
             end_date = today.replace(year=today.year - 1, month=12, day=31)
             start_date = today.replace(year=today.year - 1, month=7, day=1)
-            _send_report_job('last semester', start_date, end_date, db, token, chat_id)
         elif today.month == 7:
             end_date = today.replace(month=6, day=30)
             start_date = today.replace(month=1, day=1)
-            _send_report_job('first semester', start_date, end_date, db, token, chat_id)
     elif period == 'yearly':
         end_date = today.replace(year=today.year - 1, month=12, day=31)
         start_date = today.replace(year=today.year - 1, month=1, day=1)
-        _send_report_job('previous year', start_date, end_date, db, token, chat_id)
+
+    if not start_date or not end_date:
+        log.warning(f"Could not determine date range for period {period}")
+        client.close()
+        return
+
+    for user in users_to_report:
+        chat_id = user['settings']['notification_chat_ids']['report']
+        account_id = user['account_id']
+        log.info(f"Generating {period} report for user {account_id} (ChatID: {chat_id})...")
+
+        # We must query transactions on a per-user basis
+        # TODO: This is inefficient (N+1 query).
+        # For a full SaaS, this should be a single aggregation pipeline
+        # that groups by user_id, but this is complex.
+        # For now, we use the existing global get_report_data logic
+        # but this needs to be refactored to be user-specific.
+
+        # --- TEMPORARY: Use old logic ---
+        # This will be fixed when we refactor analytics to be user-specific
+        if str(account_id) == "1836585300":  # Hardcoded admin ID
+            _send_report_job(period, start_date, end_date, db, token, chat_id)
+        # --- END TEMPORARY ---
 
     client.close()
 
@@ -259,8 +269,7 @@ def send_daily_reminder_job():
         return
 
     token = Config.TELEGRAM_TOKEN
-    chat_id = Config.TELEGRAM_CHAT_ID
-    if not token or not chat_id:
+    if not token:
         client.close()
         return
 
@@ -269,58 +278,71 @@ def send_daily_reminder_job():
     today_start_utc = today_start_local_aware.astimezone(ZoneInfo("UTC"))
 
     try:
-        count = db.transactions.count_documents({'timestamp': {'$gte': today_start_utc}})
-        if count == 0:
-            message = "Hey! 잊지마! (Don't forget!)\n\nLooks like you haven't logged any transactions today. Take a moment to log your activity! ✍️"
-            send_telegram_message(chat_id, message, token, parse_mode='Markdown')
-        else:
-            pass
+        # Find users who have a reminder chat ID set
+        users_to_remind = db.settings.find({
+            "settings.notification_chat_ids.reminder": {"$exists": True, "$ne": None},
+        })
+
+        for user in users_to_remind:
+            chat_id = user['settings']['notification_chat_ids']['reminder']
+            account_id = user['account_id']
+
+            # Check if this user has logged any transactions today
+            count = db.transactions.count_documents({
+                'timestamp': {'$gte': today_start_utc},
+                'account_id': account_id
+            })
+
+            if count == 0:
+                lang = user.get('settings', {}).get('language', 'en')
+                # TODO: Use i18n for this message
+                if lang == 'km':
+                    message = "សួស្តី!\nកុំភ្លេចកត់ត្រាចំណាយថ្ងៃនេះណា! ✍️"
+                else:
+                    message = "Hey!\nLooks like you haven't logged any transactions today. Take a moment to log your activity! ✍️"
+
+                send_telegram_message(chat_id, message, token, parse_mode='Markdown')
+            else:
+                pass  # User has logged, do nothing
+
     except Exception as e:
         log.error(f"Daily reminder job failed to query/send: {e}", exc_info=True)
 
     client.close()
 
 
-def get_db():
-    """
-    Connects to the specific database.
-    Uses Flask's 'g' to reuse the connection per-request.
-    """
-    if 'db_client' not in g:
-        uri = current_app.config['MONGODB_URI']
-        try:
-            g.db_client = MongoClient(uri, **MONGO_CONNECTION_ARGS)
-            g.db = g.db_client[current_app.config['DB_NAME']]
-        except Exception as e:
-            log.error(f"Failed to create MongoClient: {e}", exc_info=True)
-            raise e
-    return g.db
-
-
-def close_db(e=None):
-    """Closes the database connection on app context teardown."""
-    client = g.pop('db_client', None)
-    if client is not None:
-        client.close()
-        g.pop('db', None)
+# --- REFACTOR: get_db() and close_db() are now imported from app.utils.db ---
+# def get_db(): ...
+# def close_db(e=None): ...
 
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
+    # --- Pass config to Flask app context ---
     app.config['MONGODB_URI'] = Config.MONGODB_URI
     app.config['DB_NAME'] = Config.DB_NAME
     app.config['TELEGRAM_TOKEN'] = Config.TELEGRAM_TOKEN
+    app.config['BIFROST_URL'] = Config.BIFROST_URL
+    app.config['BIFROST_CLIENT_ID'] = Config.BIFROST_CLIENT_ID
+    app.config['BIFROST_CLIENT_SECRET'] = Config.BIFROST_CLIENT_SECRET
+    # ---
 
     app.teardown_appcontext(close_db)
 
     scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Phnom_Penh')
-    scheduler.add_job(send_daily_reminder_job, trigger=CronTrigger(hour=21, minute=0), id='daily_reminder', replace_existing=True)
-    scheduler.add_job(run_scheduled_report, args=['weekly'], trigger=CronTrigger(day_of_week='mon', hour=8, minute=0), id='weekly_report', replace_existing=True)
-    scheduler.add_job(run_scheduled_report, args=['monthly'], trigger=CronTrigger(day=1, hour=8, minute=30), id='monthly_report', replace_existing=True)
-    scheduler.add_job(run_scheduled_report, args=['semesterly'], trigger=CronTrigger(month='1,7', day=1, hour=9, minute=0), id='semesterly_report', replace_existing=True)
-    scheduler.add_job(run_scheduled_report, args=['yearly'], trigger=CronTrigger(month=1, day=1, hour=9, minute=30), id='yearly_report', replace_existing=True)
+    scheduler.add_job(send_daily_reminder_job, trigger=CronTrigger(hour=21, minute=0), id='daily_reminder',
+                      replace_existing=True)
+    scheduler.add_job(run_scheduled_report, args=['weekly'], trigger=CronTrigger(day_of_week='mon', hour=8, minute=0),
+                      id='weekly_report', replace_existing=True)
+    scheduler.add_job(run_scheduled_report, args=['monthly'], trigger=CronTrigger(day=1, hour=8, minute=30),
+                      id='monthly_report', replace_existing=True)
+    scheduler.add_job(run_scheduled_report, args=['semesterly'],
+                      trigger=CronTrigger(month='1,7', day=1, hour=9, minute=0), id='semesterly_report',
+                      replace_existing=True)
+    scheduler.add_job(run_scheduled_report, args=['yearly'], trigger=CronTrigger(month=1, day=1, hour=9, minute=30),
+                      id='yearly_report', replace_existing=True)
     scheduler.start()
     app.scheduler = scheduler
 
@@ -330,7 +352,8 @@ def create_app():
     from .debts.routes import debts_bp
     from .summary.routes import summary_bp
     from .reminders.routes import reminders_bp
-    from .auth.routes import auth_bp
+    from .users.routes import users_bp  # --- REFACTOR: Import new users_bp ---
+    # from .auth.routes import auth_bp # --- REFACTOR: auth_bp removed ---
 
     app.register_blueprint(settings_bp)
     app.register_blueprint(analytics_bp)
@@ -338,7 +361,9 @@ def create_app():
     app.register_blueprint(debts_bp)
     app.register_blueprint(summary_bp)
     app.register_blueprint(reminders_bp)
-    app.register_blueprint(auth_bp)
+    app.register_blueprint(users_bp)  # --- REFACTOR: Register new users_bp ---
+
+    # app.register_blueprint(auth_bp) # --- REFACTOR: auth_bp removed ---
 
     @app.route("/health")
     def health_check():
@@ -384,10 +409,12 @@ def create_app():
             return jsonify({"ok": False, "error": "DB config missing"}), 500
 
         try:
-            client = MongoClient(uri, **MONGO_CONNECTION_ARGS)
-            admin_ok = client.admin.command("ping").get("ok", 0) == 1
-            db = client[dbname]
+            # --- REFACTOR: Use get_db() to ping ---
+            db = get_db()
             db_ok = db.command("ping").get("ok", 0) == 1
+
+            admin_db = db.client.admin
+            admin_ok = admin_db.command("ping").get("ok", 0) == 1
 
             try:
                 colls = db.list_collection_names()
@@ -403,7 +430,7 @@ def create_app():
                 "collections_count": len(colls),
                 "collections": sorted(colls)[:25],
             }
-            client.close()
+            # close_db() is handled by teardown context
             status = 200 if payload["ok"] else 500
             return jsonify(payload), status
         except Exception as e:
