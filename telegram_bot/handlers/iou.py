@@ -17,6 +17,7 @@ from .helpers import (
 from .command_handler import parse_amount_and_currency_for_mode
 from utils.i18n import t
 import re
+from api_client import PremiumFeatureException
 
 # Conversation states
 (
@@ -30,7 +31,8 @@ PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
 def _get_user_settings_for_iou(context: ContextTypes.DEFAULT_TYPE):
     """Helper to get currency mode and primary currency."""
-    profile = context.user_data.get('user_profile', {})
+    profile = context.user_data.get('profile', {})
+
     settings = profile.get('settings', {})
     mode = settings.get('currency_mode', 'dual')
 
@@ -43,7 +45,8 @@ def _get_user_settings_for_iou(context: ContextTypes.DEFAULT_TYPE):
 
 def _format_debt_details(debt, context: ContextTypes.DEFAULT_TYPE):
     """Helper to format the full details of a debt, including repayments."""
-    direction = t("iou.debt_direction_lent", context) if debt['type'] == 'lent' else t("iou.debt_direction_borrowed", context)
+    direction = t("iou.debt_direction_lent", context) if debt['type'] == 'lent' else t("iou.debt_direction_borrowed",
+                                                                                       context)
     purpose_text = t("iou.debt_purpose", context, purpose=debt['purpose']) if debt.get('purpose') else ""
     created_date = datetime.fromisoformat(debt['created_at'].replace('Z', '+00:00')).astimezone(PHNOM_PENH_TZ).strftime(
         '%d %b %Y, %I:%M %p')
@@ -64,8 +67,11 @@ def _format_debt_details(debt, context: ContextTypes.DEFAULT_TYPE):
     if repayments:
         text_lines.append(t("iou.debt_repayments", context))
         for rep in repayments:
-            rep_date = datetime.fromisoformat(rep['date'].replace('Z', '+00:00')).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y')
-            text_lines.append(t("iou.debt_repayment_item", context, amount=f"{rep['amount']:{amount_format}}", currency=currency, date=rep_date))
+            rep_date = datetime.fromisoformat(rep['date'].replace('Z', '+00:00')).astimezone(PHNOM_PENH_TZ).strftime(
+                '%d %b %Y')
+            text_lines.append(
+                t("iou.debt_repayment_item", context, amount=f"{rep['amount']:{amount_format}}", currency=currency,
+                  date=rep_date))
 
     return "\n".join(text_lines)
 
@@ -165,8 +171,8 @@ async def iou_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user_id = context.user_data['user_profile']['_id']
-    grouped_debts = api_client.get_open_debts(user_id)
+    jwt = context.user_data['jwt']
+    grouped_debts = api_client.get_open_debts(jwt)
 
     text = t("iou.view_header_open", context)
     keyboard = keyboards.iou_list_keyboard(grouped_debts, context, is_settled=False)
@@ -182,8 +188,8 @@ async def iou_view_settled(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user_id = context.user_data['user_profile']['_id']
-    grouped_debts = api_client.get_settled_debts_grouped(user_id)
+    jwt = context.user_data['jwt']
+    grouped_debts = api_client.get_settled_debts_grouped(jwt)
 
     text = t("iou.view_header_settled", context)
     keyboard = keyboards.iou_list_keyboard(grouped_debts, context, is_settled=True)
@@ -200,8 +206,8 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     _, _, _, person_name = query.data.split(':')
 
-    user_id = context.user_data['user_profile']['_id']
-    person_debts = api_client.get_all_debts_by_person(person_name, user_id)
+    jwt = context.user_data['jwt']
+    person_debts = api_client.get_all_debts_by_person(person_name, jwt)
 
     if not person_debts:
         await query.edit_message_text(
@@ -211,7 +217,8 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     debt_type = person_debts[0]['type']
-    direction = t("iou.person_direction_lent", context) if debt_type == 'lent' else t("iou.person_direction_borrowed", context)
+    direction = t("iou.person_direction_lent", context) if debt_type == 'lent' else t("iou.person_direction_borrowed",
+                                                                                      context)
 
     header = t("iou.person_header_open", context, person=person_name, direction=direction)
     ledger_text = _format_person_ledger(person_debts, context, is_settled=False)
@@ -230,8 +237,8 @@ async def iou_person_detail_settled(update: Update, context: ContextTypes.DEFAUL
     await query.answer()
     _, _, _, person_name = query.data.split(':')
 
-    user_id = context.user_data['user_profile']['_id']
-    person_debts = api_client.get_all_settled_debts_by_person(person_name, user_id)
+    jwt = context.user_data['jwt']
+    person_debts = api_client.get_all_settled_debts_by_person(person_name, jwt)
 
     if not person_debts:
         await query.edit_message_text(
@@ -241,7 +248,8 @@ async def iou_person_detail_settled(update: Update, context: ContextTypes.DEFAUL
         return
 
     debt_type = person_debts[0]['type']
-    direction = t("iou.person_direction_lent_past", context) if debt_type == 'lent' else t("iou.person_direction_borrowed_past", context)
+    direction = t("iou.person_direction_lent_past", context) if debt_type == 'lent' else t(
+        "iou.person_direction_borrowed_past", context)
 
     header = t("iou.person_header_settled", context, person=person_name, direction=direction)
     ledger_text = _format_person_ledger(person_debts, context, is_settled=True)
@@ -261,11 +269,11 @@ async def iou_manage_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _, _, _, person_name, debt_type, is_settled_str = query.data.split(':')
     is_settled = is_settled_str == 'True'
 
-    user_id = context.user_data['user_profile']['_id']
+    jwt = context.user_data['jwt']
     if is_settled:
-        person_debts = api_client.get_all_settled_debts_by_person(person_name, user_id)
+        person_debts = api_client.get_all_settled_debts_by_person(person_name, jwt)
     else:
-        person_debts = api_client.get_all_debts_by_person(person_name, user_id)
+        person_debts = api_client.get_all_debts_by_person(person_name, jwt)
 
     if not person_debts:
         await query.edit_message_text(
@@ -288,8 +296,8 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _, _, debt_id, person_name, is_settled_str = query.data.split(':')
     is_settled = is_settled_str == 'True'
 
-    user_id = context.user_data['user_profile']['_id']
-    debt = api_client.get_debt_details(debt_id, user_id)
+    jwt = context.user_data['jwt']
+    debt = api_client.get_debt_details(debt_id, jwt)
 
     if not debt:
         await query.edit_message_text(
@@ -299,7 +307,8 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = _format_debt_details(debt, context)
-    keyboard = keyboards.iou_detail_actions_keyboard(debt_id, person_name, debt['type'], is_settled, debt['status'], context)
+    keyboard = keyboards.iou_detail_actions_keyboard(debt_id, person_name, debt['type'], is_settled, debt['status'],
+                                                     context)
     await query.edit_message_text(text=text, parse_mode='HTML', reply_markup=keyboard)
 
 
@@ -309,28 +318,40 @@ async def debt_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer(t("iou.analysis_loading", context))
     chat_id = update.effective_chat.id
+    jwt = context.user_data['jwt']
 
-    user_id = context.user_data['user_profile']['_id']
-    analysis_data = api_client.get_debt_analysis(user_id)
+    try:
+        analysis_data = api_client.get_debt_analysis(jwt)
 
-    if not analysis_data:
+        if not analysis_data:
+            await query.edit_message_text(
+                t("iou.analysis_fail", context),
+                reply_markup=keyboards.iou_menu_keyboard(context)
+            )
+            return
+
+        final_text = _format_debt_analysis_message(analysis_data, context)
         await query.edit_message_text(
-            t("iou.analysis_fail", context),
+            text=final_text,
+            parse_mode='HTML',
+            reply_markup=keyboards.debt_analysis_actions_keyboard(context)
+        )
+
+        if overview_pie := _create_debt_overview_pie(analysis_data):
+            await context.bot.send_photo(chat_id=chat_id, photo=overview_pie)
+        if concentration_bar := _create_debt_concentration_bar(analysis_data):
+            await context.bot.send_photo(chat_id=chat_id, photo=concentration_bar)
+
+    except PremiumFeatureException:
+        await query.edit_message_text(
+            t("common.premium_required", context),
             reply_markup=keyboards.iou_menu_keyboard(context)
         )
-        return
-
-    final_text = _format_debt_analysis_message(analysis_data, context)
-    await query.edit_message_text(
-        text=final_text,
-        parse_mode='HTML',
-        reply_markup=keyboards.debt_analysis_actions_keyboard(context)
-    )
-
-    if overview_pie := _create_debt_overview_pie(analysis_data):
-        await context.bot.send_photo(chat_id=chat_id, photo=overview_pie)
-    if concentration_bar := _create_debt_concentration_bar(analysis_data):
-        await context.bot.send_photo(chat_id=chat_id, photo=concentration_bar)
+    except Exception as e:
+        await query.edit_message_text(
+            f"An unexpected error occurred: {e}",
+            reply_markup=keyboards.iou_menu_keyboard(context)
+        )
 
 
 # --- NEW HANDLER FOR DEBT CSV EXPORT ---
@@ -342,8 +363,8 @@ async def download_debt_analysis_csv(update: Update,
     await query.answer(t("search.searching", context))
 
     try:
-        user_id = context.user_data['user_profile']['_id']
-        debts = api_client.get_open_debts_export(user_id)
+        jwt = context.user_data['jwt']
+        debts = api_client.get_open_debts_export(jwt)
 
         if not debts:
             await query.message.reply_text(t("iou.view_no_open", context))
@@ -371,9 +392,17 @@ async def iou_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user_profile = context.user_data.get('user_profile')
+    # --- REFACTOR: Preserve auth cache ---
+    jwt = context.user_data.get('jwt')
+    profile_data = context.user_data.get('profile_data')
+    profile = context.user_data.get('profile')
+    role = context.user_data.get('role')
     context.user_data.clear()
-    context.user_data['user_profile'] = user_profile
+    context.user_data['jwt'] = jwt
+    context.user_data['profile_data'] = profile_data
+    context.user_data['profile'] = profile
+    context.user_data['role'] = role
+    # ---
 
     context.user_data['iou_type'] = 'lent' if query.data == 'iou_lent' else 'borrowed'
     await query.message.reply_text(
@@ -482,7 +511,8 @@ async def iou_received_currency(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def iou_received_purpose(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives the purpose and saves the new IOU."""
-    user_id = context.user_data['user_profile']['_id']
+    jwt = context.user_data['jwt']
+
     debt_data = {
         "type": context.user_data.get('iou_type'),
         "person": context.user_data.get('iou_person'),
@@ -492,11 +522,13 @@ async def iou_received_purpose(update: Update, context: ContextTypes.DEFAULT_TYP
         "timestamp": context.user_data.get('timestamp')
     }
 
-    response = api_client.add_debt(debt_data, user_id)
-    base_text = t("iou.success", context) if response else t("iou.fail", context)
+    response = api_client.add_debt(debt_data, jwt)
+    base_text = (t("iou.success", context)
+                 if response and "error" not in response
+                 else t("iou.fail", context))
 
     summary_text = format_summary_message(
-        api_client.get_detailed_summary(user_id), context
+        api_client.get_detailed_summary(jwt), context
     )
 
     await update.message.reply_text(
@@ -504,7 +536,16 @@ async def iou_received_purpose(update: Update, context: ContextTypes.DEFAULT_TYP
         parse_mode='HTML',
         reply_markup=keyboards.main_menu_keyboard(context)
     )
-    context.user_data.clear()
+
+    # --- THIS IS THE FIX ---
+    # Clear only conversation state, not auth state
+    context.user_data.pop('iou_type', None)
+    context.user_data.pop('iou_person', None)
+    context.user_data.pop('iou_amount', None)
+    context.user_data.pop('iou_currency', None)
+    context.user_data.pop('timestamp', None)
+    # --- END FIX ---
+
     return ConversationHandler.END
 
 
@@ -515,9 +556,17 @@ async def repay_lump_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user_profile = context.user_data.get('user_profile')
+    # --- REFACTOR: Preserve auth cache ---
+    jwt = context.user_data.get('jwt')
+    profile_data = context.user_data.get('profile_data')
+    profile = context.user_data.get('profile')
+    role = context.user_data.get('role')
     context.user_data.clear()
-    context.user_data['user_profile'] = user_profile
+    context.user_data['jwt'] = jwt
+    context.user_data['profile_data'] = profile_data
+    context.user_data['profile'] = profile
+    context.user_data['role'] = role
+    # ---
 
     _, _, person, debt_type = query.data.split(':')
     context.user_data.update({
@@ -535,7 +584,7 @@ async def repay_lump_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def received_lump_repayment_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives and processes the lump-sum repayment amount."""
     try:
-        user_id = context.user_data['user_profile']['_id']
+        jwt = context.user_data['jwt']
         mode, currencies = _get_user_settings_for_iou(context)
         primary_currency = currencies[0] if mode == 'single' else 'USD'
 
@@ -553,7 +602,7 @@ async def received_lump_repayment_amount(update: Update, context: ContextTypes.D
         debt_type = context.user_data['lump_repay_debt_type']
 
         response = api_client.record_lump_sum_repayment(
-            person, currency, amount, debt_type, user_id, timestamp=None
+            person, currency, amount, debt_type, jwt, timestamp=None
         )
 
         base_text = (t("iou.repay_success", context, message=response['message'])
@@ -561,7 +610,7 @@ async def received_lump_repayment_amount(update: Update, context: ContextTypes.D
                      else t("iou.repay_fail", context, error=response.get('error', 'Unknown error')))
 
         summary_text = format_summary_message(
-            api_client.get_detailed_summary(user_id), context
+            api_client.get_detailed_summary(jwt), context
         )
 
         await update.message.reply_text(
@@ -573,6 +622,7 @@ async def received_lump_repayment_amount(update: Update, context: ContextTypes.D
     except (ValueError, TypeError):
         await update.message.reply_text(t("iou.repay_invalid_amount", context))
         return REPAY_LUMP_AMOUNT
+
 
 # --- NEW: Debt Edit/Cancel Handlers ---
 
@@ -607,9 +657,9 @@ async def iou_cancel_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer(t("iou.cancel_confirm", context))
 
-    user_id = context.user_data['user_profile']['_id']
+    jwt = context.user_data['jwt']
     debt_id = query.data.split(':')[-1]
-    response = api_client.cancel_debt(debt_id, user_id)
+    response = api_client.cancel_debt(debt_id, jwt)
 
     if 'message' in response:
         base_text = t("iou.cancel_success", context, message=response['message'])
@@ -617,7 +667,7 @@ async def iou_cancel_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE)
         base_text = t("iou.cancel_fail", context, error=response.get('error', 'Unknown error'))
 
     summary_text = format_summary_message(
-        api_client.get_detailed_summary(user_id), context
+        api_client.get_detailed_summary(jwt), context
     )
 
     await query.edit_message_text(
@@ -636,9 +686,17 @@ async def iou_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user_profile = context.user_data.get('user_profile')
+    # --- REFACTOR: Preserve auth cache ---
+    jwt = context.user_data.get('jwt')
+    profile_data = context.user_data.get('profile_data')
+    profile = context.user_data.get('profile')
+    role = context.user_data.get('role')
     context.user_data.clear()
-    context.user_data['user_profile'] = user_profile
+    context.user_data['jwt'] = jwt
+    context.user_data['profile_data'] = profile_data
+    context.user_data['profile'] = profile
+    context.user_data['role'] = role
+    # ---
 
     _, _, field, debt_id = query.data.split(':')
 
@@ -655,7 +713,7 @@ async def iou_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def iou_edit_received_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives the new value and updates the debt."""
-    user_id = context.user_data['user_profile']['_id']
+    jwt = context.user_data['jwt']
     debt_id = context.user_data.get('iou_edit_debt_id')
     field = context.user_data.get('iou_edit_field')
     new_value = update.message.text
@@ -667,7 +725,7 @@ async def iou_edit_received_value(update: Update, context: ContextTypes.DEFAULT_
         )
         return ConversationHandler.END
 
-    response = api_client.update_debt(debt_id, {field: new_value}, user_id)
+    response = api_client.update_debt(debt_id, {field: new_value}, jwt)
 
     if 'message' in response:
         base_text = t("iou.edit_success", context, message=response['message'])
@@ -675,7 +733,7 @@ async def iou_edit_received_value(update: Update, context: ContextTypes.DEFAULT_
         base_text = t("iou.edit_fail", context, error=response.get('error', 'Unknown error'))
 
     summary_text = format_summary_message(
-        api_client.get_detailed_summary(user_id), context
+        api_client.get_detailed_summary(jwt), context
     )
 
     await update.message.reply_text(
@@ -683,6 +741,12 @@ async def iou_edit_received_value(update: Update, context: ContextTypes.DEFAULT_
         parse_mode='HTML',
         reply_markup=keyboards.main_menu_keyboard(context)
     )
-    context.user_data.clear()
+
+    # --- THIS IS THE FIX ---
+    # Clear only conversation state, not auth state
+    context.user_data.pop('iou_edit_debt_id', None)
+    context.user_data.pop('iou_edit_field', None)
+    # --- END FIX ---
+
     return ConversationHandler.END
 # --- End of modified file ---

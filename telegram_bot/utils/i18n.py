@@ -42,12 +42,10 @@ def load_translations():
 def t(key: str, context: ContextTypes.DEFAULT_TYPE, **kwargs) -> str:
     """
     Translates a given key into the user's preferred language.
-
     Args:
         key: The dot-separated key (e.g., "common.welcome").
         context: The bot's context, used to find the user's profile.
         **kwargs: Variables to format into the string.
-
     Returns:
         The translated and formatted string.
     """
@@ -56,12 +54,16 @@ def t(key: str, context: ContextTypes.DEFAULT_TYPE, **kwargs) -> str:
 
     # 1. Get user's language from cached profile
     lang = DEFAULT_LANGUAGE
-    if context.user_data and 'user_profile' in context.user_data:
+
+    # --- THIS IS THE FIX ---
+    # The decorator caches at 'profile', not 'user_profile'
+    if context.user_data and 'profile' in context.user_data:
         lang = (
-            context.user_data['user_profile']
+            context.user_data['profile']
             .get('settings', {})
             .get('language', DEFAULT_LANGUAGE)
         )
+    # --- END FIX ---
 
     if lang not in SUPPORTED_LANGUAGES:
         lang = DEFAULT_LANGUAGE

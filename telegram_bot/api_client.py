@@ -9,7 +9,7 @@ log = logging.getLogger(__name__)
 
 load_dotenv()
 BASE_URL = os.getenv("WEB_SERVICE_URL")
-BIFROST_URL = os.getenv("BIFROST_URL")
+BIFROST_URL = os.getenv("BIFROST_BASE_URL")
 BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")  # Client ID for the *bot app*
 
 

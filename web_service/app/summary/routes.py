@@ -10,6 +10,9 @@ from app.utils.db import get_db, settings_collection, transactions_collection, d
 # --- REFACTOR: Import new auth decorator ---
 from app.utils.auth import auth_required
 from app.utils.currency import get_live_usd_to_khr_rate
+# --- THIS IS THE FIX ---
+from bson import ObjectId
+# --- END FIX ---
 
 summary_bp = Blueprint('summary', __name__, url_prefix='/summary')
 
@@ -64,7 +67,7 @@ def calculate_period_summary(start_date, end_date, db, account_id, user_rate):
         {'$match': {
             'timestamp': {'$gte': start_date, '$lte': end_date},
             'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES},
-            'account_id': account_id # <-- REFACTOR
+            'account_id': account_id  # account_id is already an ObjectId here
         }},
         {
             '$addFields': {
@@ -120,16 +123,19 @@ def calculate_period_summary(start_date, end_date, db, account_id, user_rate):
 
 
 @summary_bp.route('/detailed', methods=['GET'])
-@auth_required(min_role="user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
 def get_detailed_summary():
     """Generates the detailed summary for the authenticated user."""
     db = get_db()
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    # Convert the string g.account_id to ObjectId
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     # 1. Get User's Settings (Initial Balances, Mode, Currencies)
-    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
     user_settings_doc = settings_collection().find_one(
         {'account_id': account_id},
         {'settings': 1}
@@ -150,7 +156,7 @@ def get_detailed_summary():
     # 2. Calculate Total Transaction Flow (Income & Expense)
     pipeline_transactions = [
         {'$match': {
-            'account_id': account_id, # <-- REFACTOR
+            'account_id': account_id,  # <-- REFACTOR
             'currency': {'$in': currencies_to_track}
         }},
         {'$group': {
@@ -164,15 +170,17 @@ def get_detailed_summary():
     final_balances = {}
     for currency in currencies_to_track:
         initial = initial_balances.get(currency, 0)
-        income = next((r['total'] for r in tx_results if r['_id']['type'] == 'income' and r['_id']['currency'] == currency), 0)
-        expense = next((r['total'] for r in tx_results if r['_id']['type'] == 'expense' and r['_id']['currency'] == currency), 0)
+        income = next((r['total'] for r in tx_results if
+                       r['_id']['type'] == 'income' and r['_id']['currency'] == currency), 0)
+        expense = next((r['total'] for r in tx_results if
+                        r['_id']['type'] == 'expense' and r['_id']['currency'] == currency), 0)
         final_balances[currency] = initial + income - expense
 
     # 4. Calculate Debts
     pipeline_debts = [
         {'$match': {
             'status': 'open',
-            'account_id': account_id, # <-- REFACTOR
+            'account_id': account_id,  # <-- REFACTOR
             'currency': {'$in': currencies_to_track}
         }},
         {'$group': {
@@ -192,14 +200,12 @@ def get_detailed_summary():
     ]
 
     # 5. Calculate Period Summaries
-
-    # Get user's rate for period calculations
     rate_preference = settings.get('rate_preference', 'live')
     user_rate = 4100.0
     if rate_preference == 'fixed':
         user_rate = settings.get('fixed_rate', 4100.0)
     else:
-        user_rate = get_live_usd_to_khr_rate() # Simplified for summary
+        user_rate = get_live_usd_to_khr_rate()  # Simplified for summary
 
     date_ranges = get_date_ranges()
     period_summaries = {}

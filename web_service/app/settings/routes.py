@@ -1,4 +1,4 @@
-# --- web_service/app/settings/routes.py (Refactored) ---
+# --- web_service/app/settings/routes.py (Fixed) ---
 """
 Handles user-specific settings.
 All endpoints are multi-tenant and require a valid user_id.
@@ -6,38 +6,50 @@ All endpoints are multi-tenant and require a valid user_id.
 from flask import Blueprint, request, jsonify, g
 from app.utils.currency import get_live_usd_to_khr_rate
 from app.utils.db import settings_collection
-# --- REFACTOR: Import new auth decorator ---
 from app.utils.auth import auth_required
+# --- THIS IS THE FIX ---
+from app.utils.serializers import serialize_profile  # Import the shared serializer
+# --- END FIX ---
+from bson import ObjectId
 
 settings_bp = Blueprint('settings', __name__, url_prefix='/settings')
 
 
 @settings_bp.route('/', methods=['GET'])
-@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")
 def get_user_settings():
     """Fetches all settings for the authenticated user."""
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
 
-    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
+    # --- THIS IS THE FIX ---
+    # We must explicitly include 'account_id' in the projection
     user_settings = settings_collection().find_one(
         {'account_id': account_id},
-        {'_id': 0, 'settings': 1, 'name_en': 1, 'name_km': 1}
+        {'_id': 0, 'account_id': 1, 'settings': 1, 'name_en': 1, 'name_km': 1, 'onboarding_complete': 1}
     )
+    # --- END FIX ---
+
     if not user_settings:
         return jsonify({'error': 'User settings not found'}), 404
 
-    return jsonify(user_settings)
+    # The decorator expects {"profile": {...}}
+    # --- THIS IS THE FIX ---
+    # We must serialize the document before returning it to jsonify
+    return jsonify({"profile": serialize_profile(user_settings)})
+    # --- END FIX ---
 
 
 @settings_bp.route('/balance', methods=['POST'])
-@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")
 def update_initial_balance():
     """Updates the initial balance for a specific currency for a user."""
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
 
     data = request.json
     if 'currency' not in data or 'amount' not in data:
@@ -50,7 +62,6 @@ def update_initial_balance():
         return jsonify({'error': 'Invalid currency or amount format'}), 400
 
     update_key = f"settings.initial_balances.{currency}"
-    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
     result = settings_collection().update_one(
         {'account_id': account_id},
         {'$set': {update_key: amount}}
@@ -65,12 +76,13 @@ def update_initial_balance():
 
 
 @settings_bp.route('/category', methods=['POST'])
-@auth_required(min_role="premium_user")  # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")
 def add_user_category():
     """Adds a new custom category for a user."""
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
 
     data = request.json
     if 'type' not in data or 'name' not in data:
@@ -85,7 +97,6 @@ def add_user_category():
         return jsonify({'error': 'Category name cannot be empty'}), 400
 
     update_key = f"settings.categories.{category_type}"
-    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
     result = settings_collection().update_one(
         {'account_id': account_id},
         {'$addToSet': {update_key: category_name}}
@@ -100,12 +111,13 @@ def add_user_category():
 
 
 @settings_bp.route('/category', methods=['DELETE'])
-@auth_required(min_role="premium_user")  # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")
 def remove_user_category():
     """Removes a custom category for a user."""
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
 
     data = request.json
     if 'type' not in data or 'name' not in data:
@@ -118,7 +130,6 @@ def remove_user_category():
         return jsonify({'error': 'Invalid type'}), 400
 
     update_key = f"settings.categories.{category_type}"
-    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
     result = settings_collection().update_one(
         {'account_id': account_id},
         {'$pull': {update_key: category_name}}
@@ -136,13 +147,14 @@ def remove_user_category():
 
 
 @settings_bp.route('/rate', methods=['POST'])
-@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")
 def update_khr_rate():
     """Updates the user-specific fixed exchange rate."""
     data = request.json
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
 
     if 'rate' not in data:
         return jsonify({'error': 'Rate is required'}), 400
@@ -152,7 +164,6 @@ def update_khr_rate():
     except ValueError:
         return jsonify({'error': 'Rate must be a number'}), 400
 
-    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
     settings_collection().update_one(
         {'account_id': account_id},
         {'$set': {
@@ -167,16 +178,16 @@ def update_khr_rate():
 
 
 @settings_bp.route('/rate', methods=['GET'])
-@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")
 def get_khr_rate():
     """
     Fetches the KHR exchange rate based on the user's preference.
     """
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
 
-    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
     user_settings_doc = settings_collection().find_one({'account_id': account_id})
     if not user_settings_doc:
         return jsonify({'error': 'User settings not found'}), 404
@@ -193,19 +204,19 @@ def get_khr_rate():
 
 
 @settings_bp.route('/mode', methods=['POST'])
-@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")
 def update_user_mode():
     """
     Sets the user's currency mode, language, and names during onboarding.
     """
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
 
     data = request.json
     mode = data.get('mode')
 
-    # --- REFACTOR: name_en is not required, name_km/language are optional ---
     name_en = data.get('name_en')
     name_km = data.get('name_km')
     language = data.get('language')
@@ -231,11 +242,9 @@ def update_user_mode():
         update_payload['settings.primary_currency'] = primary_currency.upper()
 
     elif mode == 'dual':
-        # No longer require language/name_km, they can be set separately
         if 'settings.primary_currency' not in update_payload:
             update_payload['settings.primary_currency'] = 'USD'  # Default for dual
 
-    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
     result = settings_collection().update_one(
         {'account_id': account_id},
         {'$set': update_payload}
@@ -248,14 +257,14 @@ def update_user_mode():
 
 
 @settings_bp.route('/complete_onboarding', methods=['POST'])
-@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")
 def complete_onboarding():
     """Marks the user's onboarding as complete."""
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
 
-    # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
     result = settings_collection().update_one(
         {'account_id': account_id},
         {'$set': {'onboarding_complete': True}}

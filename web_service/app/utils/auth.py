@@ -1,4 +1,4 @@
-# --- web_service/app/utils/auth.py (New) ---
+# --- web_service/app/utils/auth.py (Fixed) ---
 
 import os
 import requests
@@ -58,7 +58,7 @@ def auth_required(min_role="user"):
                 auth = HTTPBasicAuth(client_id, client_secret)
 
                 # Send the *user's* JWT in the payload to be validated
-                payload = {"token": token}
+                payload = {"jwt": token}
 
                 response = requests.post(validate_url, auth=auth, json=payload, timeout=5)
 
@@ -66,7 +66,6 @@ def auth_required(min_role="user"):
                     data = response.json()
                     if data.get("is_valid"):
                         # --- SUCCESS ---
-                        # Check role level
                         user_role = data.get("app_specific_role", "user")
                         user_level = _get_role_level(user_role)
                         min_level = _get_role_level(min_role)
@@ -81,6 +80,12 @@ def auth_required(min_role="user"):
                         # Populate g for this request context
                         g.account_id = data.get("account_id")
                         g.role = user_role
+
+                        # --- THIS IS THE FIX ---
+                        # We no longer need telegram_id, as Bifrost doesn't send it
+                        # g.telegram_id = data.get("telegram_id")
+                        # --- END FIX ---
+
                         return f(*args, **kwargs)
 
                     else:
@@ -92,6 +97,11 @@ def auth_required(min_role="user"):
                     # Error with *this service's* credentials
                     current_app.logger.error("Bifrost auth failed (401). Check CLIENT_ID/SECRET.")
                     return jsonify({"error": "Authentication service auth failed"}), 500
+
+                elif response.status_code == 403:
+                    # This happens if the account is not linked to the app
+                    current_app.logger.error(f"Bifrost validation error 403: {response.text}")
+                    return jsonify(response.json()), 403
 
                 else:
                     # Other Bifrost error

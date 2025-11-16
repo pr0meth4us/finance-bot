@@ -1,4 +1,4 @@
-# --- web_service/app/users/routes.py (New) ---
+# --- web_service/app/users/routes.py (Fixed) ---
 """
 Handles user profile management, replacing the old auth blueprint.
 """
@@ -7,7 +7,11 @@ from datetime import datetime
 from pymongo import ReturnDocument
 from app.utils.db import settings_collection
 from app.utils.auth import auth_required
+# --- THIS IS THE FIX ---
+from app.utils.serializers import serialize_profile  # Import the shared serializer
+# --- END FIX ---
 from zoneinfo import ZoneInfo
+from bson import ObjectId
 
 users_bp = Blueprint('users', __name__, url_prefix='/users')
 UTC_TZ = ZoneInfo("UTC")
@@ -25,20 +29,23 @@ DEFAULT_INCOME_CATEGORIES = [
 ]
 
 
-def _get_default_settings(account_id_str: str):
+# --- THIS IS THE FIX ---
+# Removed telegram_id from the function arguments
+def _get_default_settings(account_id_obj: ObjectId):
+    # --- END FIX ---
     """
     Generates the default user profile document to be inserted into the
     'settings' collection for a new user.
     """
-    # Hardcode admin defaults
-    if account_id_str == "1836585300":
-        reminder_chat_id = -1003192465072
-        report_chat_id = -4876783109
-    else:
-        reminder_chat_id = None
-        report_chat_id = None
+    # --- THIS IS THE FIX ---
+    # The hardcoded check is removed, as requested by the user.
+    # All users now get the same default 'None' for chat IDs.
+    reminder_chat_id = None
+    report_chat_id = None
+    # --- END FIX ---
 
     return {
+        "account_id": account_id_obj,
         "settings": {
             "language": "en",  # Default to English
             "currency_mode": None,  # User must set this
@@ -60,13 +67,10 @@ def _get_default_settings(account_id_str: str):
     }
 
 
-def serialize_profile(doc):
-    """Serializes a settings profile doc, converting ObjectId."""
-    if '_id' in doc:
-        doc['_id'] = str(doc['_id'])
-    if 'created_at' in doc and isinstance(doc['created_at'], datetime):
-        doc['created_at'] = doc['created_at'].isoformat()
-    return doc
+# --- THIS IS THE FIX ---
+# This function is now imported from app.utils.serializers
+# def serialize_profile(doc): ...
+# --- END FIX ---
 
 
 @users_bp.route('/me', methods=['GET'])
@@ -82,31 +86,43 @@ def get_my_profile():
     It returns the user's profile document AND their role from Bifrost.
     """
     try:
-        account_id = g.account_id
+        try:
+            account_id_str = g.account_id
+            account_id_obj = ObjectId(account_id_str)
+        except Exception:
+            return jsonify({'error': 'Invalid account_id format from token'}), 400
+
         user_role = g.role
 
-        if not account_id:
+        # --- THIS IS THE FIX ---
+        if not account_id_obj:
+            # --- END FIX ---
             # This should not happen if @auth_required is working
-            return jsonify({"error": "Auth decorator failed"}), 500
+            return jsonify({"error": "Auth decorator failed to provide IDs"}), 500
 
         db_settings = settings_collection()
 
         # Atomically find or create the user's settings profile
         user_profile = db_settings.find_one_and_update(
-            {'account_id': account_id},
+            {'account_id': account_id_obj},
             {
-                '$setOnInsert': _get_default_settings(account_id)
+                # --- THIS IS THE FIX ---
+                # Pass only the account_id
+                '$setOnInsert': _get_default_settings(account_id_obj)
+                # --- END FIX ---
             },
             upsert=True,
             return_document=ReturnDocument.AFTER
         )
 
         if not user_profile:
-            current_app.logger.error(f"Failed to find or create profile for {account_id}")
+            current_app.logger.error(f"Failed to find or create profile for {account_id_obj}")
             return jsonify({"error": "Failed to find or create user profile"}), 500
 
+        # The /settings/ GET endpoint expects the root doc
+        # but the /users/me endpoint (called by decorator) expects { "profile": {...}, "role": "..." }
         return jsonify({
-            "profile": serialize_profile(user_profile),
+            "profile": serialize_profile(user_profile),  # Use the imported serializer
             "role": user_role
         }), 200
 

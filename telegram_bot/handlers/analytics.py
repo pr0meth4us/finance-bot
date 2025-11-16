@@ -13,9 +13,11 @@ from .helpers import (
     _create_expense_pie_chart,
     _format_habits_message,
     _create_spending_line_chart,
-    _create_csv_from_transactions  # <-- NEW IMPORT
+    _create_csv_from_transactions
 )
 from utils.i18n import t
+# --- NEW: Import the custom exception ---
+from api_client import PremiumFeatureException
 
 (
     CHOOSE_REPORT_PERIOD, REPORT_ASK_START_DATE, REPORT_ASK_END_DATE,
@@ -31,13 +33,6 @@ async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the menu for selecting a report period."""
     query = update.callback_query
     await query.answer()
-
-    # --- THIS IS THE FIX ---
-    # Preserve the user_profile, clear everything else, then restore it.
-    user_profile = context.user_data.get('user_profile')
-    context.user_data.clear()
-    context.user_data['user_profile'] = user_profile
-    # --- END FIX ---
 
     await query.edit_message_text(
         t("analytics.report_ask_period", context),
@@ -134,50 +129,77 @@ async def _generate_report(update: Update,
                            start_date, end_date):
     """Shared logic to generate and send report summary and charts."""
     chat_id = update.effective_chat.id
-    user_id = context.user_data['user_profile']['_id']
+    jwt = context.user_data['jwt']
 
     loading_text = t("analytics.report_generating", context,
                      start_date=start_date, end_date=end_date)
 
-    loading_message = await context.bot.send_message(
-        chat_id=chat_id, text=loading_text
-    )
+    # Use query.message if callback, otherwise update.message
+    message_interface = update.callback_query.message if update.callback_query else update.message
+
+    loading_message = await message_interface.reply_text(loading_text)
     if update.callback_query:
-        await update.callback_query.message.delete()
+        # Try to delete the old message with the button
+        try:
+            await update.callback_query.message.delete()
+        except Exception:
+            pass  # Message might already be gone
 
-    report_data = api_client.get_detailed_report(user_id, start_date, end_date)
-    await loading_message.delete()
+    try:
+        # --- THIS IS THE FIX ---
+        report_data = api_client.get_detailed_report(jwt, start_date, end_date)
+        # --- END FIX ---
 
-    if report_data:
-        summary_message = _format_report_summary_message(report_data)
-        await context.bot.send_message(
-            chat_id=chat_id, text=summary_message, parse_mode='HTML'
-        )
+        await loading_message.delete()
 
-        if bar_chart := _create_income_expense_chart(
-                report_data, start_date, end_date):
-            await context.bot.send_photo(chat_id=chat_id, photo=bar_chart)
-        if line_chart := _create_spending_line_chart(
-                report_data, start_date, end_date):
-            await context.bot.send_photo(chat_id=chat_id, photo=line_chart)
-        if pie_chart := _create_expense_pie_chart(
-                report_data, start_date, end_date):
-            await context.bot.send_photo(chat_id=chat_id, photo=pie_chart)
-
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=t("analytics.report_success", context),
-            # --- MODIFICATION: Use new keyboard ---
-            reply_markup=keyboards.report_actions_keyboard(
-                start_date, end_date, context
+        if report_data and "error" not in report_data:
+            # --- THIS IS THE FIX: Pass context to the helper ---
+            summary_message = _format_report_summary_message(report_data, context)
+            # --- END FIX ---
+            await context.bot.send_message(
+                chat_id=chat_id, text=summary_message, parse_mode='HTML'
             )
-        )
-    else:
+
+            if bar_chart := _create_income_expense_chart(
+                    report_data, start_date, end_date):
+                await context.bot.send_photo(chat_id=chat_id, photo=bar_chart)
+            if line_chart := _create_spending_line_chart(
+                    report_data, start_date, end_date):
+                await context.bot.send_photo(chat_id=chat_id, photo=line_chart)
+            if pie_chart := _create_expense_pie_chart(
+                    report_data, start_date, end_date):
+                await context.bot.send_photo(chat_id=chat_id, photo=pie_chart)
+
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=t("analytics.report_success", context),
+                reply_markup=keyboards.report_actions_keyboard(
+                    start_date, end_date, context
+                )
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=t("analytics.report_fail", context),
+                reply_markup=keyboards.main_menu_keyboard(context)
+            )
+
+    # --- THIS IS THE FIX ---
+    except PremiumFeatureException:
+        await loading_message.delete()
         await context.bot.send_message(
             chat_id=chat_id,
-            text=t("analytics.report_fail", context),
+            text=t("common.premium_required", context),
             reply_markup=keyboards.main_menu_keyboard(context)
         )
+    except Exception as e:
+        await loading_message.delete()
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"An unexpected error occurred: {e}",
+            reply_markup=keyboards.main_menu_keyboard(context)
+        )
+    # --- END FIX ---
 
 
 @authenticate_user
@@ -185,13 +207,6 @@ async def habits_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays menu to choose a period for habits analysis."""
     query = update.callback_query
     await query.answer()
-
-    # --- THIS IS THE FIX ---
-    # Preserve the user_profile, clear everything else, then restore it.
-    user_profile = context.user_data.get('user_profile')
-    context.user_data.clear()
-    context.user_data['user_profile'] = user_profile
-    # --- END FIX ---
 
     await query.edit_message_text(
         t("analytics.habits_ask_period", context),
@@ -235,27 +250,45 @@ async def process_habits_choice(update: Update,
     date_pair = date_ranges.get(period)
     if date_pair:
         start_date, end_date = date_pair
-        await query.edit_message_text(
-            t("analytics.habits_generating", context)
-        )
 
-        user_id = context.user_data['user_profile']['_id']
-        habits_data = api_client.get_spending_habits(
-            user_id, start_date, end_date
-        )
-
-        if habits_data:
-            message = _format_habits_message(habits_data)
+        try:
+            # --- THIS IS THE FIX ---
             await query.edit_message_text(
-                text=message,
-                parse_mode='HTML',
+                t("analytics.habits_generating", context)
+            )
+
+            jwt = context.user_data['jwt']
+            habits_data = api_client.get_spending_habits(
+                jwt, start_date, end_date
+            )
+            # --- END FIX ---
+
+            if habits_data and "error" not in habits_data:
+                message = _format_habits_message(habits_data)
+                await query.edit_message_text(
+                    text=message,
+                    parse_mode='HTML',
+                    reply_markup=keyboards.main_menu_keyboard(context)
+                )
+            else:
+                await query.edit_message_text(
+                    t("analytics.habits_fail", context),
+                    reply_markup=keyboards.main_menu_keyboard(context)
+                )
+
+        # --- THIS IS THE FIX ---
+        except PremiumFeatureException:
+            await query.edit_message_text(
+                t("common.premium_required", context),
                 reply_markup=keyboards.main_menu_keyboard(context)
             )
-        else:
+        except Exception as e:
             await query.edit_message_text(
-                t("analytics.habits_fail", context),
+                f"An unexpected error occurred: {e}",
                 reply_markup=keyboards.main_menu_keyboard(context)
             )
+        # --- END FIX ---
+
     else:
         await query.edit_message_text(
             t("analytics.habits_invalid_period", context),
@@ -274,7 +307,7 @@ async def download_report_csv(update: Update,
     await query.answer(t("search.searching", context))
 
     try:
-        user_id = context.user_data['user_profile']['_id']
+        jwt = context.user_data['jwt']
         _, start_date_str, end_date_str = query.data.split(':')
         start_date = datetime.fromisoformat(start_date_str).date()
         end_date = datetime.fromisoformat(end_date_str).date()
@@ -284,9 +317,10 @@ async def download_report_csv(update: Update,
             'end_date': end_date.isoformat()
         }
 
-        # Use the existing search API to get all raw transactions
+        # Note: search_transactions_for_management is a 'user' role endpoint,
+        # so we don't need to catch PremiumFeatureException here unless that changes.
         transactions = api_client.search_transactions_for_management(
-            search_params, user_id
+            search_params, jwt
         )
 
         if not transactions:

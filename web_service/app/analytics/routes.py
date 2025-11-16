@@ -13,6 +13,10 @@ from app.utils.db import get_db, settings_collection
 from app.utils.currency import get_live_usd_to_khr_rate
 # --- REFACTOR: Import new auth decorator ---
 from app.utils.auth import auth_required
+# --- THIS IS THE FIX ---
+from bson import ObjectId
+
+# --- END FIX ---
 
 analytics_bp = Blueprint('analytics', __name__, url_prefix='/analytics')
 
@@ -21,7 +25,7 @@ FINANCIAL_TRANSACTION_CATEGORIES = [
     'Debt Repayment',
     'Loan Received',
     'Debt Settled',
-    'Initial Balance' # Kept for v1 data, but excluded from new reports
+    'Initial Balance'  # Kept for v1 data, but excluded from new reports
 ]
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
@@ -31,10 +35,11 @@ UTC_TZ = ZoneInfo("UTC")
 def _get_user_financial_base(db, account_id):
     """
     Helper to get the user's initial balance in USD and their preferred rate.
+
     """
     # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
     user_settings_doc = settings_collection().find_one(
-        {'account_id': account_id},
+        {'account_id': account_id},  # This query now correctly receives an ObjectId
         {'settings': 1}
     )
     if not user_settings_doc:
@@ -79,23 +84,26 @@ def get_date_ranges_for_search():
         "this_week": create_utc_range(start_of_week, start_of_week + timedelta(days=6)),
         "last_week": create_utc_range(start_of_last_week, end_of_last_week),
         "this_month": create_utc_range(start_of_month,
-                                     (start_of_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(
+                                       (start_of_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(
                                            days=1))
     }
 
 
 @analytics_bp.route('/search', methods=['POST'])
-@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")  #
 def search_transactions():
     """Performs an advanced search and sums up matching transactions for a user."""
     params = request.json
     db = get_db()
 
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
-    match_stage = {'account_id': account_id} # --- REFACTOR: Use account_id
+    match_stage = {'account_id': account_id}  # --- REFACTOR: Use account_id
 
     date_filter = {}
     if params.get('period'):
@@ -184,14 +192,17 @@ def search_transactions():
 
 
 @analytics_bp.route('/report/detailed', methods=['GET'])
-@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")
 def get_detailed_report():
     """Generates a detailed report for the authenticated user."""
     db = get_db()
 
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     start_date_str = request.args.get('start_date')
     end_date_str = request.args.get('end_date')
@@ -213,12 +224,10 @@ def get_detailed_report():
         return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
 
     try:
-        # --- REFACTOR: Pass account_id ---
         initial_balance_in_usd, user_rate = _get_user_financial_base(db, account_id)
     except Exception as e:
         return jsonify({"error": f"Could not load user settings: {str(e)}"}), 404
 
-    # --- REFACTOR: Use account_id ---
     user_match = {'account_id': account_id}
 
     add_fields_stage = {
@@ -229,9 +238,9 @@ def get_detailed_report():
                     'then': '$amount',
                     'else': {
                         '$let': {
-                            'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', user_rate]}}, # Use user's rate
+                            'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', user_rate]}},  # Use user's rate
                             'in': {'$cond': {'if': {'$gt': ['$$rate', 0]}, 'then': {'$divide': ['$amount', '$$rate']},
-                                            'else': {'$divide': ['$amount', user_rate]}}}
+                                             'else': {'$divide': ['$amount', user_rate]}}}
                         }
                     }
                 }
@@ -279,7 +288,8 @@ def get_detailed_report():
 
     # Spending Over Time
     spending_over_time_pipeline = [
-        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
+        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES},
+                    **user_match}},
         add_fields_stage,
         {
             '$project': {
@@ -294,7 +304,8 @@ def get_detailed_report():
 
     # Daily Expense Stats
     daily_stats_pipeline = [
-        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
+        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES},
+                    **user_match}},
         add_fields_stage,
         {
             '$group': {
@@ -307,7 +318,8 @@ def get_detailed_report():
 
     # Top Expense Item
     top_expense_pipeline = [
-        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
+        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES},
+                    **user_match}},
         add_fields_stage,
         {'$sort': {'amount_in_usd': -1}},
         {'$limit': 1},
@@ -346,7 +358,8 @@ def get_detailed_report():
         "expenseInsights": {
             "topExpenseItem": top_expense_data[0] if top_expense_data else None,
             "mostExpensiveDay": daily_stats_data[0] if daily_stats_data else None,
-            "leastExpensiveDay": daily_stats_data[-1] if daily_stats_data and (len(daily_stats_data) > 1 or daily_stats_data[0]['total_spent_usd'] > 0) else None
+            "leastExpensiveDay": daily_stats_data[-1] if daily_stats_data and (
+                        len(daily_stats_data) > 1 or daily_stats_data[0]['total_spent_usd'] > 0) else None
         }
     }
 
@@ -378,14 +391,17 @@ def get_detailed_report():
 
 
 @analytics_bp.route('/habits', methods=['GET'])
-@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")
 def get_spending_habits():
     """Analyzes spending habits for the authenticated user."""
     db = get_db()
 
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     start_date_str = request.args.get('start_date')
     end_date_str = request.args.get('end_date')
@@ -405,12 +421,10 @@ def get_spending_habits():
         return jsonify({"error": "Invalid date format."}), 400
 
     try:
-        # --- REFACTOR: Pass account_id ---
         _, user_rate = _get_user_financial_base(db, account_id)
     except Exception as e:
         return jsonify({"error": f"Could not load user settings: {str(e)}"}), 404
 
-    # --- REFACTOR: Use account_id ---
     user_match = {'account_id': account_id}
 
     add_fields_stage = {
@@ -423,7 +437,7 @@ def get_spending_habits():
                         '$let': {
                             'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', user_rate]}},
                             'in': {'$cond': {'if': {'$gt': ['$$rate', 0]}, 'then': {'$divide': ['$amount', '$$rate']},
-                                            'else': {'$divide': ['$amount', user_rate]}}}
+                                             'else': {'$divide': ['$amount', user_rate]}}}
                         }
                     }
                 }

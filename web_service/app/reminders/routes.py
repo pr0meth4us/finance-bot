@@ -9,6 +9,9 @@ from app import send_telegram_message
 from app.utils.db import reminders_collection
 # --- REFACTOR: Import new auth decorator ---
 from app.utils.auth import auth_required
+# --- THIS IS THE FIX ---
+from bson import ObjectId
+# --- END FIX ---
 
 reminders_bp = Blueprint('reminders', __name__, url_prefix='/reminders')
 
@@ -19,9 +22,12 @@ def add_reminder():
     """Schedules a new reminder for the authenticated user."""
     data = request.json
 
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     if not all(k in data for k in ['purpose', 'reminder_datetime', 'chat_id']):
         return jsonify({'error': 'Missing required fields'}), 400

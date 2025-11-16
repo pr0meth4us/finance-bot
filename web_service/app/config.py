@@ -9,6 +9,9 @@ class Config:
     EXCHANGERATE_API_KEY = os.getenv("EXCHANGERATE_API_KEY", "").strip()
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    BIFROST_URL = os.getenv("BIFROST_BASE_URL", "").strip()
+    BIFROST_CLIENT_ID= os.getenv("BIFROST_CLIENT_ID", "").strip()
+    BIFROST_CLIENT_SECRET = os.getenv("BIFROST_CLIENT_SECRET", "").strip()
 
     @staticmethod
     def validate():

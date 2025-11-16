@@ -30,7 +30,8 @@ PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
 def _get_user_settings_for_tx(context: ContextTypes.DEFAULT_TYPE):
     """Helper to get currency mode and primary currency."""
-    profile = context.user_data.get('user_profile', {})
+    profile = context.user_data.get('profile', {})
+
     settings = profile.get('settings', {})
     mode = settings.get('currency_mode', 'dual')
 
@@ -64,7 +65,7 @@ def parse_amount_and_currency_for_mode(amount_str: str, mode: str, primary_curre
 
         # Check if it's just a number (ambiguous)
         amount_val = float(amount_str)
-        return amount_val, None, True # Ambiguous, default to USD but ask
+        return amount_val, None, True  # Ambiguous, default to USD but ask
 
     except ValueError:
         # Check if it has 'usd' or '$'
@@ -85,9 +86,17 @@ async def add_transaction_start(update: Update,
     query = update.callback_query
     await query.answer()
 
-    user_profile = context.user_data.get('user_profile')
+    # --- REFACTOR: Preserve auth cache ---
+    jwt = context.user_data.get('jwt')
+    profile_data = context.user_data.get('profile_data')
+    profile = context.user_data.get('profile')
+    role = context.user_data.get('role')
     context.user_data.clear()
-    context.user_data['user_profile'] = user_profile
+    context.user_data['jwt'] = jwt
+    context.user_data['profile_data'] = profile_data
+    context.user_data['profile'] = profile
+    context.user_data['role'] = role
+    # ---
 
     tx_type = 'expense' if query.data == 'add_expense' else 'income'
     context.user_data['tx_type'] = tx_type
@@ -122,7 +131,7 @@ async def received_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 amount_display = f"{amount:,.2f} {currency}"
 
             # Get user's dynamic categories
-            profile = context.user_data['user_profile']
+            profile = context.user_data['profile']
             tx_type = context.user_data['tx_type']
             all_categories = profile.get('settings', {}).get('categories', {})
             user_categories = all_categories.get(tx_type, [])
@@ -164,7 +173,7 @@ async def received_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['tx_currency'] = currency
 
     # Get user's dynamic categories
-    profile = context.user_data['user_profile']
+    profile = context.user_data['profile']
     tx_type = context.user_data['tx_type']
     all_categories = profile.get('settings', {}).get('categories', {})
     user_categories = all_categories.get(tx_type, [])
@@ -247,7 +256,7 @@ async def save_transaction_and_end(update: Update,
                                    context: ContextTypes.DEFAULT_TYPE):
     """Final step: construct and save the transaction to the API."""
     try:
-        user_id = context.user_data['user_profile']['_id']
+        jwt = context.user_data['jwt']
         data = context.user_data
         tx_data = {
             "type": data['tx_type'],
@@ -259,8 +268,10 @@ async def save_transaction_and_end(update: Update,
             "timestamp": data.get('timestamp')  # None if not set
         }
 
-        response = api_client.add_transaction(tx_data, user_id)
-        message = t("tx.success", context) if response else t("tx.fail", context)
+        response = api_client.add_transaction(tx_data, jwt)
+        message = (t("tx.success", context)
+                   if response and "error" not in response
+                   else t("tx.fail", context))
 
         if update.callback_query:
             await update.callback_query.message.reply_text(
@@ -271,7 +282,16 @@ async def save_transaction_and_end(update: Update,
                 message, reply_markup=keyboards.main_menu_keyboard(context)
             )
 
-        context.user_data.clear()
+        # --- THIS IS THE FIX ---
+        # Clear only conversation state, not auth state
+        context.user_data.pop('tx_type', None)
+        context.user_data.pop('tx_amount', None)
+        context.user_data.pop('tx_currency', None)
+        context.user_data.pop('tx_category', None)
+        context.user_data.pop('tx_remark', None)
+        context.user_data.pop('timestamp', None)
+        # --- END FIX ---
+
         return ConversationHandler.END
     except Exception as e:
         await (update.message or update.callback_query.message).reply_text(
@@ -288,9 +308,17 @@ async def forgot_log_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user_profile = context.user_data.get('user_profile')
+    # --- REFACTOR: Preserve auth cache ---
+    jwt = context.user_data.get('jwt')
+    profile_data = context.user_data.get('profile_data')
+    profile = context.user_data.get('profile')
+    role = context.user_data.get('role')
     context.user_data.clear()
-    context.user_data['user_profile'] = user_profile
+    context.user_data['jwt'] = jwt
+    context.user_data['profile_data'] = profile_data
+    context.user_data['profile'] = profile
+    context.user_data['role'] = role
+    # ---
 
     await query.message.reply_text(
         t("forgot.ask_day", context),
@@ -366,8 +394,8 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user_id = context.user_data['user_profile']['_id']
-    transactions = api_client.get_recent_transactions(user_id)
+    jwt = context.user_data['jwt']
+    transactions = api_client.get_recent_transactions(jwt)
 
     if not transactions:
         await query.edit_message_text(
@@ -389,9 +417,9 @@ async def manage_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
 
-    user_id = context.user_data['user_profile']['_id']
+    jwt = context.user_data['jwt']
     tx_id = query.data.replace('manage_tx_', '')
-    tx = api_client.get_transaction_details(tx_id, user_id)
+    tx = api_client.get_transaction_details(tx_id, jwt)
 
     if not tx:
         await query.edit_message_text(
@@ -405,7 +433,7 @@ async def manage_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE)
         tx['timestamp']
     ).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
 
-    currency = tx.get('currency', 'USD') # Default for safety
+    currency = tx.get('currency', 'USD')  # Default for safety
     amount_format = ",.0f" if currency == 'KHR' else ",.2f"
     amount = tx['amount']
     description = tx.get('description') or 'N/A'
@@ -446,10 +474,10 @@ async def delete_transaction_confirm(update: Update,
     query = update.callback_query
     await query.answer("Deleting...")
 
-    user_id = context.user_data['user_profile']['_id']
+    jwt = context.user_data['jwt']
     tx_id = query.data.replace('confirm_delete_', '')
+    success = api_client.delete_transaction(tx_id, jwt)
 
-    success = api_client.delete_transaction(tx_id, user_id)
     message = (t("history.delete_success", context) if success
                else t("history.delete_fail", context))
 
@@ -470,14 +498,22 @@ async def edit_transaction_start(update: Update,
     await query.answer()
     tx_id = query.data.replace('edit_tx_', '')
 
-    user_profile = context.user_data.get('user_profile')
+    # --- REFACTOR: Preserve auth cache ---
+    jwt = context.user_data.get('jwt')
+    profile_data = context.user_data.get('profile_data')
+    profile = context.user_data.get('profile')
+    role = context.user_data.get('role')
     context.user_data.clear()
-    context.user_data['user_profile'] = user_profile
+    context.user_data['jwt'] = jwt
+    context.user_data['profile_data'] = profile_data
+    context.user_data['profile'] = profile
+    context.user_data['role'] = role
+    # ---
 
     context.user_data['edit_tx_id'] = tx_id
 
     tx = api_client.get_transaction_details(
-        tx_id, context.user_data['user_profile']['_id']
+        tx_id, context.user_data['jwt']  # Pass JWT
     )
     if not tx:
         await query.edit_message_text(t("history.edit_fail", context))
@@ -503,7 +539,7 @@ async def edit_choose_field(update: Update,
 
     if field == 'categoryId':
         tx_type = context.user_data['edit_tx_type']
-        profile = context.user_data['user_profile']
+        profile = context.user_data['profile']
         all_categories = profile.get('settings', {}).get('categories', {})
         user_categories = all_categories.get(tx_type, [])
 
@@ -540,7 +576,7 @@ async def edit_choose_field(update: Update,
                 t("history.edit_no_currency_single", context),
                 show_alert=True
             )
-            return EDIT_CHOOSE_FIELD # Stay on the same menu
+            return EDIT_CHOOSE_FIELD  # Stay on the same menu
 
     if field == 'amount':
         await query.edit_message_text(
@@ -640,7 +676,7 @@ async def edit_received_custom_category(update: Update,
 async def save_updated_transaction(update: Update,
                                    context: ContextTypes.DEFAULT_TYPE):
     """Final step: save the updated transaction field to the API."""
-    user_id = context.user_data['user_profile']['_id']
+    jwt = context.user_data['jwt']
     tx_id = context.user_data['edit_tx_id']
     field = context.user_data['edit_field']
     value = context.user_data['edit_new_value']
@@ -652,7 +688,7 @@ async def save_updated_transaction(update: Update,
         extra = context.user_data['edit_extra_field']
         payload[extra['field']] = extra['value']
 
-    response = api_client.update_transaction(tx_id, payload, user_id)
+    response = api_client.update_transaction(tx_id, payload, jwt)
 
     message_interface = (update.callback_query.message if update.callback_query
                          else update.message)
@@ -669,7 +705,15 @@ async def save_updated_transaction(update: Update,
             reply_markup=keyboards.main_menu_keyboard(context)
         )
 
-    context.user_data.clear()
+    # --- THIS IS THE FIX ---
+    # Clear only conversation state, not auth state
+    context.user_data.pop('edit_tx_id', None)
+    context.user_data.pop('edit_field', None)
+    context.user_data.pop('edit_new_value', None)
+    context.user_data.pop('edit_tx_type', None)
+    context.user_data.pop('edit_extra_field', None)
+    # --- END FIX ---
+
     return ConversationHandler.END
 
 # --- End of file ---

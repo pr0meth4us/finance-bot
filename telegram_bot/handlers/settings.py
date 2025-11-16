@@ -16,7 +16,7 @@ from .common import start, cancel  # <-- THIS IS THE FIX
 from decorators import authenticate_user
 from utils.i18n import t
 
-log = logging.getLogger(__name__) # Add logger
+log = logging.getLogger(__name__)  # Add logger
 
 # Conversation states
 (
@@ -35,12 +35,15 @@ log = logging.getLogger(__name__) # Add logger
     ASK_NEW_LANGUAGE,
     GET_MISSING_NAME
     # --- END NEW STATES ---
-) = range(13) # <-- MODIFIED COUNT
+) = range(13)  # <-- MODIFIED COUNT
 
 
 def _get_user_settings_for_settings(context: ContextTypes.DEFAULT_TYPE):
     """Helper to safely get user settings and currency mode."""
-    profile = context.user_data.get('user_profile', {})
+    # --- THIS IS THE FIX ---
+    profile = context.user_data.get('profile', {})
+    # --- END FIX ---
+
     settings = profile.get('settings', {})
     mode = settings.get('currency_mode', 'dual')
 
@@ -58,20 +61,20 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query:
         await query.answer()
 
-    # --- MODIFICATION: Use message if no query (e.g., returning from a sub-flow) ---
     message_interface = update.message
     if query:
         message_interface = query.message
+
+    # --- REFACTOR: Get JWT ---
+    jwt = context.user_data['jwt']
+    log.info(f"User {context.user_data['profile']['account_id']} entering settings menu.")
+
+    # --- REFACTOR: Pass JWT ---
+    user_data = api_client.get_user_settings(jwt)
+    rate_data = api_client.get_exchange_rate(jwt)
     # ---
 
-    user_id = context.user_data['user_profile']['_id']
-    log.info(f"User {user_id} entering settings menu.")
-
-    # Use the /settings/ endpoint which returns settings + names
-    user_data = api_client.get_user_settings(user_id)
-    rate_data = api_client.get_exchange_rate(user_id)
-
-    if not user_data or not rate_data:
+    if not user_data or "error" in user_data or not rate_data or "error" in rate_data:
         err_msg = t("common.error_generic", context)
         if query:
             await query.edit_message_text(
@@ -85,12 +88,14 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return ConversationHandler.END
 
-    # Update local cache with fresh data
-    context.user_data['user_profile']['settings'] = user_data.get('settings', {})
-    context.user_data['user_profile']['name_en'] = user_data.get('name_en')
-    context.user_data['user_profile']['name_km'] = user_data.get('name_km')
+    # --- REFACTOR: Update local cache with fresh data ---
+    # The API returns {"profile": {...}, "role": "..."}
+    # We must be careful to merge this with the *existing* cache
+    context.user_data["profile_data"]["profile"] = user_data.get("profile", {})
+    context.user_data["profile"] = user_data.get("profile", {})
+    # ---
 
-    settings = user_data.get('settings', {})
+    settings = user_data.get('profile', {}).get('settings', {})
     balances = settings.get('initial_balances', {})
     rate_pref = settings.get('rate_preference', 'live')
     fixed_rate = settings.get('fixed_rate', 4100)
@@ -126,7 +131,6 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = keyboards.settings_menu_keyboard(context)
 
-    # --- MODIFICATION: Use message_interface ---
     if query:
         await message_interface.edit_text(
             text=text,
@@ -139,7 +143,6 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='HTML',
             reply_markup=keyboard
         )
-    # ---
 
     return SETTINGS_MENU
 
@@ -151,7 +154,7 @@ async def set_balance_start(update: Update,
     """Asks which account balance to set."""
     query = update.callback_query
     await query.answer()
-    log.info(f"User {context.user_data['user_profile']['_id']} starting set_balance flow.")
+    log.info(f"User {context.user_data['profile']['account_id']} starting set_balance flow.")
 
     mode, currencies = _get_user_settings_for_settings(context)
 
@@ -180,16 +183,20 @@ async def received_balance_amount(update: Update,
                                   context: ContextTypes.DEFAULT_TYPE):
     """Saves the new initial balance to the API."""
     try:
-        user_id = context.user_data['user_profile']['_id']
+        # --- REFACTOR: Get JWT ---
+        jwt = context.user_data['jwt']
+        # ---
         amount = float(update.message.text)
         currency = context.user_data.get('settings_currency')
-        log.info(f"User {user_id} setting balance for {currency} to {amount}.")
+        log.info(f"User {context.user_data['profile']['account_id']} setting balance for {currency} to {amount}.")
 
         if not currency:
-            log.warning(f"User {user_id} lost context in received_balance_amount.")
+            log.warning(f"User {context.user_data['profile']['account_id']} lost context in received_balance_amount.")
             raise ValueError("Context lost")
 
-        api_client.update_initial_balance(user_id, currency, amount)
+        # --- REFACTOR: Pass JWT ---
+        api_client.update_initial_balance(jwt, currency, amount)
+        # ---
 
         await update.message.reply_text(
             t("settings.balance_set_success", context,
@@ -217,7 +224,7 @@ async def update_rate_start(update: Update,
     """Asks for a new fixed exchange rate."""
     query = update.callback_query
     await query.answer()
-    log.info(f"User {context.user_data['user_profile']['_id']} starting update_rate flow.")
+    log.info(f"User {context.user_data['profile']['account_id']} starting update_rate flow.")
     await query.edit_message_text(t("settings.ask_rate", context))
     return NEW_RATE
 
@@ -225,11 +232,15 @@ async def update_rate_start(update: Update,
 async def received_new_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Saves the new fixed rate via the API."""
     try:
-        user_id = context.user_data['user_profile']['_id']
+        # --- REFACTOR: Get JWT ---
+        jwt = context.user_data['jwt']
+        # ---
         new_rate = float(update.message.text)
-        log.info(f"User {user_id} setting new fixed rate to {new_rate}.")
+        log.info(f"User {context.user_data['profile']['account_id']} setting new fixed rate to {new_rate}.")
 
-        api_client.update_exchange_rate(new_rate, user_id)
+        # --- REFACTOR: Pass JWT ---
+        api_client.update_exchange_rate(new_rate, jwt)
+        # ---
 
         await update.message.reply_text(
             t("settings.rate_set_success", context, rate=new_rate)
@@ -251,18 +262,24 @@ async def categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the category management menu."""
     query = update.callback_query
     await query.answer()
-    user_id = context.user_data['user_profile']['_id']
-    log.info(f"User {user_id} entering categories menu.")
+    # --- REFACTOR: Get JWT ---
+    jwt = context.user_data['jwt']
+    log.info(f"User {context.user_data['profile']['account_id']} entering categories menu.")
 
-    user_data = api_client.get_user_settings(user_id)
-    if not user_data:
+    # --- REFACTOR: Pass JWT ---
+    user_data = api_client.get_user_settings(jwt)
+    # ---
+
+    if not user_data or "error" in user_data:
         await query.edit_message_text(
             t("common.error_generic", context),
             reply_markup=keyboards.settings_menu_keyboard(context)
         )
         return SETTINGS_MENU
 
-    categories = user_data.get('settings', {}).get('categories', {})
+    # --- REFACTOR: Read from new structure ---
+    categories = user_data.get('profile', {}).get('settings', {}).get('categories', {})
+    # ---
     expense_cats = categories.get('expense', [])
     income_cats = categories.get('income', [])
 
@@ -328,12 +345,17 @@ async def received_category_add_name(update: Update,
                                      context: ContextTypes.DEFAULT_TYPE):
     """Receives and saves the new category name."""
     try:
-        user_id = context.user_data['user_profile']['_id']
+        # --- REFACTOR: Get JWT ---
+        jwt = context.user_data['jwt']
+        # ---
         cat_type = context.user_data['category_type']
         cat_name = update.message.text.strip().title()
-        log.info(f"User {user_id} adding category '{cat_name}' to {cat_type}.")
+        log.info(f"User {context.user_data['profile']['account_id']} adding category '{cat_name}' to {cat_type}.")
 
-        api_client.add_category(user_id, cat_type, cat_name)
+        # --- REFACTOR: Pass JWT ---
+        api_client.add_category(jwt, cat_type, cat_name)
+        # ---
+
         await update.message.reply_text(
             t("settings.category_add_success", context,
               name=cat_name, type=cat_type)
@@ -350,12 +372,17 @@ async def received_category_remove_name(update: Update,
                                         context: ContextTypes.DEFAULT_TYPE):
     """Receives and removes the category name."""
     try:
-        user_id = context.user_data['user_profile']['_id']
+        # --- REFACTOR: Get JWT ---
+        jwt = context.user_data['jwt']
+        # ---
         cat_type = context.user_data['category_type']
         cat_name = update.message.text.strip().title()
-        log.info(f"User {user_id} removing category '{cat_name}' from {cat_type}.")
+        log.info(f"User {context.user_data['profile']['account_id']} removing category '{cat_name}' from {cat_type}.")
 
-        api_client.remove_category(user_id, cat_type, cat_name)
+        # --- REFACTOR: Pass JWT ---
+        api_client.remove_category(jwt, cat_type, cat_name)
+        # ---
+
         await update.message.reply_text(
             t("settings.category_remove_success", context,
               name=cat_name, type=cat_type)
@@ -374,7 +401,7 @@ async def switch_to_dual_confirm(update: Update, context: ContextTypes.DEFAULT_T
     """Asks the user to confirm switching to dual-currency mode."""
     query = update.callback_query
     await query.answer()
-    log.info(f"User {context.user_data['user_profile']['_id']} starting switch_to_dual flow.")
+    log.info(f"User {context.user_data['profile']['account_id']} starting switch_to_dual flow.")
 
     await query.edit_message_text(
         t("settings.switch_to_dual_confirm", context),
@@ -389,7 +416,9 @@ async def switch_to_dual_get_name(update: Update, context: ContextTypes.DEFAULT_
     await query.answer()
 
     # Set language to Khmer by default for this prompt
-    context.user_data['user_profile']['settings']['language'] = 'km'
+    # --- REFACTOR: Use 'profile' ---
+    context.user_data['profile']['settings']['language'] = 'km'
+    # ---
 
     await query.edit_message_text(
         t("settings.ask_name_km_switch", context)
@@ -401,25 +430,27 @@ async def received_km_name_for_switch(update: Update, context: ContextTypes.DEFA
     """Receives the Khmer name and finalizes the mode switch."""
     try:
         km_name = update.message.text.strip()
-        user_id = context.user_data['user_profile']['_id']
-        log.info(f"User {user_id} completing switch_to_dual with KM name.")
+        # --- REFACTOR: Get JWT ---
+        jwt = context.user_data['jwt']
+        log.info(f"User {context.user_data['profile']['account_id']} completing switch_to_dual with KM name.")
 
         # Get existing English name
-        name_en = context.user_data['user_profile'].get('name_en', 'User')
+        name_en = context.user_data['profile'].get('name_en', 'User')
 
-        # Use the /settings/mode endpoint to update
+        # --- REFACTOR: Pass JWT ---
         api_client.update_user_mode(
-            user_id,
+            jwt,
             mode='dual',
-            language='km', # Default to Khmer upon switch
+            language='km',  # Default to Khmer upon switch
             name_en=name_en,
             name_km=km_name
         )
+        # ---
 
         # Update local cache
-        context.user_data['user_profile']['settings']['currency_mode'] = 'dual'
-        context.user_data['user_profile']['settings']['language'] = 'km'
-        context.user_data['user_profile']['name_km'] = km_name
+        context.user_data['profile']['settings']['currency_mode'] = 'dual'
+        context.user_data['profile']['settings']['language'] = 'km'
+        context.user_data['profile']['name_km'] = km_name
 
         await update.message.reply_text(
             t("settings.switch_to_dual_success", context)
@@ -438,7 +469,7 @@ async def change_language_start(update: Update, context: ContextTypes.DEFAULT_TY
     """Asks the user which language they want to switch to."""
     query = update.callback_query
     await query.answer()
-    log.info(f"User {context.user_data['user_profile']['_id']} starting change_language flow.")
+    log.info(f"User {context.user_data['profile']['account_id']} starting change_language flow.")
 
     await query.edit_message_text(
         t("settings.ask_new_language", context),
@@ -457,45 +488,50 @@ async def received_new_language(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
 
     new_lang = query.data.split(':')[-1]
-    user_id = context.user_data['user_profile']['_id']
-    profile = context.user_data['user_profile']
+    # --- REFACTOR: Get JWT & profile ---
+    jwt = context.user_data['jwt']
+    profile = context.user_data['profile']
+    # ---
     mode = profile.get('settings', {}).get('currency_mode', 'dual')
 
-    context.user_data['new_lang'] = new_lang # Store for next step if needed
+    context.user_data['new_lang'] = new_lang  # Store for next step if needed
 
     # Check if we need to ask for a missing name
     if mode == 'dual':
         if new_lang == 'km' and not profile.get('name_km'):
-            log.info(f"User {user_id} switching to KM, but name_km is missing. Asking.")
+            log.info(f"User {profile['account_id']} switching to KM, but name_km is missing. Asking.")
             # Set lang in context so the prompt is in Khmer
-            context.user_data['user_profile']['settings']['language'] = 'km'
+            context.user_data['profile']['settings']['language'] = 'km'
             await query.edit_message_text(t("settings.ask_missing_name_km", context))
             return GET_MISSING_NAME
 
         if new_lang == 'en' and not profile.get('name_en'):
-            log.info(f"User {user_id} switching to EN, but name_en is missing. Asking.")
+            log.info(f"User {profile['account_id']} switching to EN, but name_en is missing. Asking.")
             # Set lang in context so the prompt is in English
-            context.user_data['user_profile']['settings']['language'] = 'en'
+            context.user_data['profile']['settings']['language'] = 'en'
             await query.edit_message_text(t("settings.ask_missing_name_en", context))
             return GET_MISSING_NAME
 
     # If in single-mode OR in dual-mode with both names present, just switch
-    log.info(f"User {user_id} switching language to {new_lang}. No name needed.")
+    log.info(f"User {profile['account_id']} switching language to {new_lang}. No name needed.")
+
+    # --- REFACTOR: Pass JWT ---
     api_client.update_user_mode(
-        user_id,
-        mode=mode, # Keep existing mode
+        jwt,
+        mode=mode,  # Keep existing mode
         language=new_lang,
-        name_en=profile.get('name_en'), # Pass existing names
+        name_en=profile.get('name_en'),  # Pass existing names
         name_km=profile.get('name_km'),
-        primary_currency=profile.get('settings', {}).get('primary_currency') # Pass existing currency
+        primary_currency=profile.get('settings', {}).get('primary_currency')  # Pass existing currency
     )
+    # ---
 
     # Update local cache
-    context.user_data['user_profile']['settings']['language'] = new_lang
+    context.user_data['profile']['settings']['language'] = new_lang
 
     await query.edit_message_text(
         t("settings.language_switch_success", context),
-        reply_markup=keyboards.main_menu_keyboard(context) # Go to main menu
+        reply_markup=keyboards.main_menu_keyboard(context)  # Go to main menu
     )
     return ConversationHandler.END
 
@@ -506,9 +542,11 @@ async def received_missing_name_for_switch(update: Update, context: ContextTypes
     """
     try:
         new_name = update.message.text.strip()
-        user_id = context.user_data['user_profile']['_id']
+        # --- REFACTOR: Get JWT & profile ---
+        jwt = context.user_data['jwt']
         new_lang = context.user_data['new_lang']
-        profile = context.user_data['user_profile']
+        profile = context.user_data['profile']
+        # ---
         mode = profile.get('settings', {}).get('currency_mode', 'dual')
 
         name_en = profile.get('name_en')
@@ -516,29 +554,30 @@ async def received_missing_name_for_switch(update: Update, context: ContextTypes
 
         if new_lang == 'km':
             name_km = new_name
-            log.info(f"User {user_id} provided missing KM name. Saving.")
+            log.info(f"User {profile['account_id']} provided missing KM name. Saving.")
         else:
             name_en = new_name
-            log.info(f"User {user_id} provided missing EN name. Saving.")
+            log.info(f"User {profile['account_id']} provided missing EN name. Saving.")
 
-        # Save the full profile update
+        # --- REFACTOR: Pass JWT ---
         api_client.update_user_mode(
-            user_id,
+            jwt,
             mode=mode,
             language=new_lang,
             name_en=name_en,
             name_km=name_km,
             primary_currency=profile.get('settings', {}).get('primary_currency')
         )
+        # ---
 
         # Update local cache
-        context.user_data['user_profile']['settings']['language'] = new_lang
-        context.user_data['user_profile']['name_en'] = name_en
-        context.user_data['user_profile']['name_km'] = name_km
+        context.user_data['profile']['settings']['language'] = new_lang
+        context.user_data['profile']['name_en'] = name_en
+        context.user_data['profile']['name_km'] = name_km
 
         await update.message.reply_text(
             t("settings.language_switch_success", context),
-            reply_markup=keyboards.main_menu_keyboard(context) # Go to main menu
+            reply_markup=keyboards.main_menu_keyboard(context)  # Go to main menu
         )
         return ConversationHandler.END
 
@@ -546,6 +585,7 @@ async def received_missing_name_for_switch(update: Update, context: ContextTypes
         log.error(f"Error in received_missing_name_for_switch: {e}", exc_info=True)
         await update.message.reply_text(t("common.error_generic", context))
         return await start(update, context)
+
 
 # --- END NEW FLOW ---
 

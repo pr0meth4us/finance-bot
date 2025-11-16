@@ -2,12 +2,13 @@
 
 from flask import Blueprint, request, jsonify, g
 from datetime import datetime, time, timedelta
+# --- THIS IS THE FIX ---
 from bson import ObjectId
+# --- END FIX ---
 from app.utils.currency import get_live_usd_to_khr_rate
 import re
 from zoneinfo import ZoneInfo
 from app.utils.db import get_db, transactions_collection
-# --- REFACTOR: Import new auth decorator ---
 from app.utils.auth import auth_required
 
 transactions_bp = Blueprint('transactions', __name__, url_prefix='/transactions')
@@ -48,8 +49,6 @@ def serialize_tx(tx):
         tx['_id'] = str(tx['_id'])
     if 'timestamp' in tx and isinstance(tx['timestamp'], datetime):
         tx['timestamp'] = tx['timestamp'].isoformat()
-
-    # --- REFACTOR: Use account_id ---
     if 'account_id' in tx:
         tx['account_id'] = str(tx['account_id'])
 
@@ -57,14 +56,15 @@ def serialize_tx(tx):
 
 
 @transactions_bp.route('/', methods=['POST'])
-@auth_required(min_role="user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
 def add_transaction():
     """Adds a transaction for an authenticated user."""
-    db = get_db()
-
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     data = request.json
     if not all(k in data for k in ['type', 'amount', 'currency', 'categoryId', 'accountName']):
@@ -74,7 +74,7 @@ def add_transaction():
     timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now(UTC_TZ)
 
     tx = {
-        "account_id": account_id, # <-- REFACTOR
+        "account_id": account_id,  # <-- REFACTOR
         "type": data['type'],
         "amount": float(data['amount']),
         "currency": data['currency'],
@@ -92,38 +92,36 @@ def add_transaction():
 
 
 @transactions_bp.route('/recent', methods=['GET'])
-@auth_required(min_role="user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
 def get_recent_transactions():
     """Fetches recent transactions for an authenticated user."""
-    db = get_db()
-
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     limit = int(request.args.get('limit', 20))
 
-    # --- REFACTOR: Query is now user-specific ---
     txs = list(transactions_collection().find({'account_id': account_id}).sort('timestamp', -1).limit(limit))
-    # ---
 
     return jsonify([serialize_tx(tx) for tx in txs])
 
 
 @transactions_bp.route('/search', methods=['POST'])
-@auth_required(min_role="user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
 def search_transactions():
     """Performs an advanced search for an authenticated user."""
     params = request.json
-    db = get_db()
 
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
-
-    # --- REFACTOR: Add account_id to match_stage ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
     match_stage = {'account_id': account_id}
-    # ---
+    # --- END FIX ---
 
     date_filter = {}
     if params.get('period'):
@@ -165,20 +163,18 @@ def search_transactions():
 
 
 @transactions_bp.route('/<tx_id>', methods=['GET'])
-@auth_required(min_role="user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
 def get_transaction(tx_id):
     """Fetches a single transaction for an authenticated user."""
-    db = get_db()
-
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     try:
-        # --- REFACTOR: Query is now user-specific ---
         transaction = transactions_collection().find_one({'_id': ObjectId(tx_id), 'account_id': account_id})
-        # ---
-
         if transaction:
             return jsonify(serialize_tx(transaction))
         else:
@@ -188,15 +184,17 @@ def get_transaction(tx_id):
 
 
 @transactions_bp.route('/<tx_id>', methods=['PUT'])
-@auth_required(min_role="user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
 def update_transaction(tx_id):
     """Updates a transaction for an authenticated user."""
     data = request.json
-    db = get_db()
 
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     if not data:
         return jsonify({'error': 'No update data provided'}), 400
@@ -225,12 +223,10 @@ def update_transaction(tx_id):
         return jsonify({'error': 'No valid fields to update'}), 400
 
     try:
-        # --- REFACTOR: Query is now user-specific ---
         result = transactions_collection().update_one(
             {'_id': ObjectId(tx_id), 'account_id': account_id},
             {'$set': update_fields}
         )
-        # ---
 
         if result.matched_count:
             return jsonify({'message': 'Transaction updated successfully'})
@@ -241,20 +237,18 @@ def update_transaction(tx_id):
 
 
 @transactions_bp.route('/<tx_id>', methods=['DELETE'])
-@auth_required(min_role="user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
 def delete_transaction(tx_id):
     """Deletes a transaction for an authenticated user."""
-    db = get_db()
-
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     try:
-        # --- REFACTOR: Query is now user-specific ---
         result = transactions_collection().delete_one({'_id': ObjectId(tx_id), 'account_id': account_id})
-        # ---
-
         if result.deleted_count:
             return jsonify({'message': 'Transaction deleted'})
         else:

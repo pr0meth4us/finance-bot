@@ -72,7 +72,10 @@ COMMAND_MAP = {
 
 def _get_user_settings_for_command(context: ContextTypes.DEFAULT_TYPE):
     """Helper to get currency mode and primary currency."""
-    profile = context.user_data.get('user_profile', {})
+    # --- THIS IS THE FIX ---
+    profile = context.user_data.get('profile', {})
+    # --- END FIX ---
+
     settings = profile.get('settings', {})
     mode = settings.get('currency_mode', 'dual')
 
@@ -127,7 +130,7 @@ def parse_date_from_args(args):
         try:
             parsed_date = datetime.strptime(date_str, '%d-%m')
         except (ValueError, TypeError):
-            return None, args # Last arg wasn't a date
+            return None, args  # Last arg wasn't a date
 
     # It was a date, so return it and the args *without* it
     tx_datetime = today.replace(
@@ -300,7 +303,10 @@ async def handle_repayment(update: Update, context: ContextTypes.DEFAULT_TYPE,
                            args, debt_type: str):
     """Handles parsing !paid and !repaid by commands."""
     try:
-        user_id = context.user_data['user_profile']['_id']
+        # --- REFACTOR: Get JWT ---
+        jwt = context.user_data['jwt']
+        # ---
+
         mode, primary_curr = _get_user_settings_for_command(context)
 
         command_example = (
@@ -323,8 +329,9 @@ async def handle_repayment(update: Update, context: ContextTypes.DEFAULT_TYPE,
         amount_str = remaining_args[1]
         amount, currency = parse_amount_and_currency_for_mode(amount_str, mode, primary_curr)
 
+        # --- REFACTOR: Pass JWT ---
         response = api_client.record_lump_sum_repayment(
-            person, currency, amount, debt_type, user_id, tx_date
+            person, currency, amount, debt_type, jwt, tx_date
         )
         base_text = response.get('message', '❌ An error occurred.')
         if response.get('error'):
@@ -335,9 +342,12 @@ async def handle_repayment(update: Update, context: ContextTypes.DEFAULT_TYPE,
         logger.error(f"Error in handle_repayment: {e}", exc_info=True)
         base_text = t("command.repayment_fail", context)
 
+    # --- REFACTOR: Get JWT ---
+    jwt = context.user_data['jwt']
     summary_text = format_summary_message(
-        api_client.get_detailed_summary(user_id), context
+        api_client.get_detailed_summary(jwt), context  # Pass JWT
     )
+    # ---
     await update.message.reply_text(
         base_text + summary_text,
         parse_mode='HTML',
@@ -389,14 +399,10 @@ async def unified_message_router(update: Update,
     command = parts[0].lower()
     args = parts[1:]
 
-    # --- MODIFICATION: We must get the user_id *here* to pass it down,
-    # but we can't block. We rely on the called functions to be decorated.
-    # We fetch it manually ONLY for the final summary.
-    user_profile = context.user_data.get('user_profile')
-    if not user_profile:
-        # This can happen if the user's first message is a command
-        # The decorated functions will handle the auth flow
-        logger.info("No user profile in context, decorated function will auth.")
+    # --- REFACTOR: Check for profile ---
+    profile = context.user_data.get('profile')
+    if not profile:
+        logger.info("No profile in context, decorated function will auth.")
     # ---
 
     try:
@@ -439,19 +445,21 @@ async def unified_message_router(update: Update,
         # If any of the above functions returned, it means auth is in progress
         # or an error was sent. If they return data, we proceed.
         if (tx_data or debt_data) and base_text:
-            user_id = context.user_data['user_profile']['_id']
+            # --- REFACTOR: Get JWT ---
+            jwt = context.user_data['jwt']
             if tx_data:
-                response = api_client.add_transaction(tx_data, user_id)
-                if not response:
+                response = api_client.add_transaction(tx_data, jwt)  # Pass JWT
+                if not response or "error" in response:
                     base_text = t("command.tx_fail", context)
             elif debt_data:
-                response = api_client.add_debt(debt_data, user_id)
-                if not response:
+                response = api_client.add_debt(debt_data, jwt)  # Pass JWT
+                if not response or "error" in response:
                     base_text = t("command.debt_fail", context)
 
             summary_text = format_summary_message(
-                api_client.get_detailed_summary(user_id), context
+                api_client.get_detailed_summary(jwt), context  # Pass JWT
             )
+            # ---
             await update.message.reply_text(
                 base_text + summary_text,
                 parse_mode='HTML',
@@ -461,10 +469,10 @@ async def unified_message_router(update: Update,
         return ConversationHandler.END
 
     except Exception as e:
-        # This will catch errors if auth failed and context.user_data['user_profile'] is missing
-        if "user_profile" not in context.user_data:
+        # This will catch errors if auth failed
+        if "profile" not in context.user_data:
             logger.info("Action blocked, user is being onboarded.")
-            return ConversationHandler.END # Onboarding is active
+            return ConversationHandler.END  # Onboarding is active
 
         logger.error(f"Error in unified_message_router: {e}", exc_info=True)
         await update.message.reply_text(t("command.error_parsing", context))
@@ -513,11 +521,13 @@ async def unknown_command_entry_point(update: Update,
             amount_display = f"{amount:,.0f} {currency}"
         elif currency:
             amount_display = f"{amount:,.2f} {currency}"
-        else: # Fallback for single mode with no symbol
+        else:  # Fallback for single mode with no symbol
             amount_display = f"{amount:,.2f}"
 
         # Get user's dynamic categories
-        profile = context.user_data['user_profile']
+        # --- REFACTOR: Read from 'profile' ---
+        profile = context.user_data['profile']
+        # ---
         all_categories = profile.get('settings', {}).get('categories', {})
         user_categories = all_categories.get('expense', [])
         keyboard = keyboards.expense_categories_keyboard(user_categories,
@@ -568,17 +578,21 @@ async def received_text_for_custom_category(update: Update,
 
 async def save_and_end_unknown(message, context: ContextTypes.DEFAULT_TYPE):
     """Saves the transaction from the unknown command flow."""
-    user_id = context.user_data['user_profile']['_id']
+    # --- REFACTOR: Get JWT ---
+    jwt = context.user_data['jwt']
+    # ---
     tx_data = context.user_data.get('new_tx')
     if not tx_data:
         return ConversationHandler.END
 
-    response = api_client.add_transaction(tx_data, user_id)
+    response = api_client.add_transaction(tx_data, jwt)  # Pass JWT
 
     base_text = (_format_success_message(tx_data, context)
-                 if response else t("command.tx_fail", context))
+                 if response and "error" not in response
+                 else t("command.tx_fail", context))
+
     summary_text = format_summary_message(
-        api_client.get_detailed_summary(user_id), context
+        api_client.get_detailed_summary(jwt), context  # Pass JWT
     )
 
     await message.reply_text(

@@ -1,4 +1,4 @@
-# --- telegram_bot/decorators.py (Refactored) ---
+# --- telegram_bot/decorators.py (Fixed) ---
 from functools import wraps
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
@@ -25,7 +25,6 @@ async def _send_auth_error(update: Update, context: ContextTypes.DEFAULT_TYPE, m
 def authenticate_user(func):
     """
     Refactored decorator for JWT authentication and profile fetching.
-
     1. Checks for a cached JWT. If missing, logs in via Bifrost.
     2. Checks for a cached Profile. If missing, fetches from /users/me.
     3. Checks for onboarding_complete flag.
@@ -80,12 +79,20 @@ def authenticate_user(func):
                 log.info(f"User {user_id}: Profile fetched and cached. Role: {context.user_data['role']}")
 
             # --- 3. Check Onboarding Status ---
-            # This logic remains from v1, but reads from the new cache
             is_complete = context.user_data.get("profile", {}).get("onboarding_complete")
             if not is_complete:
+
+                # --- THIS IS THE FIX ---
+                # If the handler being called is the onboarding handler itself,
+                # we must allow it to run so the user can *get* onboarded.
+                if func.__name__ == 'onboarding_start':
+                    log.info(f"User {user_id}: Onboarding_complete=False. Allowing '{func.__name__}' to run.")
+                    return await func(update, context, *args, **kwargs)
+                # --- END FIX ---
+
+                # For any *other* handler, block it.
                 log.info(f"User {user_id}: Onboarding_complete=False. Blocking handler '{func.__name__}'.")
 
-                # Use i18n for the message
                 message = t("common.onboarding_required", context)
 
                 if update.message:
@@ -100,7 +107,7 @@ def authenticate_user(func):
                 # Cleanly end the current conversation/handler
                 return ConversationHandler.END
 
-            # --- 4. Success ---
+            # --- 4. Success (User is onboarded) ---
             return await func(update, context, *args, **kwargs)
 
         except Exception as e:

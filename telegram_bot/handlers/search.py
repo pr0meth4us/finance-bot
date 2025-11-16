@@ -6,10 +6,12 @@ from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 from .common import cancel
 from .helpers import format_summation_results
-from decorators import authenticate_user # <-- MODIFICATION: Fix import
+from decorators import authenticate_user
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from utils.i18n import t
+# --- NEW: Import the custom exception ---
+from api_client import PremiumFeatureException
 
 # Conversation states
 (
@@ -21,17 +23,14 @@ from utils.i18n import t
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
 
-@authenticate_user # <-- MODIFICATION
+@authenticate_user
 async def search_menu_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the search sub-menu and enters the conversation."""
     query = update.callback_query
     await query.answer()
 
     # --- THIS IS THE FIX ---
-    # Preserve the user_profile, clear everything else, then restore it.
-    user_profile = context.user_data.get('user_profile')
-    context.user_data.clear()
-    context.user_data['user_profile'] = user_profile
+    # We no longer need to clear the context.
     # --- END FIX ---
 
     await query.edit_message_text(
@@ -41,7 +40,7 @@ async def search_menu_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CHOOSE_ACTION
 
 
-@authenticate_user # <-- MODIFICATION
+@authenticate_user
 async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the search type choice ('manage' or 'sum') and moves to period selection."""
     query = update.callback_query
@@ -58,7 +57,7 @@ async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CHOOSE_PERIOD
 
 
-@authenticate_user # <-- MODIFICATION
+@authenticate_user
 async def received_period_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the period choice and asks for transaction type."""
     query = update.callback_query
@@ -78,7 +77,7 @@ async def received_period_choice(update: Update, context: ContextTypes.DEFAULT_T
     return CHOOSE_TYPE
 
 
-@authenticate_user # <-- MODIFICATION
+@authenticate_user
 async def received_custom_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives and validates the custom start date."""
     try:
@@ -93,7 +92,7 @@ async def received_custom_start(update: Update, context: ContextTypes.DEFAULT_TY
         return GET_CUSTOM_START
 
 
-@authenticate_user # <-- MODIFICATION
+@authenticate_user
 async def received_custom_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives, validates end date, and asks for transaction type."""
     try:
@@ -114,7 +113,7 @@ async def received_custom_end(update: Update, context: ContextTypes.DEFAULT_TYPE
         return GET_CUSTOM_END
 
 
-@authenticate_user # <-- MODIFICATION
+@authenticate_user
 async def received_type_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the transaction type choice and asks for categories."""
     query = update.callback_query
@@ -130,7 +129,7 @@ async def received_type_choice(update: Update, context: ContextTypes.DEFAULT_TYP
     return GET_CATEGORIES
 
 
-@authenticate_user # <-- MODIFICATION
+@authenticate_user
 async def received_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives categories and asks for keywords."""
     message_text = t("search.ask_keywords", context)
@@ -151,7 +150,7 @@ async def received_categories(update: Update, context: ContextTypes.DEFAULT_TYPE
     return GET_KEYWORDS
 
 
-@authenticate_user # <-- MODIFICATION
+@authenticate_user
 async def received_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives keywords and either asks for logic or executes the search."""
     if update.callback_query:
@@ -172,7 +171,7 @@ async def received_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await execute_search(update, context)
 
 
-@authenticate_user # <-- MODIFICATION
+@authenticate_user
 async def received_keyword_logic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receives the keyword logic and executes the search."""
     query = update.callback_query
@@ -185,7 +184,7 @@ async def received_keyword_logic(update: Update, context: ContextTypes.DEFAULT_T
 async def execute_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Executes the correct search type and displays results by editing the message."""
 
-    user_id = context.user_data['user_profile']['_id']
+    jwt = context.user_data['jwt']
     params = context.user_data.get('search_params', {})
     search_type = context.user_data.get('search_type')
 
@@ -196,50 +195,72 @@ async def execute_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         message_to_edit = await update.message.reply_text(t("search.searching", context))
 
-    if search_type == 'manage':
-        results = api_client.search_transactions_for_management(params, user_id)
-        if not results:
+    try:
+        if search_type == 'manage':
+            results = api_client.search_transactions_for_management(params, jwt)
+            if not results:
+                await message_to_edit.edit_text(
+                    t("search.no_results", context),
+                    reply_markup=keyboards.main_menu_keyboard(context)
+                )
+            elif len(results) == 1:
+                tx = results[0]
+                emoji = "⬇️ Expense" if tx['type'] == 'expense' else "⬆️ Income"
+                date_str = datetime.fromisoformat(
+                    tx['timestamp']
+                ).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
+                amount_format = ",.0f" if tx['currency'] == 'KHR' else ",.2f"
+                amount = tx['amount']
+                description = tx.get('description') or 'N/A'
+
+                text = (
+                    f"{t('search.one_result', context)}\n\n"
+                    f"{t('history.tx_details_no_prompt', context, emoji=emoji, amount=f'{amount:{amount_format}}', currency=tx['currency'], category=tx['categoryId'], description=description, date=date_str)}"
+                )
+                await message_to_edit.edit_text(
+                    text=text,
+                    parse_mode='HTML',
+                    reply_markup=keyboards.manage_tx_keyboard(tx['_id'], context)
+                )
+            else:
+                text = t("search.many_results", context, count=len(results))
+                await message_to_edit.edit_text(
+                    text=text,
+                    reply_markup=keyboards.history_keyboard(
+                        results, context, is_search_result=True
+                    )
+                )
+
+        elif search_type == 'sum':
+            # --- THIS IS THE FIX ---
+            # This endpoint requires a premium role
+            results = api_client.sum_transactions_for_analytics(params, jwt)
+            # --- END FIX ---
+
+            response_text = format_summation_results(params, results, context)
             await message_to_edit.edit_text(
-                t("search.no_results", context),
+                response_text,
+                parse_mode='HTML',
                 reply_markup=keyboards.main_menu_keyboard(context)
             )
-        elif len(results) == 1:
-            tx = results[0]
-            emoji = "⬇️ Expense" if tx['type'] == 'expense' else "⬆️ Income"
-            date_str = datetime.fromisoformat(
-                tx['timestamp']
-            ).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
-            amount_format = ",.0f" if tx['currency'] == 'KHR' else ",.2f"
-            amount = tx['amount']
-            description = tx.get('description') or 'N/A'
 
-            text = (
-                f"{t('search.one_result', context)}\n\n"
-                f"{t('history.tx_details_no_prompt', context, emoji=emoji, amount=f'{amount:{amount_format}}', currency=tx['currency'], category=tx['categoryId'], description=description, date=date_str)}"
-            )
-            await message_to_edit.edit_text(
-                text=text,
-                parse_mode='HTML',
-                reply_markup=keyboards.manage_tx_keyboard(tx['_id'], context)
-            )
-        else:
-            text = t("search.many_results", context, count=len(results))
-            await message_to_edit.edit_text(
-                text=text,
-                reply_markup=keyboards.history_keyboard(
-                    results, context, is_search_result=True
-                )
-            )
-
-    elif search_type == 'sum':
-        results = api_client.sum_transactions_for_analytics(params, user_id)
-        response_text = format_summation_results(params, results, context)
+    # --- THIS IS THE FIX ---
+    except PremiumFeatureException:
         await message_to_edit.edit_text(
-            response_text,
-            parse_mode='HTML',
+            t("common.premium_required", context),
             reply_markup=keyboards.main_menu_keyboard(context)
         )
+    except Exception as e:
+        await message_to_edit.edit_text(
+            f"An unexpected error occurred: {e}",
+            reply_markup=keyboards.main_menu_keyboard(context)
+        )
+    # --- END FIX ---
 
-    context.user_data.clear()
+    # --- REFACTOR: We must NOT clear the auth cache ---
+    # We only clear the search-specific keys
+    context.user_data.pop('search_type', None)
+    context.user_data.pop('search_params', None)
+    # ---
     return ConversationHandler.END
 # --- End of new file ---

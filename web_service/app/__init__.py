@@ -15,7 +15,9 @@ from datetime import datetime, time, timedelta, date
 from zoneinfo import ZoneInfo
 from bson import ObjectId
 # --- REFACTOR: Import new db utils ---
-from app.utils.db import get_db, close_db, settings_collection, MONGO_CONNECTION_ARGS
+from app.utils.db import get_db, close_db, settings_collection, transactions_collection, MONGO_CONNECTION_ARGS
+# --- REFACTOR: Import new currency util ---
+from app.utils.currency import get_live_usd_to_khr_rate
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,7 +33,6 @@ FINANCIAL_TRANSACTION_CATEGORIES = [
 
 
 # --- REFACTOR: Connection args moved to db.py ---
-# MONGO_CONNECTION_ARGS = { ... }
 
 
 def send_telegram_message(chat_id, text, token, parse_mode='HTML'):
@@ -57,12 +58,38 @@ def send_telegram_photo(chat_id, photo_bytes, token, caption=""):
         log.warning(f"Failed to send scheduled photo to {chat_id}: {e}")
 
 
-def get_report_data(start_date_local_obj, end_date_local_obj, db):
-    """Internal logic to fetch detailed report data."""
+# --- REFACTOR: This is the new, tenant-aware report data function ---
+def get_user_specific_report_data(start_date_local_obj, end_date_local_obj, db, user_settings_doc):
+    """
+    Internal logic to fetch detailed report data FOR A SPECIFIC USER.
+    """
+    account_id = user_settings_doc['account_id']
+    settings = user_settings_doc.get('settings', {})
+
+    # 1. Get user's rate
+    rate_preference = settings.get('rate_preference', 'live')
+    user_rate = 4100.0
+    if rate_preference == 'fixed':
+        user_rate = settings.get('fixed_rate', 4100.0)
+    else:
+        # Note: This makes an API call. For many users, this could be slow.
+        # A better SaaS would cache this live rate globally.
+        user_rate = get_live_usd_to_khr_rate()
+
+    # 2. Get user's initial balance
+    initial_balances = settings.get('initial_balances', {})
+    initial_usd = initial_balances.get('USD', 0)
+    initial_khr = initial_balances.get('KHR', 0)
+    initial_balance_in_usd = initial_usd + (initial_khr / user_rate)
+
+    # 3. Define date ranges
     aware_start_local = datetime.combine(start_date_local_obj, time.min, tzinfo=PHNOM_PENH_TZ)
     aware_end_local = datetime.combine(end_date_local_obj, time.max, tzinfo=PHNOM_PENH_TZ)
     start_date_utc = aware_start_local.astimezone(UTC_TZ)
     end_date_utc = aware_end_local.astimezone(UTC_TZ)
+
+    user_match = {'account_id': account_id}
+    date_range_match = {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc}}
 
     add_fields_stage = {
         '$addFields': {
@@ -72,9 +99,9 @@ def get_report_data(start_date_local_obj, end_date_local_obj, db):
                     'then': '$amount',
                     'else': {
                         '$let': {
-                            'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', 4100.0]}},
+                            'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', user_rate]}},
                             'in': {'$cond': {'if': {'$gt': ['$$rate', 0]}, 'then': {'$divide': ['$amount', '$$rate']},
-                                             'else': {'$divide': ['$amount', 4100.0]}}}
+                                             'else': {'$divide': ['$amount', user_rate]}}}
                         }
                     }
                 }
@@ -82,19 +109,20 @@ def get_report_data(start_date_local_obj, end_date_local_obj, db):
         }
     }
 
+    # 4. Get Starting Balance
     start_balance_pipeline = [
-        {'$match': {'timestamp': {'$lt': start_date_utc}}},
+        {'$match': {'timestamp': {'$lt': start_date_utc}, **user_match}},
         add_fields_stage,
         {'$group': {'_id': '$type', 'totalUSD': {'$sum': '$amount_in_usd'}}}
     ]
     start_balance_data = list(db.transactions.aggregate(start_balance_pipeline))
     start_income = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'income'), 0)
     start_expense = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'expense'), 0)
-    balance_at_start_usd = start_income - start_expense
+    balance_at_start_usd = initial_balance_in_usd + start_income - start_expense
 
+    # 5. Get Operational Data
     operational_pipeline = [
-        {'$match': {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc},
-                    'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}}},
+        {'$match': {**date_range_match, 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
         add_fields_stage,
         {'$group': {'_id': {'type': '$type', 'category': '$categoryId'}, 'total': {'$sum': '$amount_in_usd'}}},
         {'$sort': {'total': -1}}
@@ -117,6 +145,9 @@ def get_report_data(start_date_local_obj, end_date_local_obj, db):
             report['expenseBreakdown'].append({'category': item['_id']['category'], 'totalUSD': item['total']})
     report['summary']['netSavingsUSD'] = report['summary']['totalIncomeUSD'] - report['summary']['totalExpenseUSD']
     return report
+
+
+# --- END REFACTOR ---
 
 
 def format_scheduled_report_message(data):
@@ -179,9 +210,12 @@ def create_pie_chart_from_data(data, start_date, end_date):
     return buf.getvalue()
 
 
-def _send_report_job(period_name, start_date, end_date, db, token, chat_id):
-    """Generic helper to generate and send a report."""
-    report_data = get_report_data(start_date, end_date, db)
+def _send_report_job(period_name, start_date, end_date, db, token, chat_id, user_settings_doc):
+    """Generic helper to generate and send a report FOR A SPECIFIC USER."""
+    # --- REFACTOR: Use new tenant-aware function ---
+    report_data = get_user_specific_report_data(start_date, end_date, db, user_settings_doc)
+    # --- END REFACTOR ---
+
     if report_data and report_data.get('summary', {}).get('totalExpenseUSD', 0) > 0:
         message = format_scheduled_report_message(report_data)
         send_telegram_message(chat_id, message, token)
@@ -204,11 +238,10 @@ def run_scheduled_report(period):
         return
 
     try:
-        # --- REFACTOR: Use 'db.settings' (was 'db.users') ---
-        # We find users who have a report_chat_id set in their profile
-        users_to_report = db.settings.find({
+        # Find users who have a report_chat_id set
+        users_to_report = list(db.settings.find({
             "settings.notification_chat_ids.report": {"$exists": True, "$ne": None},
-        })
+        }))
     except Exception as e:
         log.error(f"Scheduled job failed to query users: {e}", exc_info=True)
         client.close()
@@ -239,23 +272,17 @@ def run_scheduled_report(period):
         client.close()
         return
 
-    for user in users_to_report:
-        chat_id = user['settings']['notification_chat_ids']['report']
-        account_id = user['account_id']
+    # --- REFACTOR: Loop and send tenant-aware report ---
+    for user_settings_doc in users_to_report:
+        chat_id = user_settings_doc['settings']['notification_chat_ids']['report']
+        account_id = user_settings_doc['account_id']
         log.info(f"Generating {period} report for user {account_id} (ChatID: {chat_id})...")
 
-        # We must query transactions on a per-user basis
-        # TODO: This is inefficient (N+1 query).
-        # For a full SaaS, this should be a single aggregation pipeline
-        # that groups by user_id, but this is complex.
-        # For now, we use the existing global get_report_data logic
-        # but this needs to be refactored to be user-specific.
-
-        # --- TEMPORARY: Use old logic ---
-        # This will be fixed when we refactor analytics to be user-specific
-        if str(account_id) == "1836585300":  # Hardcoded admin ID
-            _send_report_job(period, start_date, end_date, db, token, chat_id)
-        # --- END TEMPORARY ---
+        try:
+            _send_report_job(period, start_date, end_date, db, token, chat_id, user_settings_doc)
+        except Exception as e:
+            log.error(f"Failed to generate report for user {account_id}: {e}", exc_info=True)
+    # --- END REFACTOR ---
 
     client.close()
 
@@ -279,9 +306,9 @@ def send_daily_reminder_job():
 
     try:
         # Find users who have a reminder chat ID set
-        users_to_remind = db.settings.find({
+        users_to_remind = list(db.settings.find({
             "settings.notification_chat_ids.reminder": {"$exists": True, "$ne": None},
-        })
+        }))
 
         for user in users_to_remind:
             chat_id = user['settings']['notification_chat_ids']['reminder']
@@ -312,8 +339,6 @@ def send_daily_reminder_job():
 
 
 # --- REFACTOR: get_db() and close_db() are now imported from app.utils.db ---
-# def get_db(): ...
-# def close_db(e=None): ...
 
 
 def create_app():
@@ -328,6 +353,8 @@ def create_app():
     app.config['BIFROST_CLIENT_ID'] = Config.BIFROST_CLIENT_ID
     app.config['BIFROST_CLIENT_SECRET'] = Config.BIFROST_CLIENT_SECRET
     # ---
+
+    print('fucking', Config.BIFROST_URL)
 
     app.teardown_appcontext(close_db)
 
@@ -353,7 +380,6 @@ def create_app():
     from .summary.routes import summary_bp
     from .reminders.routes import reminders_bp
     from .users.routes import users_bp  # --- REFACTOR: Import new users_bp ---
-    # from .auth.routes import auth_bp # --- REFACTOR: auth_bp removed ---
 
     app.register_blueprint(settings_bp)
     app.register_blueprint(analytics_bp)
@@ -362,8 +388,6 @@ def create_app():
     app.register_blueprint(summary_bp)
     app.register_blueprint(reminders_bp)
     app.register_blueprint(users_bp)  # --- REFACTOR: Register new users_bp ---
-
-    # app.register_blueprint(auth_bp) # --- REFACTOR: auth_bp removed ---
 
     @app.route("/health")
     def health_check():

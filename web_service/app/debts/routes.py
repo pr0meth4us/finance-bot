@@ -5,12 +5,13 @@ All endpoints are multi-tenant and require a valid user_id.
 """
 from flask import Blueprint, request, jsonify, g
 from datetime import datetime
+# --- THIS IS THE FIX ---
 from bson import ObjectId
+# --- END FIX ---
 import re
 from zoneinfo import ZoneInfo
 from app.utils.currency import get_live_usd_to_khr_rate
 from app.utils.db import get_db, settings_collection, debts_collection, transactions_collection
-# --- REFACTOR: Import new auth decorator ---
 from app.utils.auth import auth_required
 
 debts_bp = Blueprint('debts', __name__, url_prefix='/debts')
@@ -21,7 +22,6 @@ def serialize_debt(doc):
     """Serializes a debt document from MongoDB for JSON responses."""
     if '_id' in doc:
         doc['_id'] = str(doc['_id'])
-    # --- REFACTOR: Use account_id ---
     if 'account_id' in doc:
         doc['account_id'] = str(doc['account_id'])
     if 'created_at' in doc and isinstance(doc['created_at'], datetime):
@@ -41,25 +41,27 @@ def get_db_rate(db, account_id):
     This is now user-specific.
     """
     # --- REFACTOR: Use 'db.settings' and query by 'account_id' ---
+    # Note: account_id is expected to be an ObjectId here
     settings_doc = settings_collection().find_one({'account_id': account_id})
     if settings_doc and 'settings' in settings_doc:
         settings = settings_doc['settings']
         if settings.get('rate_preference') == 'fixed':
              rate = float(settings.get('fixed_rate', 4100.0))
              if rate > 0:
-                return rate
+                 return rate
     return get_live_usd_to_khr_rate() # Default to live rate
 
 
 @debts_bp.route('/', methods=['POST'])
-@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")  # --- REFACTOR: Add decorator ---
 def add_debt():
     """Adds a new debt for the authenticated user."""
-    db = get_db()
-
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     data = request.json
     if not all(k in data for k in ['type', 'person', 'amount', 'currency']):
@@ -75,7 +77,7 @@ def add_debt():
     account_name = f"{data['currency']} Account"
 
     tx_data = {
-        "account_id": account_id, # <-- REFACTOR
+        "account_id": account_id,  # <-- REFACTOR
         "amount": amount,
         "currency": data['currency'],
         "accountName": account_name,
@@ -92,7 +94,7 @@ def add_debt():
     tx_id = tx_result.inserted_id
 
     debt = {
-        "account_id": account_id, # <-- REFACTOR
+        "account_id": account_id,  # <-- REFACTOR
         "type": data['type'],
         "person": data['person'].strip().title(),
         "originalAmount": amount,
@@ -110,17 +112,18 @@ def add_debt():
 
 
 @debts_bp.route('/', methods=['GET'])
-@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")  # --- REFACTOR: Add decorator ---
 def get_open_debts():
     """Fetches and groups open debts for the authenticated user."""
-    db = get_db()
-
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     pipeline = [
-        {'$match': {'status': 'open', 'account_id': account_id}}, # <-- REFACTOR
+        {'$match': {'status': 'open', 'account_id': account_id}},  # <-- REFACTOR
         {'$group': {
             '_id': {'person_normalized': {'$toLower': '$person'}, 'currency': '$currency', 'type': '$type'},
             'person_display': {'$first': '$person'},
@@ -145,31 +148,34 @@ def get_open_debts():
 
 
 @debts_bp.route('/export/open', methods=['GET'])
-@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")  # --- REFACTOR: Add decorator ---
 def get_open_debts_export_list():
     """Fetches a simple flat list of all open debts for export."""
-    db = get_db()
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     query_filter = {
         'status': 'open',
-        'account_id': account_id # <-- REFACTOR
+        'account_id': account_id  # <-- REFACTOR
     }
     debts = list(debts_collection().find(query_filter).sort('created_at', 1))
     return jsonify([serialize_debt(d) for d in debts])
 
 
 @debts_bp.route('/list/settled', methods=['GET'])
-@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")  # --- REFACTOR: Add decorator ---
 def get_settled_debts_grouped():
     """Fetches and groups settled OR canceled debts for the authenticated user."""
-    db = get_db()
-
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     pipeline = [
         {'$match': {
@@ -200,18 +206,19 @@ def get_settled_debts_grouped():
 
 
 @debts_bp.route('/<debt_id>', methods=['GET'])
-@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")  # --- REFACTOR: Add decorator ---
 def get_debt_details(debt_id):
     """Fetches details for a single debt owned by the authenticated user."""
-    db = get_db()
-
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     debt = debts_collection().find_one({
         '_id': ObjectId(debt_id),
-        'account_id': account_id # <-- REFACTOR
+        'account_id': account_id  # <-- REFACTOR
     })
 
     if not debt:
@@ -220,73 +227,79 @@ def get_debt_details(debt_id):
 
 
 @debts_bp.route('/person/<person_name>/<currency>', methods=['GET'])
-@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")  # --- REFACTOR: Add decorator ---
 def get_debts_by_person_and_currency(person_name, currency):
     """Fetches debts by person/currency for the authenticated user."""
-    db = get_db()
-
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     query_filter = {
         'person': re.compile(f'^{re.escape(person_name)}$', re.IGNORECASE),
         'currency': currency,
         'status': 'open',
-        'account_id': account_id # <-- REFACTOR
+        'account_id': account_id  # <-- REFACTOR
     }
     debts = list(debts_collection().find(query_filter).sort('created_at', 1))
     return jsonify([serialize_debt(d) for d in debts])
 
 
 @debts_bp.route('/person/<person_name>/all', methods=['GET'])
-@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")  # --- REFACTOR: Add decorator ---
 def get_all_debts_by_person(person_name):
     """Fetches all open debts for a person, for the authenticated user."""
-    db = get_db()
-
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     query_filter = {
         'person': re.compile(f'^{re.escape(person_name)}$', re.IGNORECASE),
         'status': 'open',
-        'account_id': account_id # <-- REFACTOR
+        'account_id': account_id  # <-- REFACTOR
     }
     debts = list(debts_collection().find(query_filter).sort('created_at', 1))
     return jsonify([serialize_debt(d) for d in debts])
 
 
 @debts_bp.route('/person/<person_name>/all/settled', methods=['GET'])
-@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")  # --- REFACTOR: Add decorator ---
 def get_all_settled_debts_by_person(person_name):
     """Fetches all settled debts for a person, for the authenticated user."""
-    db = get_db()
-
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     query_filter = {
         'person': re.compile(f'^{re.escape(person_name)}$', re.IGNORECASE),
         'status': {'$in': ['settled', 'canceled']},
-        'account_id': account_id # <-- REFACTOR
+        'account_id': account_id  # <-- REFACTOR
     }
     debts = list(debts_collection().find(query_filter).sort('created_at', 1))
     return jsonify([serialize_debt(d) for d in debts])
 
 
 @debts_bp.route('/person/<payment_currency>/repay', methods=['POST'])
-@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")  # --- REFACTOR: Add decorator ---
 def record_lump_sum_repayment(payment_currency):
     """Handles a lump-sum repayment for the authenticated user."""
     data = request.json
     db = get_db()
 
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     if 'amount' not in data or 'type' not in data or 'person' not in data:
         return jsonify({'error': 'Repayment amount, type, and person are required'}), 400
@@ -312,7 +325,7 @@ def record_lump_sum_repayment(payment_currency):
         'currency': payment_currency,
         'status': 'open',
         'type': debt_type,
-        'account_id': account_id # <-- REFACTOR
+        'account_id': account_id  # <-- REFACTOR
     }
     debts_to_process = list(debts_collection().find(query_filter).sort('created_at', 1))
 
@@ -357,7 +370,7 @@ def record_lump_sum_repayment(payment_currency):
             interest_desc = f"Interest paid to {person_name}"
 
         interest_tx = {
-            "account_id": account_id, # <-- REFACTOR
+            "account_id": account_id,  # <-- REFACTOR
             "type": interest_tx_type,
             "amount": interest_amount,
             "currency": debt_currency,
@@ -376,7 +389,7 @@ def record_lump_sum_repayment(payment_currency):
         new_status = 'settled' if new_remaining <= 0.001 else 'open'
 
         debts_collection().update_one(
-            {'_id': debt['_id'], 'account_id': account_id}, # <-- REFACTOR
+            {'_id': debt['_id'], 'account_id': account_id},  # <-- REFACTOR
             {
                 '$inc': {'remainingAmount': -repayment_for_this_debt},
                 '$push': {'repayments': {'amount': repayment_for_this_debt, 'date': payment_time_utc}},
@@ -390,7 +403,7 @@ def record_lump_sum_repayment(payment_currency):
     tx_desc = f"Repayment from {person_name}" if debt_type == 'lent' else f"Repayment to {person_name}"
 
     tx = {
-        "account_id": account_id, # <-- REFACTOR
+        "account_id": account_id,  # <-- REFACTOR
         "type": tx_type,
         "amount": payment_amount,
         "currency": payment_currency,
@@ -417,19 +430,21 @@ def record_lump_sum_repayment(payment_currency):
 
 
 @debts_bp.route('/<debt_id>/cancel', methods=['POST'])
-@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")  # --- REFACTOR: Add decorator ---
 def cancel_debt(debt_id):
     """Cancels a debt and reverses the initial transaction for the authenticated user."""
     db = get_db()
-
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     try:
         debt = debts_collection().find_one({
             '_id': ObjectId(debt_id),
-            'account_id': account_id # <-- REFACTOR
+            'account_id': account_id  # <-- REFACTOR
         })
         if not debt:
             return jsonify({'error': 'Debt not found or access denied'}), 404
@@ -443,7 +458,7 @@ def cancel_debt(debt_id):
 
         original_tx = transactions_collection().find_one({
             '_id': ObjectId(tx_id),
-            'account_id': account_id # <-- REFACTOR
+            'account_id': account_id  # <-- REFACTOR
         })
         if not original_tx:
             return jsonify({'error': 'Cannot cancel debt: Original transaction not found.'}), 500
@@ -452,7 +467,7 @@ def cancel_debt(debt_id):
         reverse_desc = f"Reversal for Canceled Debt: {original_tx['description']}"
 
         reverse_tx = {
-            "account_id": account_id, # <-- REFACTOR
+            "account_id": account_id,  # <-- REFACTOR
             "type": reverse_type,
             "amount": original_tx['amount'],
             "currency": original_tx['currency'],
@@ -464,7 +479,7 @@ def cancel_debt(debt_id):
         transactions_collection().insert_one(reverse_tx)
 
         debts_collection().update_one(
-            {'_id': ObjectId(debt_id), 'account_id': account_id}, # <-- REFACTOR
+            {'_id': ObjectId(debt_id), 'account_id': account_id},  # <-- REFACTOR
             {'$set': {'status': 'canceled', 'remainingAmount': 0}}
         )
 
@@ -474,14 +489,15 @@ def cancel_debt(debt_id):
 
 
 @debts_bp.route('/<debt_id>', methods=['PUT'])
-@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")  # --- REFACTOR: Add decorator ---
 def update_debt(debt_id):
     """Updates the person or purpose of a debt for the authenticated user."""
-    db = get_db()
-
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     data = request.json
     if not data or not any(k in data for k in ['person', 'purpose']):
@@ -494,7 +510,7 @@ def update_debt(debt_id):
         update_fields['purpose'] = data['purpose'].strip()
 
     result = debts_collection().update_one(
-        {'_id': ObjectId(debt_id), 'account_id': account_id}, # <-- REFACTOR
+        {'_id': ObjectId(debt_id), 'account_id': account_id},  # <-- REFACTOR
         {'$set': update_fields}
     )
 
@@ -505,19 +521,20 @@ def update_debt(debt_id):
 
 
 @debts_bp.route('/analysis', methods=['GET'])
-@auth_required(min_role="premium_user") # --- REFACTOR: Add decorator ---
+@auth_required(min_role="premium_user")  # --- REFACTOR: Add decorator ---
 def get_debt_analysis():
     """Generates a debt analysis for the authenticated user."""
     db = get_db()
-
-    # --- REFACTOR: Get account_id from g ---
-    account_id = g.account_id
-    # ---
+    # --- THIS IS THE FIX ---
+    try:
+        account_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+    # --- END FIX ---
 
     now = datetime.now(UTC_TZ)
 
     # Base match stage for all pipelines
-    # --- REFACTOR: Use account_id ---
     base_match = {'status': 'open', 'account_id': account_id}
 
     # --- Pipeline 1: Concentration (Top people) ---
@@ -548,7 +565,6 @@ def get_debt_analysis():
     ]
 
     # --- Pipeline 3: Overview (Total Owed vs. Total Lent in USD) ---
-    # --- REFACTOR: Use user-specific rate ---
     rate = get_db_rate(db, account_id)
     overview_pipeline = [
         {'$match': base_match},

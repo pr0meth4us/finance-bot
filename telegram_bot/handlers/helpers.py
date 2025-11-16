@@ -15,7 +15,11 @@ PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
 def _get_user_settings(context: ContextTypes.DEFAULT_TYPE):
     """Helper to safely get user settings and currency mode."""
-    profile = context.user_data.get('user_profile', {})
+    # --- THIS IS THE FIX ---
+    # The decorator caches at 'profile', not 'user_profile'
+    profile = context.user_data.get('profile', {})
+    # --- END FIX ---
+
     settings = profile.get('settings', {})
     mode = settings.get('currency_mode', 'dual')
 
@@ -242,7 +246,7 @@ def format_summation_results(params, results,
     return header + date_text + count_text + "\n".join(stats_lines)
 
 
-def _format_report_summary_message(data):
+def _format_report_summary_message(data, context: ContextTypes.DEFAULT_TYPE):
     """Formats the detailed report data into a readable string."""
     summary = data.get('summary', {})
     start_date = datetime.fromisoformat(data['startDate']).strftime('%b %d, %Y')
@@ -251,50 +255,40 @@ def _format_report_summary_message(data):
     start_balance = summary.get('balanceAtStartUSD', 0)
     end_balance = summary.get('balanceAtEndUSD', 0)
 
-    header = f"📊 <b>Financial Report</b>\n" \
-             f"🗓️ <i>{start_date} to {end_date}</i>\n\n"
+    header = t("analytics.report_header", context, start_date=start_date, end_date=end_date)
     balance_overview_text = (
-        f"<b>Balance Overview (in USD):</b>\n"
-        f"▫️ Starting Balance: ${start_balance:,.2f}\n"
-        f"▫️ Ending Balance: ${end_balance:,.2f}\n\n"
+            t("analytics.balance_overview", context) +
+            t("analytics.starting_balance", context, balance=start_balance) +
+            t("analytics.ending_balance", context, balance=end_balance)
     )
 
     income = summary.get('totalIncomeUSD', 0)
     expense = summary.get('totalExpenseUSD', 0)
     net = summary.get('netSavingsUSD', 0)
     summary_text = (
-        f"<b>Operational Summary (in USD):</b>\n"
-        f"⬆️ Total Income: ${income:,.2f}\n"
-        f"⬇️ Total Expense: ${expense:,.2f}\n"
-        f"<b>Net Savings: ${net:,.2f}</b> {'✅' if net >= 0 else '🔻'}\n\n"
+            t("analytics.operational_summary", context) +
+            t("analytics.total_income", context, income=income) +
+            t("analytics.total_expense", context, expense=expense) +
+            t("analytics.net_savings", context, net=net, emoji=('✅' if net >= 0 else '🔻'))
     )
 
     insights = data.get('expenseInsights', {})
-    insights_text = "<b>Expense Insights:</b>\n"
+    insights_text = t("analytics.expense_insights", context)
 
     top_item = insights.get('topExpenseItem')
     if top_item:
         top_desc = top_item.get('description') or top_item.get('category', 'N/A')
-        insights_text += (
-            f"    - <b>Top Expense:</b> ${top_item['amount_usd']:,.2f} "
-            f"({top_desc}) on {top_item['date']}\n"
-        )
+        insights_text += t("analytics.top_expense", context, amount=top_item['amount_usd'], description=top_desc,
+                           date=top_item['date'])
 
     most_day = insights.get('mostExpensiveDay')
     if most_day:
-        insights_text += (
-            f"    - <b>Busiest Day:</b> {most_day['_id']} "
-            f"(${most_day['total_spent_usd']:,.2f})\n"
-        )
+        insights_text += t("analytics.busiest_day", context, date=most_day['_id'], amount=most_day['total_spent_usd'])
 
     least_day = insights.get('leastExpensiveDay')
     if least_day and (not most_day or least_day['_id'] != most_day['_id']):
-        insights_text += (
-            f"    - <b>Quietest Day:</b> {least_day['_id']} "
-            f"(${least_day['total_spent_usd']:,.2f})\n"
-        )
-
-    insights_text += "\n"
+        insights_text += t("analytics.quietest_day", context, date=least_day['_id'],
+                           amount=least_day['total_spent_usd'])
 
     expense_breakdown = data.get('expenseBreakdown', [])
     major_expenses = []
@@ -310,48 +304,41 @@ def _format_report_summary_message(data):
             else:
                 major_expenses.append(item)
 
-    expense_text = "<b>Major Expenses:</b>\n"
+    expense_text = t("analytics.major_expenses", context)
     if major_expenses:
         for item in major_expenses:
-            expense_text += (
-                f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
-            )
+            expense_text += f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
     else:
-        expense_text += "    - No major expenses recorded.\n"
+        expense_text += t("analytics.no_major_expenses", context)
 
     if minor_expenses:
-        other_text = "\n<b>Other Expenses (grouped in chart):</b>\n"
+        other_text = t("analytics.other_expenses", context)
         for item in minor_expenses:
-            other_text += (
-                f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
-            )
+            other_text += f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
 
     income_breakdown = data.get('incomeBreakdown', [])
-    income_text = "\n<b>Income Sources:</b>\n"
+    income_text = t("analytics.income_sources", context)
     if income_breakdown:
         for item in income_breakdown[:5]:
-            income_text += (
-                f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
-            )
+            income_text += f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
     else:
-        income_text += "    - No income recorded.\n"
+        income_text += t("analytics.no_income", context)
 
     fin_summary = data.get('financialSummary', {})
-    financial_text = "\n<b>Loan & Debt Activity (in USD):</b>\n"
+    financial_text = t("analytics.loan_activity", context)
     financial_lines = [
-        f"    - Lent to others: ${fin_summary['totalLentUSD']:,.2f}"
-        if fin_summary.get('totalLentUSD', 0) > 0 else None,
-        f"    - Borrowed from others: ${fin_summary['totalBorrowedUSD']:,.2f}"
-        if fin_summary.get('totalBorrowedUSD', 0) > 0 else None,
-        f"    - Repayments received: ${fin_summary['totalRepaidToYouUSD']:,.2f}"
-        if fin_summary.get('totalRepaidToYouUSD', 0) > 0 else None,
-        f"    - Repayments made: ${fin_summary['totalYouRepaidUSD']:,.2f}"
-        if fin_summary.get('totalYouRepaidUSD', 0) > 0 else None
+        t("analytics.lent_to_others", context, amount=fin_summary['totalLentUSD']) if fin_summary.get('totalLentUSD',
+                                                                                                      0) > 0 else None,
+        t("analytics.borrowed_from_others", context, amount=fin_summary['totalBorrowedUSD']) if fin_summary.get(
+            'totalBorrowedUSD', 0) > 0 else None,
+        t("analytics.repayments_received", context, amount=fin_summary['totalRepaidToYouUSD']) if fin_summary.get(
+            'totalRepaidToYouUSD', 0) > 0 else None,
+        t("analytics.repayments_made", context, amount=fin_summary['totalYouRepaidUSD']) if fin_summary.get(
+            'totalYouRepaidUSD', 0) > 0 else None
     ]
     active_lines = [line for line in financial_lines if line]
-    financial_text += "\n".join(
-        active_lines
-    ) if active_lines else "    - No loan or debt activity."
+    financial_text += "\n".join(active_lines) if active_lines else t("analytics.no_loan_activity", context)
+
     return (
             header + balance_overview_text + summary_text + insights_text +
             expense_text + other_text + income_text + financial_text

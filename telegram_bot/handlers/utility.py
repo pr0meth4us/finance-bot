@@ -27,9 +27,9 @@ async def get_current_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer("Fetching rate...")
 
-    # --- MODIFICATION: Get user_id ---
-    user_id = context.user_data['user_profile']['_id']
-    data = api_client.get_exchange_rate(user_id) # <-- MODIFICATION
+    # --- REFACTOR: Get JWT ---
+    jwt = context.user_data['jwt']
+    data = api_client.get_exchange_rate(jwt) # <-- MODIFICATION
     # ---
 
     if data and 'rate' in data:
@@ -53,9 +53,7 @@ async def set_reminder_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
 
     # --- THIS IS THE FIX ---
-    user_profile = context.user_data.get('user_profile')
-    context.user_data.clear()
-    context.user_data['user_profile'] = user_profile
+    # We no longer need to clear the context.
     # --- END FIX ---
 
     await query.message.reply_text(t("utility.remind_what", context))
@@ -102,12 +100,13 @@ async def received_reminder_custom_date(update: Update, context: ContextTypes.DE
 @authenticate_user # <-- MODIFICATION
 async def received_reminder_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        # --- MODIFICATION: Get user_id and chat_id from profile ---
-        user_profile = context.user_data['user_profile']
-        user_id = user_profile['_id']
+        # --- REFACTOR: Get JWT and profile ---
+        jwt = context.user_data['jwt']
+        profile = context.user_data['profile']
+        # ---
 
         # Use the user's specific reminder chat ID, or fall back to the current chat
-        target_chat_id = user_profile.get('settings', {}).get('notification_chat_ids', {}).get('reminder') or update.effective_chat.id
+        target_chat_id = profile.get('settings', {}).get('notification_chat_ids', {}).get('reminder') or update.effective_chat.id
         # ---
 
         reminder_time = datetime.strptime(update.message.text, "%H:%M").time()
@@ -121,7 +120,9 @@ async def received_reminder_time(update: Update, context: ContextTypes.DEFAULT_T
             "chat_id": target_chat_id
         }
 
-        api_client.add_reminder(reminder_data, user_id) # <-- MODIFICATION
+        # --- REFACTOR: Pass JWT ---
+        api_client.add_reminder(reminder_data, jwt)
+        # ---
 
         await update.message.reply_text(
             t("utility.remind_success", context, date_time=aware_dt.strftime('%d %b %Y at %H:%M')),
