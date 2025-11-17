@@ -1,241 +1,160 @@
-# --- web_service/app/summary/routes.py (Refactored) ---
-"""
-Handles the main summary endpoint for the bot.
-All endpoints are multi-tenant and require a valid user_id.
-"""
 from flask import Blueprint, jsonify, g
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
+from bson import ObjectId
+
 from app.utils.db import get_db, settings_collection, transactions_collection, debts_collection
 from app.utils.auth import auth_required
 from app.utils.currency import get_live_usd_to_khr_rate
-from bson import ObjectId
 
 summary_bp = Blueprint('summary', __name__, url_prefix='/summary')
 
-FINANCIAL_TRANSACTION_CATEGORIES = [
-    'Loan Lent',
-    'Debt Repayment',
-    'Loan Received',
-    'Debt Settled'
-]
-
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 UTC_TZ = ZoneInfo("UTC")
+FINANCIAL_CATS = ['Loan Lent', 'Debt Repayment', 'Loan Received', 'Debt Settled']
 
 
-def create_utc_range(start_date_local, end_date_local):
-    """Converts local start/end dates into a timezone-aware UTC range."""
-    aware_start_dt = datetime.combine(
-        start_date_local, time.min, tzinfo=PHNOM_PENH_TZ
-    )
-    aware_end_dt = datetime.combine(
-        end_date_local, time.max, tzinfo=PHNOM_PENH_TZ
-    )
-    return aware_start_dt.astimezone(UTC_TZ), aware_end_dt.astimezone(UTC_TZ)
+def get_account_id():
+    try:
+        return ObjectId(g.account_id)
+    except Exception:
+        raise ValueError("Invalid account_id format")
 
 
 def get_date_ranges():
-    """Helper function to get start and end datetimes for various periods."""
+    """Returns UTC date ranges for the summary dashboard."""
     today = datetime.now(PHNOM_PENH_TZ).date()
 
-    start_of_week = today - timedelta(days=today.weekday())
-    end_of_week = start_of_week + timedelta(days=6)
-    end_of_last_week = start_of_week - timedelta(days=1)
-    start_of_last_week = end_of_last_week - timedelta(days=6)
-    start_of_month = today.replace(day=1)
-    next_month = start_of_month.replace(day=28) + timedelta(days=4)
-    end_of_month = next_month - timedelta(days=next_month.day)
-    end_of_last_month = start_of_month - timedelta(days=1)
-    start_of_last_month = end_of_last_month.replace(day=1)
+    def to_utc(d_start, d_end):
+        s = datetime.combine(d_start, time.min, tzinfo=PHNOM_PENH_TZ).astimezone(UTC_TZ)
+        e = datetime.combine(d_end, time.max, tzinfo=PHNOM_PENH_TZ).astimezone(UTC_TZ)
+        return s, e
+
+    start_week = today - timedelta(days=today.weekday())
+    start_month = today.replace(day=1)
+    start_prev_month = (start_month - timedelta(days=1)).replace(day=1)
+    end_prev_month = start_month - timedelta(days=1)
 
     return {
-        "today": create_utc_range(today, today),
-        "this_week": create_utc_range(start_of_week, end_of_week),
-        "last_week": create_utc_range(start_of_last_week, end_of_last_week),
-        "this_month": create_utc_range(start_of_month, end_of_month),
-        "last_month": create_utc_range(start_of_last_month, end_of_last_month),
+        "today": to_utc(today, today),
+        "this_week": to_utc(start_week, start_week + timedelta(days=6)),
+        "last_week": to_utc(start_week - timedelta(days=7), start_week - timedelta(days=1)),
+        "this_month": to_utc(start_month,
+                             (start_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)),
+        "last_month": to_utc(start_prev_month, end_prev_month)
     }
 
 
 @summary_bp.route('/detailed', methods=['GET'])
 @auth_required(min_role="user")
 def get_detailed_summary():
-    """Generates the detailed summary for the authenticated user."""
-    db = get_db()
     try:
-        account_id = ObjectId(g.account_id)
-    except Exception:
+        account_id = get_account_id()
+    except ValueError:
         return jsonify({'error': 'Invalid account_id format'}), 400
 
-    # 1. Get User's Settings (Initial Balances, Mode, Currencies)
-    # Optimization: Project only needed fields
-    user_settings_doc = settings_collection().find_one(
-        {'account_id': account_id},
-        {'settings': 1}
-    )
-    if not user_settings_doc:
+    # 1. Fetch Settings
+    user_settings = settings_collection().find_one({'account_id': account_id}, {'settings': 1})
+    if not user_settings:
         return jsonify({'error': 'User settings not found'}), 404
 
-    settings = user_settings_doc.get('settings', {})
+    settings = user_settings.get('settings', {})
     initial_balances = settings.get('initial_balances', {})
     mode = settings.get('currency_mode', 'dual')
 
-    currencies_to_track = []
-    if mode == 'single':
-        currencies_to_track.append(settings.get('primary_currency', 'USD'))
-    else:
-        currencies_to_track = ['USD', 'KHR']
+    currencies = ['USD'] if mode == 'single' else ['USD', 'KHR']
+    if mode == 'single' and settings.get('primary_currency'):
+        currencies = [settings.get('primary_currency')]
 
-    # Rate determination
-    rate_preference = settings.get('rate_preference', 'live')
+    # Determine Rate
     user_rate = 4100.0
-    if rate_preference == 'fixed':
-        user_rate = settings.get('fixed_rate', 4100.0)
+    if settings.get('rate_preference') == 'fixed':
+        user_rate = float(settings.get('fixed_rate', 4100.0))
     else:
         user_rate = get_live_usd_to_khr_rate()
 
-    # 2. Calculate Total Transaction Flow (Income & Expense)
-    # This calculates the "lifetime" totals for the balance calculation
-    pipeline_transactions = [
-        {'$match': {
-            'account_id': account_id,
-            'currency': {'$in': currencies_to_track}
-        }},
-        {'$group': {
-            '_id': {'type': '$type', 'currency': '$currency'},
-            'total': {'$sum': '$amount'}
-        }}
-    ]
-    tx_results = list(transactions_collection().aggregate(pipeline_transactions))
+    # 2. Calculate Balances (Aggregated Income/Expense)
+    tx_totals = list(transactions_collection().aggregate([
+        {'$match': {'account_id': account_id, 'currency': {'$in': currencies}}},
+        {'$group': {'_id': {'type': '$type', 'currency': '$currency'}, 'total': {'$sum': '$amount'}}}
+    ]))
 
-    # 3. Calculate Balances
     final_balances = {}
-    for currency in currencies_to_track:
-        initial = initial_balances.get(currency, 0)
-        income = next((r['total'] for r in tx_results if
-                       r['_id']['type'] == 'income' and r['_id']['currency'] == currency), 0)
-        expense = next((r['total'] for r in tx_results if
-                        r['_id']['type'] == 'expense' and r['_id']['currency'] == currency), 0)
-        final_balances[currency] = initial + income - expense
+    for curr in currencies:
+        base = initial_balances.get(curr, 0)
+        inc = next((x['total'] for x in tx_totals if x['_id']['type'] == 'income' and x['_id']['currency'] == curr), 0)
+        exp = next((x['total'] for x in tx_totals if x['_id']['type'] == 'expense' and x['_id']['currency'] == curr), 0)
+        final_balances[curr] = base + inc - exp
 
-    # 4. Calculate Debts
-    pipeline_debts = [
-        {'$match': {
-            'status': 'open',
-            'account_id': account_id,
-            'currency': {'$in': currencies_to_track}
-        }},
-        {'$group': {
-            '_id': {'type': '$type', 'currency': '$currency'},
-            'totalAmount': {'$sum': '$remainingAmount'}
-        }}
-    ]
-    debt_results = list(debts_collection().aggregate(pipeline_debts))
+    # 3. Calculate Debts
+    debt_data = list(debts_collection().aggregate([
+        {'$match': {'status': 'open', 'account_id': account_id, 'currency': {'$in': currencies}}},
+        {'$group': {'_id': {'type': '$type', 'currency': '$currency'}, 'total': {'$sum': '$remainingAmount'}}}
+    ]))
 
-    debts_owed_to_you = [
-        {'total': d['totalAmount'], '_id': d['_id']['currency']}
-        for d in debt_results if d['_id']['type'] == 'lent'
-    ]
-    debts_owed_by_you = [
-        {'total': d['totalAmount'], '_id': d['_id']['currency']}
-        for d in debt_results if d['_id']['type'] == 'borrowed'
-    ]
+    owed_to_you = [{'total': d['total'], '_id': d['_id']['currency']} for d in debt_data if d['_id']['type'] == 'lent']
+    owed_by_you = [{'total': d['total'], '_id': d['_id']['currency']} for d in debt_data if
+                   d['_id']['type'] == 'borrowed']
 
-    # 5. Calculate Period Summaries using $facet
-    date_ranges = get_date_ranges()
+    # 4. Period Summaries ($facet)
+    ranges = get_date_ranges()
+    min_date = min(r[0] for r in ranges.values())
+    max_date = max(r[1] for r in ranges.values())
 
-    # Determine global min date to filter the initial match stage
-    min_date = min(r[0] for r in date_ranges.values())
-    max_date = max(r[1] for r in date_ranges.values())
-
-    # Common stage for currency conversion
-    conversion_stage = {
+    conversion = {
         '$addFields': {
-            'amount_in_usd': {
-                '$cond': {
-                    'if': {'$eq': ['$currency', 'USD']},
-                    'then': '$amount',
-                    'else': {
-                        '$let': {
-                            'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', user_rate]}},
-                            'in': {
-                                '$cond': {
-                                    'if': {'$gt': ['$$rate', 0]},
-                                    'then': {'$divide': ['$amount', '$$rate']},
-                                    'else': {'$divide': ['$amount', user_rate]}
-                                }
-                            }
-                        }
-                    }
-                }
+            'usd_val': {
+                '$cond': [
+                    {'$eq': ['$currency', 'USD']}, '$amount',
+                    {'$divide': ['$amount', {'$ifNull': ['$exchangeRateAtTime', user_rate]}]}
+                ]
             }
         }
     }
 
-    group_stage = {
-        '$group': {
-            '_id': {'type': '$type', 'currency': '$currency'},
-            'total': {'$sum': '$amount'},
-            'totalUSD': {'$sum': '$amount_in_usd'}
-        }
-    }
-
-    facet_stages = {}
-    for period_name, (start_dt, end_dt) in date_ranges.items():
-        facet_stages[period_name] = [
-            {'$match': {'timestamp': {'$gte': start_dt, '$lte': end_dt}}},
-            group_stage
+    facets = {}
+    for name, (start, end) in ranges.items():
+        facets[name] = [
+            {'$match': {'timestamp': {'$gte': start, '$lte': end}}},
+            {'$group': {
+                '_id': {'type': '$type', 'currency': '$currency'},
+                'total': {'$sum': '$amount'},
+                'totalUSD': {'$sum': '$usd_val'}
+            }}
         ]
 
-    pipeline_periods = [
+    period_results = list(transactions_collection().aggregate([
         {'$match': {
             'timestamp': {'$gte': min_date, '$lte': max_date},
-            'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES},
+            'categoryId': {'$nin': FINANCIAL_CATS},
             'account_id': account_id
         }},
-        conversion_stage,
-        {'$facet': facet_stages}
-    ]
-
-    facet_results = list(transactions_collection().aggregate(pipeline_periods))
+        conversion,
+        {'$facet': facets}
+    ]))[0]
 
     period_summaries = {}
-
-    # Helper to process facet output
-    def process_facet_result(results):
+    for name in ranges:
+        data = period_results.get(name, [])
         summary = {'income': {}, 'expense': {}, 'net_usd': 0}
-        total_income_usd = 0
-        total_expense_usd = 0
-        for item in results:
-            trans_type = item['_id']['type']
-            currency = item['_id']['currency']
-            if trans_type in summary:
-                summary[trans_type][currency] = item['total']
+        inc_usd, exp_usd = 0, 0
 
-            if trans_type == 'income':
-                total_income_usd += item['totalUSD']
-            elif trans_type == 'expense':
-                total_expense_usd += item['totalUSD']
-        summary['net_usd'] = total_income_usd - total_expense_usd
-        return summary
+        for item in data:
+            t_type = item['_id']['type']
+            curr = item['_id']['currency']
+            summary[t_type][curr] = item['total']
 
-    if facet_results:
-        facets = facet_results[0]
-        for period in date_ranges.keys():
-            raw_data = facets.get(period, [])
-            period_summaries[period] = process_facet_result(raw_data)
-    else:
-        # Should not happen given list() behavior, but safe fallback
-        for period in date_ranges.keys():
-            period_summaries[period] = {'income': {}, 'expense': {}, 'net_usd': 0}
+            if t_type == 'income':
+                inc_usd += item['totalUSD']
+            else:
+                exp_usd += item['totalUSD']
 
-    # 6. Combine all data
-    summary = {
+        summary['net_usd'] = inc_usd - exp_usd
+        period_summaries[name] = summary
+
+    return jsonify({
         'balances': final_balances,
-        'debts_owed_by_you': debts_owed_by_you,
-        'debts_owed_to_you': debts_owed_to_you,
+        'debts_owed_by_you': owed_by_you,
+        'debts_owed_to_you': owed_to_you,
         'periods': period_summaries
-    }
-
-    return jsonify(summary)
+    })

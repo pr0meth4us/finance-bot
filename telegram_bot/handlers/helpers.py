@@ -1,12 +1,10 @@
-# --- Start of modified file: telegram_bot/handlers/helpers.py ---
-
-from datetime import datetime
 import io
 import csv
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from datetime import datetime
 from zoneinfo import ZoneInfo
-import pandas as pd
 from telegram.ext import ContextTypes
 from utils.i18n import t
 
@@ -14,364 +12,196 @@ PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
 
 def _get_user_settings(context: ContextTypes.DEFAULT_TYPE):
-    """Helper to safely get user settings and currency mode."""
-    # --- THIS IS THE FIX ---
-    # The decorator caches at 'profile', not 'user_profile'
+    """Extracts currency mode and currencies from context."""
     profile = context.user_data.get('profile', {})
-    # --- END FIX ---
-
     settings = profile.get('settings', {})
     mode = settings.get('currency_mode', 'dual')
 
     if mode == 'single':
-        primary_currency = settings.get('primary_currency', 'USD')
-        return mode, (primary_currency,)
+        primary = settings.get('primary_currency', 'USD')
+        return mode, (primary,)
 
-    # Default to dual if not set
     return 'dual', ('USD', 'KHR')
 
 
-def format_summary_message(summary_data,
-                           context: ContextTypes.DEFAULT_TYPE):
-    """Formats the detailed summary data into a readable string."""
+def format_summary_message(summary_data, context: ContextTypes.DEFAULT_TYPE):
+    """Formats detailed summary data into a readable string."""
     if not summary_data:
         return ""
 
     mode, currencies = _get_user_settings(context)
+    balances = summary_data.get('balances', {})
 
     # 1. Balances
     balance_lines = [f"{t('summary.balances', context)}"]
-    balances = summary_data.get('balances', {})
-
     if mode == 'dual':
-        usd_bal = balances.get('USD', 0)
-        khr_bal = balances.get('KHR', 0)
-        balance_lines.append(f"💵 {usd_bal:,.2f} USD")
-        balance_lines.append(f"៛ {khr_bal:,.0f} KHR")
+        balance_lines.append(f"💵 {balances.get('USD', 0):,.2f} USD")
+        balance_lines.append(f"៛ {balances.get('KHR', 0):,.0f} KHR")
     else:
-        currency = currencies[0]
-        bal = balances.get(currency, 0)
-        # Apply currency-specific formatting
-        amount_format = ",.0f" if currency == 'KHR' else ",.2f"
-        balance_lines.append(f"<b>{bal:{amount_format}} {currency}</b>")
-
-    balance_text = "\n".join(balance_lines)
+        curr = currencies[0]
+        val = balances.get(curr, 0)
+        fmt = ",.0f" if curr == 'KHR' else ",.2f"
+        balance_lines.append(f"<b>{val:{fmt}} {curr}</b>")
 
     # 2. Debts
     debt_lines = [f"{t('summary.debts', context)}"]
 
-    # Owed To You
-    debt_lines.append(f"{t('summary.you_are_owed', context)}")
-    owed_to_you_data = summary_data.get('debts_owed_to_you', [])
-    found_debt_to_you = False
-    for currency in currencies:
-        total = next((item['total'] for item in owed_to_you_data
-                      if item['_id'] == currency), 0)
-        if total > 0:
-            amount_format = ",.0f" if currency == 'KHR' else ",.2f"
-            symbol = "៛" if currency == 'KHR' else "💵"
-            debt_lines.append(f"    {symbol} {total:{amount_format}} {currency}")
-            found_debt_to_you = True
-    if not found_debt_to_you:
-        debt_lines.append("    -")
+    def _format_debts(title, data):
+        lines = [title]
+        found = False
+        for curr in currencies:
+            total = next((i['total'] for i in data if i['_id'] == curr), 0)
+            if total > 0:
+                fmt = ",.0f" if curr == 'KHR' else ",.2f"
+                symbol = "៛" if curr == 'KHR' else "💵"
+                lines.append(f"    {symbol} {total:{fmt}} {curr}")
+                found = True
+        if not found:
+            lines.append("    -")
+        return lines
 
-    # Owed By You
-    debt_lines.append(f"{t('summary.you_owe', context)}")
-    owed_by_you_data = summary_data.get('debts_owed_by_you', [])
-    found_debt_by_you = False
-    for currency in currencies:
-        total = next((item['total'] for item in owed_by_you_data
-                      if item['_id'] == currency), 0)
-        if total > 0:
-            amount_format = ",.0f" if currency == 'KHR' else ",.2f"
-            symbol = "៛" if currency == 'KHR' else "💵"
-            debt_lines.append(f"    {symbol} {total:{amount_format}} {currency}")
-            found_debt_by_you = True
-    if not found_debt_by_you:
-        debt_lines.append("    -")
+    debt_lines.extend(_format_debts(t('summary.you_are_owed', context), summary_data.get('debts_owed_to_you', [])))
+    debt_lines.extend(_format_debts(t('summary.you_owe', context), summary_data.get('debts_owed_by_you', [])))
 
-    debt_text = "\n".join(debt_lines)
-
-    # 3. Activity Periods
-    def format_period_line(period_data):
-        income = period_data.get('income', {})
-        expense = period_data.get('expense', {})
-
-        income_parts = []
-        for currency in currencies:
-            if income.get(currency, 0) > 0:
-                amount_format = ",.0f" if currency == 'KHR' else ",.2f"
-                income_parts.append(f"{income[currency]:{amount_format}} {currency}")
-        income_str = ' & '.join(income_parts) if income_parts else "0"
-
-        expense_parts = []
-        for currency in currencies:
-            if expense.get(currency, 0) > 0:
-                amount_format = ",.0f" if currency == 'KHR' else ",.2f"
-                expense_parts.append(f"{expense[currency]:{amount_format}} {currency}")
-        expense_str = ' & '.join(expense_parts) if expense_parts else "0"
-
-        return (
-            f"{t('summary.in', context, value=income_str)}\n"
-            f"{t('summary.out', context, value=expense_str)}"
-        )
-
+    # 3. Activity
     periods = summary_data.get('periods', {})
-    activity_text = ""
+    activity_lines = [f"{t('summary.activity_header', context)}"]
+
+    def _fmt_period(period_key, label_key):
+        p_data = periods.get(period_key, {})
+        inc = p_data.get('income', {})
+        exp = p_data.get('expense', {})
+
+        inc_str = " & ".join(
+            [f"{inc.get(c, 0):{',.0f' if c == 'KHR' else ',.2f'}} {c}" for c in currencies if inc.get(c, 0) > 0]) or "0"
+        exp_str = " & ".join(
+            [f"{exp.get(c, 0):{',.0f' if c == 'KHR' else ',.2f'}} {c}" for c in currencies if exp.get(c, 0) > 0]) or "0"
+
+        return f"{t(label_key, context)}\n{t('summary.in', context, value=inc_str)}\n{t('summary.out', context, value=exp_str)}"
+
     if periods:
-        this_month_net = periods.get('this_month', {}).get('net_usd', 0)
-        net_emoji = '✅' if this_month_net >= 0 else '🔻'
+        activity_lines.append(_fmt_period('today', 'summary.today'))
+        activity_lines.append(_fmt_period('this_week', 'summary.this_week'))
+        activity_lines.append(_fmt_period('last_week', 'summary.last_week'))
+        activity_lines.append(_fmt_period('this_month', 'summary.this_month'))
 
-        today_text = (
-            f"{t('summary.today', context)}\n"
-            f"{format_period_line(periods.get('today', {}))}"
-        )
-        this_week_text = (
-            f"{t('summary.this_week', context)}\n"
-            f"{format_period_line(periods.get('this_week', {}))}"
-        )
-        last_week_text = (
-            f"{t('summary.last_week', context)}\n"
-            f"{format_period_line(periods.get('last_week', {}))}"
-        )
-        this_month_text = (
-            f"{t('summary.this_month', context)}\n"
-            f"{format_period_line(periods.get('this_month', {}))}"
-        )
-
-        activity_text = (
-            f"{t('summary.activity_header', context)}\n{today_text}\n"
-            f"{this_week_text}\n{last_week_text}\n{this_month_text}"
-        )
-
-        # Only show Net USD if in dual mode
         if mode == 'dual':
-            this_month_net_text = t(
-                'summary.net',
-                context,
-                value=this_month_net,
-                emoji=net_emoji
-            )
-            activity_text += f"\n{this_month_net_text}"
+            net = periods.get('this_month', {}).get('net_usd', 0)
+            emoji = '✅' if net >= 0 else '🔻'
+            activity_lines.append(f"\n{t('summary.net', context, value=net, emoji=emoji)}")
 
-    return (
-        f"{t('summary.status_header', context)}\n{balance_text}\n"
-        f"\n{debt_text}\n\n{activity_text}"
-    )
+    return "\n".join(balance_lines + [""] + debt_lines + [""] + activity_lines)
 
 
-def format_summation_results(params, results,
-                             context: ContextTypes.DEFAULT_TYPE):
-    """Formats the results from the summation analytics API."""
+def format_summation_results(params, results, context: ContextTypes.DEFAULT_TYPE):
+    """Formats summation analytics results."""
     if not results or results.get('total_count', 0) == 0:
         return t('search.no_results', context)
 
     header = "<b>📈 Search Totals</b>\n\n"
+    meta = []
 
-    query_summary = []
-    if params.get('period'):
-        query_summary.append(
-            f"<b>Period:</b> {params['period'].replace('_', ' ').title()}"
-        )
-    elif params.get('start_date'):
-        start = datetime.fromisoformat(params['start_date'])
-        end = datetime.fromisoformat(params['end_date'])
-        query_summary.append(
-            f"<b>Period:</b> {start:%b %d, %Y} to {end:%b %d, %Y}"
-        )
+    if params.get('start_date'):
+        s = datetime.fromisoformat(params['start_date'])
+        e = datetime.fromisoformat(params['end_date'])
+        meta.append(f"<b>Period:</b> {s:%b %d, %Y} to {e:%b %d, %Y}")
 
     if params.get('transaction_type'):
-        query_summary.append(
-            f"<b>Type:</b> {params['transaction_type'].title()}"
-        )
+        meta.append(f"<b>Type:</b> {params['transaction_type'].title()}")
 
     if params.get('categories'):
-        query_summary.append(
-            f"<b>Categories:</b> {', '.join(params['categories'])}"
-        )
+        meta.append(f"<b>Categories:</b> {', '.join(params['categories'])}")
 
-    if params.get('keywords'):
-        logic = params.get('keyword_logic', 'OR')
-        query_summary.append(
-            f"<b>Keywords:</b> {', '.join(params['keywords'])} "
-            f"(Logic: {logic})"
-        )
-
-    header += "\n".join(query_summary) + "\n\n"
-
-    # Date Range
-    date_text = ""
-    if results.get('earliest_log_utc') and results.get('latest_log_utc'):
-        earliest = (
-            datetime.fromisoformat(results['earliest_log_utc'])
-            .astimezone(PHNOM_PENH_TZ)
-            .strftime('%b %d, %Y')
-        )
-        latest = (
-            datetime.fromisoformat(results['latest_log_utc'])
-            .astimezone(PHNOM_PENH_TZ)
-            .strftime('%b %d, %Y')
-        )
-        if earliest == latest:
-            date_text = f"<b>Date:</b> {earliest}\n"
-        else:
-            date_text = f"<b>Date Range:</b> {earliest} to {latest}\n"
-
-    # Totals & Stats
-    total_count = results['total_count']
-    count_text = f"Found <b>{total_count}</b> matching transaction(s).\n"
-
-    stats_lines = []
+    stats = []
     for item in results.get('totals_by_currency', []):
-        currency = item['currency']
-        amount_format = ",.0f" if currency == 'KHR' else ",.2f"
-        symbol = "៛" if currency == 'KHR' else "💵"
+        c = item['currency']
+        fmt = ",.0f" if c == 'KHR' else ",.2f"
+        sym = "៛" if c == 'KHR' else "💵"
 
-        stats_lines.append(f"\n--- <b>Stats for {currency}</b> ---")
-        stats_lines.append(
-            f"  {symbol} <b>Total Sum:</b> {item['total']:{amount_format}} "
-            f"{currency}"
-        )
-        stats_lines.append(f"  <b>Count:</b> {item['count']} transactions")
-        stats_lines.append(
-            f"  <b>Average:</b> {item['avg']:{amount_format}} {currency}"
-        )
-        stats_lines.append(
-            f"  <b>Highest:</b> {item['max']:{amount_format}} {currency}"
-        )
-        stats_lines.append(
-            f"  <b>Lowest:</b> {item['min']:{amount_format}} {currency}"
+        stats.append(
+            f"\n--- <b>Stats for {c}</b> ---\n"
+            f"  {sym} <b>Total:</b> {item['total']:{fmt}} {c}\n"
+            f"  <b>Count:</b> {item['count']}\n"
+            f"  <b>Avg:</b> {item['avg']:{fmt}} {c}\n"
+            f"  <b>Max:</b> {item['max']:{fmt}} {c}"
         )
 
-    return header + date_text + count_text + "\n".join(stats_lines)
+    return header + "\n".join(meta) + "\n".join(stats)
 
 
 def _format_report_summary_message(data, context: ContextTypes.DEFAULT_TYPE):
-    """Formats the detailed report data into a readable string."""
-    summary = data.get('summary', {})
-    start_date = datetime.fromisoformat(data['startDate']).strftime('%b %d, %Y')
-    end_date = datetime.fromisoformat(data['endDate']).strftime('%b %d, %Y')
+    s = data.get('summary', {})
+    start = datetime.fromisoformat(data['startDate']).strftime('%b %d, %Y')
+    end = datetime.fromisoformat(data['endDate']).strftime('%b %d, %Y')
 
-    start_balance = summary.get('balanceAtStartUSD', 0)
-    end_balance = summary.get('balanceAtEndUSD', 0)
+    header = t("analytics.report_header", context, start_date=start, end_date=end)
 
-    header = t("analytics.report_header", context, start_date=start_date, end_date=end_date)
-    balance_overview_text = (
+    balance = (
             t("analytics.balance_overview", context) +
-            t("analytics.starting_balance", context, balance=start_balance) +
-            t("analytics.ending_balance", context, balance=end_balance)
+            t("analytics.starting_balance", context, balance=s.get('balanceAtStartUSD', 0)) +
+            t("analytics.ending_balance", context, balance=s.get('balanceAtEndUSD', 0))
     )
 
-    income = summary.get('totalIncomeUSD', 0)
-    expense = summary.get('totalExpenseUSD', 0)
-    net = summary.get('netSavingsUSD', 0)
-    summary_text = (
+    net = s.get('netSavingsUSD', 0)
+    ops = (
             t("analytics.operational_summary", context) +
-            t("analytics.total_income", context, income=income) +
-            t("analytics.total_expense", context, expense=expense) +
-            t("analytics.net_savings", context, net=net, emoji=('✅' if net >= 0 else '🔻'))
+            t("analytics.total_income", context, income=s.get('totalIncomeUSD', 0)) +
+            t("analytics.total_expense", context, expense=s.get('totalExpenseUSD', 0)) +
+            t("analytics.net_savings", context, net=net, emoji='✅' if net >= 0 else '🔻')
     )
 
-    insights = data.get('expenseInsights', {})
-    insights_text = t("analytics.expense_insights", context)
+    return header + balance + ops
 
-    top_item = insights.get('topExpenseItem')
-    if top_item:
-        top_desc = top_item.get('description') or top_item.get('category', 'N/A')
-        insights_text += t("analytics.top_expense", context, amount=top_item['amount_usd'], description=top_desc,
-                           date=top_item['date'])
 
-    most_day = insights.get('mostExpensiveDay')
-    if most_day:
-        insights_text += t("analytics.busiest_day", context, date=most_day['_id'], amount=most_day['total_spent_usd'])
+def _format_habits_message(data):
+    if not data:
+        return "Could not analyze spending habits."
 
-    least_day = insights.get('leastExpensiveDay')
-    if least_day and (not most_day or least_day['_id'] != most_day['_id']):
-        insights_text += t("analytics.quietest_day", context, date=least_day['_id'],
-                           amount=least_day['total_spent_usd'])
+    day_text = "\n<b>📅 Spending by Day of Week:</b>\n"
+    days = sorted(data.get('byDayOfWeek', []), key=lambda x: x.get('total', 0), reverse=True)
+    day_text += "\n".join([f"    - {i['day']}s: ${i['total']:,.2f}" for i in days]) or "    - Not enough data.\n"
 
-    expense_breakdown = data.get('expenseBreakdown', [])
-    major_expenses = []
-    minor_expenses = []
-    other_text = ""
-    threshold = 4.0
-
-    if expense > 0:
-        for item in expense_breakdown:
-            percentage = (item['totalUSD'] / expense) * 100
-            if percentage < threshold:
-                minor_expenses.append(item)
-            else:
-                major_expenses.append(item)
-
-    expense_text = t("analytics.major_expenses", context)
-    if major_expenses:
-        for item in major_expenses:
-            expense_text += f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
+    kw_text = "\n<b>🏷️ Common Spending Keywords:</b>\n"
+    kws = data.get('keywordsByCategory', [])
+    if kws:
+        for item in kws:
+            if item.get('topKeywords'):
+                kw_text += f"    - <b>{item['category']}:</b> {', '.join(item['topKeywords'])}\n"
     else:
-        expense_text += t("analytics.no_major_expenses", context)
+        kw_text += "    - No descriptions found.\n"
 
-    if minor_expenses:
-        other_text = t("analytics.other_expenses", context)
-        for item in minor_expenses:
-            other_text += f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
+    return day_text + kw_text
 
-    income_breakdown = data.get('incomeBreakdown', [])
-    income_text = t("analytics.income_sources", context)
-    if income_breakdown:
-        for item in income_breakdown[:5]:
-            income_text += f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
-    else:
-        income_text += t("analytics.no_income", context)
 
-    fin_summary = data.get('financialSummary', {})
-    financial_text = t("analytics.loan_activity", context)
-    financial_lines = [
-        t("analytics.lent_to_others", context, amount=fin_summary['totalLentUSD']) if fin_summary.get('totalLentUSD',
-                                                                                                      0) > 0 else None,
-        t("analytics.borrowed_from_others", context, amount=fin_summary['totalBorrowedUSD']) if fin_summary.get(
-            'totalBorrowedUSD', 0) > 0 else None,
-        t("analytics.repayments_received", context, amount=fin_summary['totalRepaidToYouUSD']) if fin_summary.get(
-            'totalRepaidToYouUSD', 0) > 0 else None,
-        t("analytics.repayments_made", context, amount=fin_summary['totalYouRepaidUSD']) if fin_summary.get(
-            'totalYouRepaidUSD', 0) > 0 else None
-    ]
-    active_lines = [line for line in financial_lines if line]
-    financial_text += "\n".join(active_lines) if active_lines else t("analytics.no_loan_activity", context)
+def _format_debt_analysis_message(data, context: ContextTypes.DEFAULT_TYPE):
+    lent = [d for d in data.get('concentration', []) if d['type'] == 'lent']
+    borrowed = [d for d in data.get('concentration', []) if d['type'] == 'borrowed']
+
+    def _fmt_list(items, key_none):
+        return "\n".join([
+            t('iou.analysis_item', context, person=i['person'], total=i['total'])
+            for i in items[:3]
+        ]) or t(key_none, context)
 
     return (
-            header + balance_overview_text + summary_text + insights_text +
-            expense_text + other_text + income_text + financial_text
+        f"{t('iou.analysis_header', context)}\n"
+        f"{t('iou.analysis_lent_header', context)}\n{_fmt_list(lent, 'iou.analysis_lent_none')}\n"
+        f"{t('iou.analysis_borrow_header', context)}\n{_fmt_list(borrowed, 'iou.analysis_borrow_none')}"
     )
 
 
+# --- Charts ---
+
 def _create_income_expense_chart(data, start_date, end_date):
-    """Creates a simple bar chart comparing income and expense."""
-    summary = data.get('summary', {})
-    income = summary.get('totalIncomeUSD', 0)
-    expense = summary.get('totalExpenseUSD', 0)
-    if income == 0 and expense == 0:
-        return None
+    s = data.get('summary', {})
+    inc, exp = s.get('totalIncomeUSD', 0), s.get('totalExpenseUSD', 0)
+    if inc == 0 and exp == 0: return None
 
-    date_range_str = f"{start_date.strftime('%b %d, %Y')} to " \
-                     f"{end_date.strftime('%b %d, %Y')}"
-
-    labels = ['Income', 'Expense']
-    values = [income, expense]
-    colors = ['#4CAF50', '#F44336']
     fig, ax = plt.subplots(figsize=(6, 5))
-
-    ax.set_title('Operational Income vs. Expense', pad=20)
-    plt.suptitle(date_range_str, y=0.93, fontsize=10)
-
-    bars = ax.bar(labels, values, color=colors)
+    ax.set_title('Operational Income vs. Expense')
+    ax.bar(['Income', 'Expense'], [inc, exp], color=['#4CAF50', '#F44336'])
     ax.set_ylabel('Amount (USD)')
     ax.spines[['top', 'right']].set_visible(False)
-
-    for bar in bars:
-        yval = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width() / 2.0, yval,
-                 f'${yval:,.2f}', va='bottom', ha='center')
 
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight')
@@ -381,47 +211,20 @@ def _create_income_expense_chart(data, start_date, end_date):
 
 
 def _create_spending_line_chart(data, start_date, end_date):
-    """Creates a line chart for spending over time."""
-    spending_data = data.get('spendingOverTime', [])
-    if not spending_data:
-        return None
+    spending = data.get('spendingOverTime', [])
+    if not spending: return None
 
-    df = pd.DataFrame(spending_data)
+    df = pd.DataFrame(spending)
     df['date'] = pd.to_datetime(df['date'])
-    df = df.set_index('date')
+    df = df.set_index('date').reindex(pd.date_range(start_date, end_date), fill_value=0)
 
-    full_date_range = pd.date_range(start=start_date, end=end_date)
-    df = df.reindex(full_date_range, fill_value=0)
-
-    if df['total_spent_usd'].sum() == 0:
-        return None
+    if df['total_spent_usd'].sum() == 0: return None
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(df.index, df['total_spent_usd'],
-            marker='o', linestyle='-', markersize=4)
+    ax.plot(df.index, df['total_spent_usd'], marker='o', linestyle='-')
     ax.fill_between(df.index, df['total_spent_usd'], color='skyblue', alpha=0.3)
-
-    date_range_str = f"{start_date.strftime('%b %d, %Y')} to " \
-                     f"{end_date.strftime('%b %d, %Y')}"
-    ax.set_title('Spending Over Time (USD)', pad=20)
-    plt.suptitle(date_range_str, y=0.93, fontsize=10)
-    ax.set_ylabel('Amount Spent (USD)')
-    ax.spines[['top', 'right']].set_visible(False)
-    ax.grid(axis='y', linestyle='--', alpha=0.7)
-
-    num_days = len(df)
-    if num_days <= 10:
-        date_fmt = mdates.DateFormatter('%b %d')
-        ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
-    elif num_days <= 90:
-        date_fmt = mdates.DateFormatter('%b %d')
-        ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=1,
-                                                         byweekday=mdates.MO))
-    else:
-        date_fmt = mdates.DateFormatter('%b %Y')
-        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
-
-    ax.xaxis.set_major_formatter(date_fmt)
+    ax.set_title('Spending Over Time (USD)')
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
     fig.autofmt_xdate()
 
     buf = io.BytesIO()
@@ -432,48 +235,25 @@ def _create_spending_line_chart(data, start_date, end_date):
 
 
 def _create_expense_pie_chart(data, start_date, end_date):
-    """Creates a pie chart for the expense breakdown."""
-    expense_breakdown = data.get('expenseBreakdown', [])
-    total_expense = data.get('summary', {}).get('totalExpenseUSD', 0)
-    if not expense_breakdown or total_expense == 0:
-        return None
+    breakdown = data.get('expenseBreakdown', [])
+    total = data.get('summary', {}).get('totalExpenseUSD', 0)
+    if not breakdown or total == 0: return None
 
-    threshold = 4.0
-    new_labels = []
-    new_sizes = []
-    other_total = 0
+    labels, sizes, other = [], [], 0
+    for item in breakdown:
+        if (item['totalUSD'] / total) * 100 < 4.0:
+            other += item['totalUSD']
+        else:
+            labels.append(item['category'])
+            sizes.append(item['totalUSD'])
 
-    if total_expense > 0:
-        for item in expense_breakdown:
-            percentage = (item['totalUSD'] / total_expense) * 100
-            if percentage < threshold:
-                other_total += item['totalUSD']
-            else:
-                new_labels.append(item['category'])
-                new_sizes.append(item['totalUSD'])
-
-    if other_total > 0:
-        new_labels.append('Other')
-        new_sizes.append(other_total)
-
-    labels = new_labels
-    sizes = new_sizes
-
-    date_range_str = f"{start_date.strftime('%b %d, %Y')} to " \
-                     f"{end_date.strftime('%b %d, %Y')}"
-
-    explode = [0] * len(labels)
-    if sizes:
-        explode[sizes.index(max(sizes))] = 0.05
+    if other > 0:
+        labels.append('Other')
+        sizes.append(other)
 
     fig, ax = plt.subplots(figsize=(7, 6))
-    ax.set_title('Expense Breakdown', pad=20)
-    plt.suptitle(date_range_str, y=0.93, fontsize=10)
-
-    ax.pie(sizes, labels=labels, autopct='%1.1f%%',
-           startangle=90, pctdistance=0.85, explode=explode)
-    ax.axis('equal')
-    fig.gca().add_artist(plt.Circle((0, 0), 0.70, fc='white'))
+    ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
+    ax.set_title('Expense Breakdown')
 
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight')
@@ -482,97 +262,14 @@ def _create_expense_pie_chart(data, start_date, end_date):
     return buf.getvalue()
 
 
-def _format_habits_message(data):
-    """Formats the spending habits data into a readable string."""
-    if not data:
-        return "Could not analyze spending habits."
-
-    day_text = "\n<b>📅 Spending by Day of Week:</b>\n"
-    by_day = sorted(data.get('byDayOfWeek', []),
-                    key=lambda x: x.get('total', 0), reverse=True)
-    day_text += "\n".join([
-        f"    - {item['day']}s: ${item['total']:,.2f}" for item in by_day
-    ]) or "    - Not enough data.\n"
-
-    keyword_text = "\n<b>🏷️ Common Spending Keywords:</b>\n"
-    by_keyword = data.get('keywordsByCategory', [])
-    if by_keyword:
-        for item in by_keyword:
-            if item.get('topKeywords'):
-                keywords = ", ".join(item['topKeywords'])
-                keyword_text += f"    - <b>{item['category']}:</b> {keywords}\n"
-    else:
-        keyword_text += "    - No descriptions found to analyze.\n"
-
-    return day_text + keyword_text
-
-
-def _format_debt_analysis_message(analysis_data,
-                                  context: ContextTypes.DEFAULT_TYPE):
-    """Formats the text summary for the debt analysis."""
-    lent_by = [d for d in analysis_data.get('concentration', [])
-               if d['type'] == 'lent']
-    borrow_from = [d for d in analysis_data.get('concentration', [])
-                   if d['type'] == 'borrowed']
-
-    lent_text = t('iou.analysis_lent_header', context)
-    lent_text += "\n".join([
-        t('iou.analysis_item', context,
-          person=item['person'], total=item['total'])
-        for item in lent_by[:3]
-    ]) or t('iou.analysis_lent_none', context)
-
-    borrow_text = t('iou.analysis_borrow_header', context)
-    borrow_text += "\n".join([
-        t('iou.analysis_item', context,
-          person=item['person'], total=item['total'])
-        for item in borrow_from[:3]
-    ]) or t('iou.analysis_borrow_none', context)
-
-    aging_text = t('iou.analysis_aging_header', context)
-    aging_data = analysis_data.get('aging', [])
-    aging_text += "\n".join([
-        t('iou.analysis_aging_item', context,
-          person=item['_id'], days=item['averageAgeDays'],
-          count=item['count'])
-        for item in aging_data[:3]
-    ]) or t('iou.analysis_aging_none', context)
-
-    return (
-        f"{t('iou.analysis_header', context)}\n"
-        f"{lent_text}\n{borrow_text}\n{aging_text}"
-    )
-
-
-def _create_debt_overview_pie(analysis_data):
-    """Creates a pie chart for total owed vs. total lent in USD."""
-    overview = analysis_data.get('overview_usd', {})
-    lent_usd = overview.get('total_lent_usd', 0)
-    borrowed_usd = overview.get('total_borrowed_usd', 0)
-
-    if lent_usd == 0 and borrowed_usd == 0:
-        return None
-
-    labels = ['You Are Owed', 'You Owe']
-    sizes = [lent_usd, borrowed_usd]
-    colors = ['#4CAF50', '#F44336']
-    explode = (0.05, 0)
+def _create_debt_overview_pie(data):
+    usd = data.get('overview_usd', {})
+    lent, borrowed = usd.get('total_lent_usd', 0), usd.get('total_borrowed_usd', 0)
+    if lent == 0 and borrowed == 0: return None
 
     fig, ax = plt.subplots(figsize=(7, 6))
-    ax.set_title('Debt Overview (USD Equivalent)', pad=20)
-
-    wedges, texts, autotexts = ax.pie(
-        sizes,
-        labels=labels,
-        autopct=lambda p: f'${p * sum(sizes) / 100:,.2f}\n({p:.1f}%)',
-        startangle=90,
-        pctdistance=0.75,
-        explode=explode,
-        colors=colors
-    )
-    plt.setp(autotexts, size=10, weight="bold", color="white")
-    ax.axis('equal')
-    fig.gca().add_artist(plt.Circle((0, 0), 0.60, fc='white'))
+    ax.pie([lent, borrowed], labels=['You Are Owed', 'You Owe'], autopct='%1.1f%%', colors=['#4CAF50', '#F44336'])
+    ax.set_title('Debt Overview (USD)')
 
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight')
@@ -581,63 +278,28 @@ def _create_debt_overview_pie(analysis_data):
     return buf.getvalue()
 
 
-def _create_debt_concentration_bar(analysis_data):
-    """Creates a horizontal bar chart for debt concentration by person."""
-    concentration = analysis_data.get('concentration', [])
-    if not concentration:
-        return None
+def _create_debt_concentration_bar(data):
+    conc = data.get('concentration', [])
+    if not conc: return None
 
-    lent_data = sorted(
-        [d for d in concentration if d['type'] == 'lent'],
-        key=lambda x: x['total'], reverse=True
-    )[:5]
-    borrow_data = sorted(
-        [d for d in concentration if d['type'] == 'borrowed'],
-        key=lambda x: x['total'], reverse=True
-    )[:5]
+    lent = sorted([d for d in conc if d['type'] == 'lent'], key=lambda x: x['total'], reverse=True)[:5]
+    borrow = sorted([d for d in conc if d['type'] == 'borrowed'], key=lambda x: x['total'], reverse=True)[:5]
 
-    if not lent_data and not borrow_data:
-        return None
+    if not lent and not borrow: return None
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6), sharey=False)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
 
-    # Plot 1: You Are Owed (Lent)
-    if lent_data:
-        people_lent = [d['person'] for d in lent_data]
-        amounts_lent = [d['total'] for d in lent_data]
-        ax1.barh(people_lent, amounts_lent, color='#4CAF50')
+    if lent:
+        ax1.barh([d['person'] for d in lent], [d['total'] for d in lent], color='#4CAF50')
         ax1.set_title('You Are Owed (Top 5)')
-        ax1.set_xlabel('Amount (USD Equivalent)')
         ax1.invert_yaxis()
-        for i, v in enumerate(amounts_lent):
-            ax1.text(v + 1, i, f' ${v:,.2f}', va='center', color='black')
-    else:
-        ax1.set_title('You Are Owed')
-        ax1.text(0.5, 0.5, 'No data',
-                 horizontalalignment='center', verticalalignment='center',
-                 transform=ax1.transAxes)
-    ax1.spines[['top', 'right']].set_visible(False)
 
-    # Plot 2: You Owe (Borrowed)
-    if borrow_data:
-        people_borrow = [d['person'] for d in borrow_data]
-        amounts_borrow = [d['total'] for d in borrow_data]
-        ax2.barh(people_borrow, amounts_borrow, color='#F44336')
+    if borrow:
+        ax2.barh([d['person'] for d in borrow], [d['total'] for d in borrow], color='#F44336')
         ax2.set_title('You Owe (Top 5)')
-        ax2.set_xlabel('Amount (USD Equivalent)')
         ax2.invert_yaxis()
-        for i, v in enumerate(amounts_borrow):
-            ax2.text(v + 1, i, f' ${v:,.2f}', va='center', color='black')
-    else:
-        ax2.set_title('You Owe')
-        ax2.text(0.5, 0.5, 'No data',
-                 horizontalalignment='center', verticalalignment='center',
-                 transform=ax2.transAxes)
-    ax2.spines[['top', 'right']].set_visible(False)
 
-    plt.suptitle('Debt Concentration', fontsize=16, y=1.02)
-    plt.tight_layout(pad=2.0)
-
+    plt.tight_layout()
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight')
     plt.close(fig)
@@ -645,75 +307,42 @@ def _create_debt_concentration_bar(analysis_data):
     return buf.getvalue()
 
 
-# --- NEW CSV EXPORT HELPERS ---
+# --- CSV Exports ---
 
-def _create_csv_from_transactions(transactions_data: list) -> io.BytesIO:
-    """Converts a list of transaction dicts into an in-memory CSV file."""
+def _create_csv_from_transactions(data):
     output = io.StringIO()
     writer = csv.writer(output)
+    writer.writerow(["Date", "Type", "Amount", "Currency", "Category", "Description", "ID"])
 
-    # Write Header
-    headers = [
-        "Date (Local)", "Type", "Amount", "Currency",
-        "Category", "Description", "Transaction ID"
-    ]
-    writer.writerow(headers)
-
-    # Write Data
-    for tx in transactions_data:
-        dt_utc = datetime.fromisoformat(tx['timestamp'])
-        dt_local = dt_utc.astimezone(PHNOM_PENH_TZ)
+    for tx in data:
+        dt = datetime.fromisoformat(tx['timestamp']).astimezone(PHNOM_PENH_TZ)
         writer.writerow([
-            dt_local.strftime('%Y-%m-%d %H:%M:%S'),
-            tx.get('type'),
-            tx.get('amount'),
-            tx.get('currency'),
-            tx.get('categoryId'),
-            tx.get('description', ''),
-            tx.get('_id')
+            dt.strftime('%Y-%m-%d %H:%M:%S'),
+            tx.get('type'), tx.get('amount'), tx.get('currency'),
+            tx.get('categoryId'), tx.get('description', ''), tx.get('_id')
         ])
 
-    # Convert to BytesIO
-    buffer = io.BytesIO()
-    buffer.write(output.getvalue().encode('utf-8'))
-    buffer.seek(0)
-    output.close()
-    return buffer
+    buf = io.BytesIO()
+    buf.write(output.getvalue().encode('utf-8'))
+    buf.seek(0)
+    return buf
 
 
-def _create_csv_from_debts(debts_data: list) -> io.BytesIO:
-    """Converts a list of debt dicts into an in-memory CSV file."""
+def _create_csv_from_debts(data):
     output = io.StringIO()
     writer = csv.writer(output)
+    writer.writerow(["Date", "Type", "Person", "Original", "Remaining", "Currency", "Status", "Purpose", "ID"])
 
-    # Write Header
-    headers = [
-        "Date Created (Local)", "Type", "Person", "Original Amount",
-        "Remaining Amount", "Currency", "Status", "Purpose", "Debt ID"
-    ]
-    writer.writerow(headers)
-
-    # Write Data
-    for debt in debts_data:
-        dt_utc = datetime.fromisoformat(debt['created_at'])
-        dt_local = dt_utc.astimezone(PHNOM_PENH_TZ)
+    for d in data:
+        dt = datetime.fromisoformat(d['created_at']).astimezone(PHNOM_PENH_TZ)
         writer.writerow([
-            dt_local.strftime('%Y-%m-%d %H:%M:%S'),
-            debt.get('type'),
-            debt.get('person'),
-            debt.get('originalAmount'),
-            debt.get('remainingAmount'),
-            debt.get('currency'),
-            debt.get('status'),
-            debt.get('purpose', ''),
-            debt.get('_id')
+            dt.strftime('%Y-%m-%d'),
+            d.get('type'), d.get('person'), d.get('originalAmount'),
+            d.get('remainingAmount'), d.get('currency'), d.get('status'),
+            d.get('purpose', ''), d.get('_id')
         ])
 
-    # Convert to BytesIO
-    buffer = io.BytesIO()
-    buffer.write(output.getvalue().encode('utf-8'))
-    buffer.seek(0)
-    output.close()
-    return buffer
-
-# --- End of modified file ---
+    buf = io.BytesIO()
+    buf.write(output.getvalue().encode('utf-8'))
+    buf.seek(0)
+    return buf

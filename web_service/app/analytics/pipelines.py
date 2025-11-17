@@ -1,8 +1,7 @@
-from datetime import datetime, time
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
-UTC_TZ = ZoneInfo("UTC")
 
 FINANCIAL_TRANSACTION_CATEGORIES = [
     'Loan Lent', 'Debt Repayment', 'Loan Received', 'Debt Settled', 'Initial Balance'
@@ -10,9 +9,7 @@ FINANCIAL_TRANSACTION_CATEGORIES = [
 
 
 def get_currency_conversion_stage(user_rate):
-    """
-    Returns the $addFields stage for converting amounts to USD.
-    """
+    """Returns the $addFields stage for converting amounts to USD."""
     return {
         '$addFields': {
             'amount_in_usd': {
@@ -20,16 +17,16 @@ def get_currency_conversion_stage(user_rate):
                     'if': {'$eq': ['$currency', 'USD']},
                     'then': '$amount',
                     'else': {
-                        '$let': {
-                            'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', user_rate]}},
-                            'in': {
+                        '$divide': [
+                            '$amount',
+                            {
                                 '$cond': {
-                                    'if': {'$gt': ['$$rate', 0]},
-                                    'then': {'$divide': ['$amount', '$$rate']},
-                                    'else': {'$divide': ['$amount', user_rate]}
+                                    'if': {'$gt': [{'$ifNull': ['$exchangeRateAtTime', user_rate]}, 0]},
+                                    'then': {'$ifNull': ['$exchangeRateAtTime', user_rate]},
+                                    'else': user_rate
                                 }
                             }
-                        }
+                        ]
                     }
                 }
             }
@@ -38,9 +35,7 @@ def get_currency_conversion_stage(user_rate):
 
 
 def build_search_pipeline(match_stage):
-    """
-    Builds the pipeline for transaction search analytics.
-    """
+    """Builds the pipeline for transaction search analytics."""
     return [
         {'$match': match_stage},
         {
@@ -58,49 +53,41 @@ def build_search_pipeline(match_stage):
 
 
 def build_start_balance_pipeline(start_date_utc, user_match, user_rate):
-    """
-    Calculates income and expenses prior to the start date.
-    """
-    conversion_stage = get_currency_conversion_stage(user_rate)
+    """Calculates income and expenses prior to the start date."""
     return [
         {'$match': {'timestamp': {'$lt': start_date_utc}, **user_match}},
-        conversion_stage,
+        get_currency_conversion_stage(user_rate),
         {'$group': {'_id': '$type', 'totalUSD': {'$sum': '$amount_in_usd'}}}
     ]
 
 
 def build_faceted_report_pipeline(date_range_match, user_match, user_rate):
-    """
-    Combines operational, financial, flow, spending, and stats into a single
-    $facet aggregation to minimize database round trips.
-    """
+    """Combines multiple analytical views into a single $facet aggregation."""
     conversion_stage = get_currency_conversion_stage(user_rate)
+    base_match = {**date_range_match, **user_match}
 
-    # Common match and conversion happens BEFORE the facet to avoid repeating it 6 times
+    non_financial_match = {'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}}
+
     return [
-        {'$match': {**date_range_match, **user_match}},
+        {'$match': base_match},
         conversion_stage,
         {
             '$facet': {
-                # 1. Operational (Income/Expense breakdown, excluding financial)
                 'operational': [
                     {'$match': {'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}}},
                     {'$group': {'_id': {'type': '$type', 'category': '$categoryId'},
                                 'total': {'$sum': '$amount_in_usd'}}},
                     {'$sort': {'total': -1}}
                 ],
-                # 2. Financial (Loan/Debt activity)
                 'financial': [
                     {'$match': {'categoryId': {'$in': FINANCIAL_TRANSACTION_CATEGORIES}}},
                     {'$group': {'_id': '$categoryId', 'total': {'$sum': '$amount_in_usd'}}}
                 ],
-                # 3. Total Flow (For end balance calc)
                 'total_flow': [
                     {'$group': {'_id': '$type', 'totalUSD': {'$sum': '$amount_in_usd'}}}
                 ],
-                # 4. Spending Over Time (Daily expense totals)
                 'spending_over_time': [
-                    {'$match': {'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}}},
+                    {'$match': non_financial_match},
                     {
                         '$project': {
                             'date': {'$dateToString': {'format': '%Y-%m-%d', 'date': '$timestamp',
@@ -110,11 +97,10 @@ def build_faceted_report_pipeline(date_range_match, user_match, user_rate):
                     },
                     {'$group': {'_id': '$date', 'total_spent_usd': {'$sum': '$amount_in_usd'}}},
                     {'$sort': {'_id': 1}},
-                    {'$project': {'_id': 0, 'date': '$_id', 'total_spent_usd': '$total_spent_usd'}}
+                    {'$project': {'_id': 0, 'date': '$_id', 'total_spent_usd': 1}}
                 ],
-                # 5. Daily Stats (Most/Least expensive days)
                 'daily_stats': [
-                    {'$match': {'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}}},
+                    {'$match': non_financial_match},
                     {
                         '$group': {
                             '_id': {'$dateToString': {'format': '%Y-%m-%d', 'date': '$timestamp',
@@ -124,9 +110,8 @@ def build_faceted_report_pipeline(date_range_match, user_match, user_rate):
                     },
                     {'$sort': {'total_spent_usd': -1}}
                 ],
-                # 6. Top Expense (Single largest expense)
                 'top_expense': [
-                    {'$match': {'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}}},
+                    {'$match': non_financial_match},
                     {'$sort': {'amount_in_usd': -1}},
                     {'$limit': 1},
                     {
@@ -146,11 +131,13 @@ def build_faceted_report_pipeline(date_range_match, user_match, user_rate):
 
 
 def build_habits_pipeline(start_date_utc, end_date_utc, user_match, user_rate):
-    """
-    Pipelines for spending habits (Day of Week, Keywords).
-    """
+    """Pipelines for spending habits (Day of Week, Keywords)."""
     conversion_stage = get_currency_conversion_stage(user_rate)
-    match_base = {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc}, 'type': 'expense', **user_match}
+    match_base = {
+        'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc},
+        'type': 'expense',
+        **user_match
+    }
 
     day_of_week = [
         {'$match': match_base},
@@ -176,10 +163,7 @@ def build_habits_pipeline(start_date_utc, end_date_utc, user_match, user_rate):
     ]
 
     keywords = [
-        {'$match': {
-            **match_base,
-            'description': {'$exists': True, '$ne': ''}
-        }},
+        {'$match': {**match_base, 'description': {'$exists': True, '$ne': ''}}},
         {'$group': {
             '_id': {'category': '$categoryId', 'keyword': {'$toLower': '$description'}},
             'count': {'$sum': 1}
@@ -190,7 +174,8 @@ def build_habits_pipeline(start_date_utc, end_date_utc, user_match, user_rate):
             'topKeywordsWithCount': {'$push': {'keyword': '$_id.keyword', 'count': '$count'}}
         }},
         {'$project': {
-            '_id': 0, 'category': '$_id',
+            '_id': 0,
+            'category': '$_id',
             'topKeywords': {'$slice': ['$topKeywordsWithCount.keyword', 3]}
         }}
     ]

@@ -3,16 +3,16 @@ import requests
 from flask import Flask, jsonify, current_app
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+
 from .config import Config
 from app.utils.db import get_db, close_db
-from app.jobs import run_scheduled_report, send_daily_reminder_job, send_telegram_message
+from app.jobs import run_scheduled_report, send_daily_reminder_job
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 log = logging.getLogger(__name__)
-
 
 def create_app():
     app = Flask(__name__)
@@ -28,28 +28,58 @@ def create_app():
 
     app.teardown_appcontext(close_db)
 
-    # Initialize Scheduler
+    _init_scheduler(app)
+    _register_blueprints(app)
+    _register_health_routes(app)
+
+    return app
+
+def _init_scheduler(app):
+    """Initialize and start the background scheduler."""
     scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Phnom_Penh')
 
     # Daily Reminder (9 PM)
-    scheduler.add_job(send_daily_reminder_job, trigger=CronTrigger(hour=21, minute=0), id='daily_reminder',
-                      replace_existing=True)
+    scheduler.add_job(
+        send_daily_reminder_job,
+        trigger=CronTrigger(hour=21, minute=0),
+        id='daily_reminder',
+        replace_existing=True
+    )
 
-    # Reports
-    scheduler.add_job(run_scheduled_report, args=['weekly'], trigger=CronTrigger(day_of_week='mon', hour=8, minute=0),
-                      id='weekly_report', replace_existing=True)
-    scheduler.add_job(run_scheduled_report, args=['monthly'], trigger=CronTrigger(day=1, hour=8, minute=30),
-                      id='monthly_report', replace_existing=True)
-    scheduler.add_job(run_scheduled_report, args=['semesterly'],
-                      trigger=CronTrigger(month='1,7', day=1, hour=9, minute=0), id='semesterly_report',
-                      replace_existing=True)
-    scheduler.add_job(run_scheduled_report, args=['yearly'], trigger=CronTrigger(month=1, day=1, hour=9, minute=30),
-                      id='yearly_report', replace_existing=True)
+    # Scheduled Reports
+    scheduler.add_job(
+        run_scheduled_report,
+        args=['weekly'],
+        trigger=CronTrigger(day_of_week='mon', hour=8, minute=0),
+        id='weekly_report',
+        replace_existing=True
+    )
+    scheduler.add_job(
+        run_scheduled_report,
+        args=['monthly'],
+        trigger=CronTrigger(day=1, hour=8, minute=30),
+        id='monthly_report',
+        replace_existing=True
+    )
+    scheduler.add_job(
+        run_scheduled_report,
+        args=['semesterly'],
+        trigger=CronTrigger(month='1,7', day=1, hour=9, minute=0),
+        id='semesterly_report',
+        replace_existing=True
+    )
+    scheduler.add_job(
+        run_scheduled_report,
+        args=['yearly'],
+        trigger=CronTrigger(month=1, day=1, hour=9, minute=30),
+        id='yearly_report',
+        replace_existing=True
+    )
 
     scheduler.start()
     app.scheduler = scheduler
 
-    # Register Blueprints
+def _register_blueprints(app):
     from .settings.routes import settings_bp
     from .analytics.routes import analytics_bp
     from .transactions.routes import transactions_bp
@@ -66,6 +96,7 @@ def create_app():
     app.register_blueprint(reminders_bp)
     app.register_blueprint(users_bp)
 
+def _register_health_routes(app):
     @app.route("/health")
     def health_check():
         return jsonify({"status": "ok"})
@@ -88,5 +119,3 @@ def create_app():
             return jsonify({"ok": True, "db": current_app.config['DB_NAME']})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
-
-    return app

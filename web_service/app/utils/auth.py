@@ -1,21 +1,17 @@
-# --- web_service/app/utils/auth.py (Fixed) ---
-
-import os
 import requests
 from functools import wraps
 from flask import request, jsonify, g, current_app
 from requests.auth import HTTPBasicAuth
 from cachetools import TTLCache
 
-# Cache validation results for 5 minutes (300 seconds) to reduce upstream API load
+# Cache validation results for 5 minutes (300 seconds)
 # Max size 1024 tokens
 _token_cache = TTLCache(maxsize=1024, ttl=300)
 
-# Define role hierarchy for gating
 ROLE_HIERARCHY = {
     "user": 1,
     "premium_user": 2,
-    "admin": 99  # Bifrost 'admin' role, not used for gating but good to have
+    "admin": 99
 }
 
 
@@ -27,9 +23,8 @@ def _get_role_level(role_name):
 def _validate_token_with_bifrost(token, bifrost_url, client_id, client_secret):
     """
     Validates token against Bifrost.
-    Returns a tuple: (success_bool, data_dict_or_error_message, status_code)
+    Returns: (success_bool, data_dict_or_error, status_code)
     """
-    # Check cache first
     if token in _token_cache:
         return _token_cache[token]
 
@@ -41,9 +36,7 @@ def _validate_token_with_bifrost(token, bifrost_url, client_id, client_secret):
         response = requests.post(validate_url, auth=auth, json=payload, timeout=5)
 
         if response.status_code == 200:
-            data = response.json()
-            result = (True, data, 200)
-            # Only cache successful or explicitly invalid token responses (not server errors)
+            result = (True, response.json(), 200)
             _token_cache[token] = result
             return result
 
@@ -63,72 +56,61 @@ def _validate_token_with_bifrost(token, bifrost_url, client_id, client_secret):
 
 def auth_required(min_role="user"):
     """
-    Decorator to protect routes.
-    Validates a JWT against the Bifrost /internal/validate-token endpoint.
+    Decorator to protect routes using Bifrost JWT validation.
     Populates g.account_id and g.role on success.
-    Uses caching to avoid per-request external calls.
     """
 
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             auth_header = request.headers.get("Authorization")
-            token = None
-
             if not auth_header:
                 return jsonify({"error": "Authorization header is missing"}), 401
 
             try:
-                # Faster string split
                 scheme, token = auth_header.split(maxsplit=1)
                 if scheme.lower() != 'bearer':
-                    return jsonify({"error": "Invalid Authorization header format"}), 401
+                    raise ValueError("Invalid scheme")
             except ValueError:
                 return jsonify({"error": "Invalid Authorization header format"}), 401
 
-            # --- Server-to-Server Bifrost Call ---
-            bifrost_url = current_app.config.get("BIFROST_URL")
-            client_id = current_app.config.get("BIFROST_CLIENT_ID")
-            client_secret = current_app.config.get("BIFROST_CLIENT_SECRET")
-
-            if not bifrost_url or not client_id or not client_secret:
-                current_app.logger.error("Bifrost env vars (URL, ID, SECRET) are not set.")
+            # Config Check
+            config = current_app.config
+            if not all(
+                    [config.get("BIFROST_URL"), config.get("BIFROST_CLIENT_ID"), config.get("BIFROST_CLIENT_SECRET")]):
+                current_app.logger.error("Bifrost env vars are not set.")
                 return jsonify({"error": "Authentication system is misconfigured"}), 500
 
-            # Perform validation (cached)
+            # Validate Token
             success, data, status_code = _validate_token_with_bifrost(
-                token, bifrost_url, client_id, client_secret
+                token,
+                config["BIFROST_URL"],
+                config["BIFROST_CLIENT_ID"],
+                config["BIFROST_CLIENT_SECRET"]
             )
 
-            if success:
-                if data.get("is_valid"):
-                    # --- SUCCESS ---
-                    user_role = data.get("app_specific_role", "user")
-                    user_level = _get_role_level(user_role)
-                    min_level = _get_role_level(min_role)
+            if not success:
+                if "error" in data and status_code == 500:
+                    current_app.logger.error(f"Bifrost auth failed: {data}")
+                return jsonify(data), status_code
 
-                    if user_level < min_level:
-                        current_app.logger.warning(
-                            f"Auth denied for {data.get('account_id')}: "
-                            f"Role '{user_role}' < min_role '{min_role}'"
-                        )
-                        return jsonify({"error": "Forbidden: Insufficient role"}), 403
+            if not data.get("is_valid"):
+                current_app.logger.warning(f"Bifrost validation failed: {data.get('error')}")
+                return jsonify({"error": "Invalid or expired token"}), 401
 
-                    # Populate g for this request context
-                    g.account_id = data.get("account_id")
-                    g.role = user_role
+            # Check Role
+            user_role = data.get("app_specific_role", "user")
+            if _get_role_level(user_role) < _get_role_level(min_role):
+                current_app.logger.warning(
+                    f"Auth denied for {data.get('account_id')}: Role '{user_role}' < min_role '{min_role}'"
+                )
+                return jsonify({"error": "Forbidden: Insufficient role"}), 403
 
-                    return f(*args, **kwargs)
-                else:
-                    # Token processed but invalid
-                    current_app.logger.warning(f"Bifrost validation failed: {data.get('error')}")
-                    return jsonify({"error": "Invalid or expired token"}), 401
+            # Context Setup
+            g.account_id = data.get("account_id")
+            g.role = user_role
 
-            # Failure in validation communication
-            if "error" in data and status_code == 500:
-                current_app.logger.error(f"Bifrost auth failed (401 upstream or config error): {data}")
-
-            return jsonify(data), status_code
+            return f(*args, **kwargs)
 
         return decorated_function
 

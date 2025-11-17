@@ -1,89 +1,65 @@
-# --- Start of new file: telegram_bot/utils/i18n.py ---
 import json
 import os
+import logging
 from telegram.ext import ContextTypes
 
-# In-memory cache for translations
-translations = {}
+log = logging.getLogger(__name__)
+
+_translations = {}
 SUPPORTED_LANGUAGES = ['en', 'km']
 DEFAULT_LANGUAGE = 'en'
 
 
 def load_translations():
-    """
-    Loads all translation files from the 'locales' directory into memory.
-    """
-    global translations
-    if translations:
-        return  # Already loaded
+    """Loads translation files into memory."""
+    if _translations:
+        return
 
-    locales_dir = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), 'locales'
-    )
-    print(f"Loading translations from: {locales_dir}")
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+    locales_dir = os.path.join(base_dir, 'locales')
 
     for lang in SUPPORTED_LANGUAGES:
         file_path = os.path.join(locales_dir, f'{lang}.json')
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                translations[lang] = json.load(f)
-                print(f"Successfully loaded '{lang}' locale.")
-        except FileNotFoundError:
-            print(f"Warning: Translation file not found for '{lang}'")
-        except json.JSONDecodeError:
-            print(f"Error: Could not decode JSON for '{lang}'")
+                _translations[lang] = json.load(f)
+                log.info(f"Loaded locale: {lang}")
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            log.error(f"Failed to load locale '{lang}': {e}")
 
-    if DEFAULT_LANGUAGE not in translations:
-        raise RuntimeError(
-            f"Default language '{DEFAULT_LANGUAGE}' file is missing or invalid."
-        )
+    if DEFAULT_LANGUAGE not in _translations:
+        raise RuntimeError(f"Default language '{DEFAULT_LANGUAGE}' could not be loaded.")
 
 
 def t(key: str, context: ContextTypes.DEFAULT_TYPE, **kwargs) -> str:
     """
-    Translates a given key into the user's preferred language.
-    Args:
-        key: The dot-separated key (e.g., "common.welcome").
-        context: The bot's context, used to find the user's profile.
-        **kwargs: Variables to format into the string.
-    Returns:
-        The translated and formatted string.
+    Translates a dot-separated key into the user's preferred language.
+    Example: t("common.welcome", context, name="User")
     """
-    if not translations:
+    if not _translations:
         load_translations()
 
-    # 1. Get user's language from cached profile
+    # Determine language
     lang = DEFAULT_LANGUAGE
-
-    # --- THIS IS THE FIX ---
-    # The decorator caches at 'profile', not 'user_profile'
     if context.user_data and 'profile' in context.user_data:
-        lang = (
-            context.user_data['profile']
-            .get('settings', {})
-            .get('language', DEFAULT_LANGUAGE)
-        )
-    # --- END FIX ---
+        lang = context.user_data['profile'].get('settings', {}).get('language', DEFAULT_LANGUAGE)
 
-    if lang not in SUPPORTED_LANGUAGES:
+    if lang not in _translations:
         lang = DEFAULT_LANGUAGE
 
-    # 2. Navigate the dot-separated key
+    # Lookup key
     try:
-        keys = key.split('.')
-        temp_translation = translations.get(lang, translations[DEFAULT_LANGUAGE])
-        for k in keys:
-            temp_translation = temp_translation[k]
+        value = _translations[lang]
+        for k in key.split('.'):
+            value = value[k]
 
-        # 3. Format the string
-        return temp_translation.format(**kwargs)
+        if isinstance(value, str):
+            return value.format(**kwargs)
+        return key
 
     except (KeyError, TypeError):
-        # Fallback: return the key itself
-        print(f"Translation key not found: '{key}' for lang '{lang}'")
+        log.warning(f"Translation missing for key '{key}' in lang '{lang}'")
         return key
     except Exception as e:
-        print(f"Error during translation of key '{key}': {e}")
+        log.error(f"Translation error for '{key}': {e}")
         return key
-
-# --- End of new file ---
