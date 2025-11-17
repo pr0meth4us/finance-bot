@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify, current_app, g
 from datetime import datetime
 from bson import ObjectId
 
-from app import send_telegram_message
+from app.jobs import send_telegram_message
 from app.utils.db import reminders_collection
 from app.utils.auth import auth_required
 

@@ -176,7 +176,7 @@ async def _execute_search(message, context):
                 dt = datetime.fromisoformat(tx['timestamp']).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
                 fmt = ",.0f" if tx['currency'] == 'KHR' else ",.2f"
 
-                # Fix: Calculate string parts outside of nested f-string to avoid SyntaxError in Python 3.11
+                # Fix: Calculate string parts outside nested f-string to avoid SyntaxError in Python 3.11
                 amount_str = f"{tx['amount']:{fmt}}"
                 desc_str = tx.get('description', 'N/A')
 
