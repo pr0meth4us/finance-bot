@@ -12,6 +12,8 @@ BASE_URL = os.getenv("WEB_SERVICE_URL")
 BIFROST_URL = os.getenv("BIFROST_BASE_URL")
 BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")  # Client ID for the *bot app*
 
+# Global session for connection pooling
+_session = requests.Session()
 
 # --- NEW: Custom Exception for Gating ---
 class PremiumFeatureException(Exception):
@@ -22,16 +24,20 @@ class PremiumFeatureException(Exception):
 def _make_request(method, url, jwt, **kwargs):
     """
     A helper function to make authenticated requests and handle common errors.
+    Uses a persistent session for performance.
     """
     headers = kwargs.pop("headers", {})
     if jwt:
         headers["Authorization"] = f"Bearer {jwt}"
 
     try:
-        res = requests.request(method, url, headers=headers, timeout=10, **kwargs)
+        # Use the global session object
+        res = _session.request(method, url, headers=headers, timeout=10, **kwargs)
 
         # Check for premium feature denial
         if res.status_code == 403:
+            # Try to detect if it's a premium gating issue based on content or context
+            # (Assuming standard 403 implies permission issues here)
             raise PremiumFeatureException("This feature requires a premium subscription.")
 
         # Raise other HTTP errors
@@ -69,7 +75,7 @@ def bifrost_telegram_login(telegram_id):
         "telegram_id": str(telegram_id)
     }
     try:
-        res = requests.post(url, json=payload, timeout=10)
+        res = _session.post(url, json=payload, timeout=10)
         res.raise_for_status()
         data = res.json()
         if "jwt" in data:

@@ -2,9 +2,7 @@
 
 from flask import Blueprint, request, jsonify, g
 from datetime import datetime, time, timedelta
-# --- THIS IS THE FIX ---
 from bson import ObjectId
-# --- END FIX ---
 from app.utils.currency import get_live_usd_to_khr_rate
 import re
 from zoneinfo import ZoneInfo
@@ -56,15 +54,13 @@ def serialize_tx(tx):
 
 
 @transactions_bp.route('/', methods=['POST'])
-@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")
 def add_transaction():
     """Adds a transaction for an authenticated user."""
-    # --- THIS IS THE FIX ---
     try:
         account_id = ObjectId(g.account_id)
     except Exception:
         return jsonify({'error': 'Invalid account_id format'}), 400
-    # --- END FIX ---
 
     data = request.json
     if not all(k in data for k in ['type', 'amount', 'currency', 'categoryId', 'accountName']):
@@ -74,7 +70,7 @@ def add_transaction():
     timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now(UTC_TZ)
 
     tx = {
-        "account_id": account_id,  # <-- REFACTOR
+        "account_id": account_id,
         "type": data['type'],
         "amount": float(data['amount']),
         "currency": data['currency'],
@@ -92,36 +88,38 @@ def add_transaction():
 
 
 @transactions_bp.route('/recent', methods=['GET'])
-@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")
 def get_recent_transactions():
     """Fetches recent transactions for an authenticated user."""
-    # --- THIS IS THE FIX ---
     try:
         account_id = ObjectId(g.account_id)
     except Exception:
         return jsonify({'error': 'Invalid account_id format'}), 400
-    # --- END FIX ---
 
-    limit = int(request.args.get('limit', 20))
+    try:
+        limit = int(request.args.get('limit', 20))
+    except ValueError:
+        limit = 20
 
+    # Optimization: Only fetch required fields if payload size becomes an issue,
+    # but for now, fetching full doc is standard.
     txs = list(transactions_collection().find({'account_id': account_id}).sort('timestamp', -1).limit(limit))
 
     return jsonify([serialize_tx(tx) for tx in txs])
 
 
 @transactions_bp.route('/search', methods=['POST'])
-@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")
 def search_transactions():
     """Performs an advanced search for an authenticated user."""
     params = request.json
 
-    # --- THIS IS THE FIX ---
     try:
         account_id = ObjectId(g.account_id)
     except Exception:
         return jsonify({'error': 'Invalid account_id format'}), 400
+
     match_stage = {'account_id': account_id}
-    # --- END FIX ---
 
     date_filter = {}
     if params.get('period'):
@@ -145,6 +143,7 @@ def search_transactions():
         match_stage['type'] = params['transaction_type']
 
     if params.get('categories'):
+        # Use a single $in with regexes for simpler query plan
         categories_regex = [re.compile(f'^{re.escape(c.strip())}$', re.IGNORECASE) for c in params['categories']]
         match_stage['categoryId'] = {'$in': categories_regex}
 
@@ -155,6 +154,7 @@ def search_transactions():
         if keyword_logic == 'AND':
             match_stage['$and'] = [{'description': re.compile(k, re.IGNORECASE)} for k in keywords]
         else:
+            # Optimization: Combine OR keywords into a single regex |
             regex_str = '|'.join([re.escape(k) for k in keywords])
             match_stage['description'] = re.compile(regex_str, re.IGNORECASE)
 
@@ -163,15 +163,13 @@ def search_transactions():
 
 
 @transactions_bp.route('/<tx_id>', methods=['GET'])
-@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")
 def get_transaction(tx_id):
     """Fetches a single transaction for an authenticated user."""
-    # --- THIS IS THE FIX ---
     try:
         account_id = ObjectId(g.account_id)
     except Exception:
         return jsonify({'error': 'Invalid account_id format'}), 400
-    # --- END FIX ---
 
     try:
         transaction = transactions_collection().find_one({'_id': ObjectId(tx_id), 'account_id': account_id})
@@ -184,17 +182,15 @@ def get_transaction(tx_id):
 
 
 @transactions_bp.route('/<tx_id>', methods=['PUT'])
-@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")
 def update_transaction(tx_id):
     """Updates a transaction for an authenticated user."""
     data = request.json
 
-    # --- THIS IS THE FIX ---
     try:
         account_id = ObjectId(g.account_id)
     except Exception:
         return jsonify({'error': 'Invalid account_id format'}), 400
-    # --- END FIX ---
 
     if not data:
         return jsonify({'error': 'No update data provided'}), 400
@@ -237,15 +233,13 @@ def update_transaction(tx_id):
 
 
 @transactions_bp.route('/<tx_id>', methods=['DELETE'])
-@auth_required(min_role="user")  # --- REFACTOR: Add decorator ---
+@auth_required(min_role="user")
 def delete_transaction(tx_id):
     """Deletes a transaction for an authenticated user."""
-    # --- THIS IS THE FIX ---
     try:
         account_id = ObjectId(g.account_id)
     except Exception:
         return jsonify({'error': 'Invalid account_id format'}), 400
-    # --- END FIX ---
 
     try:
         result = transactions_collection().delete_one({'_id': ObjectId(tx_id), 'account_id': account_id})
