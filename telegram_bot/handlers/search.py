@@ -165,7 +165,7 @@ async def _execute_search(message, context):
 
     try:
         if stype == 'manage':
-            # Free tier allowed (handled by API role check if gated, but search itself is usually free-ish)
+            # Free tier allowed
             results = api_client.search_transactions_for_management(params, jwt)
             if not results:
                 await loading.edit_text(t("search.no_results", context),
@@ -176,7 +176,22 @@ async def _execute_search(message, context):
                 dt = datetime.fromisoformat(tx['timestamp']).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
                 fmt = ",.0f" if tx['currency'] == 'KHR' else ",.2f"
 
-                txt = f"{t('search.one_result', context)}\n\n{t('history.tx_details_no_prompt', context, emoji=emoji, amount=f'{tx['amount']:{fmt}}', currency=tx['currency'], category=tx['categoryId'], description=tx.get('description', 'N/A'), date=dt)}"
+                # Fix: Calculate string parts outside of nested f-string to avoid SyntaxError in Python 3.11
+                amount_str = f"{tx['amount']:{fmt}}"
+                desc_str = tx.get('description', 'N/A')
+
+                details = t(
+                    'history.tx_details_no_prompt',
+                    context,
+                    emoji=emoji,
+                    amount=amount_str,
+                    currency=tx['currency'],
+                    category=tx['categoryId'],
+                    description=desc_str,
+                    date=dt
+                )
+
+                txt = f"{t('search.one_result', context)}\n\n{details}"
                 await loading.edit_text(txt, parse_mode='HTML',
                                         reply_markup=keyboards.manage_tx_keyboard(tx['_id'], context))
             else:
