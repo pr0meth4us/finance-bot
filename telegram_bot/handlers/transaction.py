@@ -92,14 +92,19 @@ async def received_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     curr = query.data.split('_')[1]
     context.user_data['tx_currency'] = curr
+
+    # Ensure tx_type exists; default to expense if missing (shouldn't happen in normal flow)
+    if 'tx_type' not in context.user_data:
+        context.user_data['tx_type'] = 'expense'
+
     await _ask_category(query.message, context, 0, curr, show_amount=False)
     return CATEGORY
 
 
 async def _ask_category(message, context, amt, curr, show_amount=True):
-    cats = context.user_data['profile'].get('settings', {}).get('categories', {}).get(context.user_data['tx_type'], [])
-    kb_func = keyboards.expense_categories_keyboard if context.user_data[
-                                                           'tx_type'] == 'expense' else keyboards.income_categories_keyboard
+    tx_type = context.user_data.get('tx_type', 'expense')
+    cats = context.user_data['profile'].get('settings', {}).get('categories', {}).get(tx_type, [])
+    kb_func = keyboards.expense_categories_keyboard if tx_type == 'expense' else keyboards.income_categories_keyboard
     kb = kb_func(cats, context)
 
     if show_amount:
@@ -168,9 +173,13 @@ async def received_remark(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def save_transaction_and_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     d = context.user_data
     payload = {
-        "type": d['tx_type'], "amount": d['tx_amount'], "currency": d['tx_currency'],
-        "categoryId": d['tx_category'], "accountName": f"{d['tx_currency']} Account",
-        "description": d.get('tx_remark', ''), "timestamp": d.get('timestamp')
+        "type": d.get('tx_type', 'expense'),
+        "amount": d.get('tx_amount', 0),
+        "currency": d.get('tx_currency', 'USD'),
+        "categoryId": d.get('tx_category', 'Uncategorized'),
+        "accountName": f"{d.get('tx_currency', 'USD')} Account",
+        "description": d.get('tx_remark', ''),
+        "timestamp": d.get('timestamp')
     }
 
     res = api_client.add_transaction(payload, d['jwt'])
@@ -178,6 +187,11 @@ async def save_transaction_and_end(update: Update, context: ContextTypes.DEFAULT
 
     target = update.callback_query.message if update.callback_query else update.message
     await target.reply_text(msg, reply_markup=keyboards.main_menu_keyboard(context))
+
+    # Cleanup
+    for k in ['tx_type', 'tx_amount', 'tx_currency', 'tx_category', 'tx_remark', 'timestamp']:
+        context.user_data.pop(k, None)
+
     return ConversationHandler.END
 
 
