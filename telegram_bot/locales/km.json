@@ -139,9 +139,9 @@
     "setup_complete": "🎉 ការដំឡើងបានបញ្ចប់!\n\nអ្នកបានត្រៀមរួចរាល់ហើយ。\nនេះគឺជាម៉ឺនុយមេ。"
   },
   "help": {
-"help": {
-    "guide": "📚 <b>របៀបប្រើប្រាស់ FinanceBot</b>\n\n<b>1. 💸 កត់ត្រាប្រាក់ (គ្រាន់តែវាយ)</b>\n• ចំណាយ: <code>Coffee 2.50</code> (USD)\n• ចំណាយ: <code>Lunch 15000khr</code> (KHR)\n• ចំណូល: <code>Salary 500</code>\n\n<b>2. 🤝 តាមដានបំណុល</b>\n• អោយគេខ្ចី: <code>Lent John 20</code>\n• ខ្ចីគេ: <code>Borrowed Jane 50</code>\n• សងគេ: <code>Paid Jane 50</code>\n• គេសង: <code>Repaid by John 20</code>\n\n<b>3. ⚙️ ការគ្រប់គ្រង</b>\n• <b>/menu</b> - បើកផ្ទាំងគ្រប់គ្រង\n• <b>/cancel</b> - បញ្ឈប់សកម្មភាព\n• <b>/reset</b> - កំណត់គណនីឡើងវិញ\n\n<i>គន្លឹះ: ប្រើប៊ូតុងនៅក្នុង /menu សម្រាប់របាយការណ៍ ប្រវត្តិ និងការកំណត់។</i>"
+    "guide": "📚 <b>សន្លឹកបន្លំ FinanceBot</b>\n\n<b>1. 💸 កត់ត្រាប្រាក់ (គ្រាន់តែវាយ)</b>\n• ចំណាយ: <code>Coffee 2.50</code> (USD)\n• ចំណាយ: <code>Lunch 15000khr</code> (KHR)\n• ចំណូល: <code>Salary 500</code>\n\n<b>2. 🤝 តាមដានបំណុល</b>\n• អោយគេខ្ចី: <code>Lent John 20</code>\n• ខ្ចីគេ: <code>Borrowed Jane 50</code>\n• សងគេ: <code>Paid Jane 50</code>\n• គេសង: <code>Repaid by John 20</code>\n\n<b>3. ⚙️ ការគ្រប់គ្រង</b>\n• <b>/menu</b> - បើកផ្ទាំងគ្រប់គ្រង\n• <b>/cancel</b> - បញ្ឈប់សកម្មភាព\n• <b>/reset</b> - កំណត់គណនីឡើងវិញ\n\n<i>គន្លឹះ: ប្រើប៊ូតុងនៅក្នុង /menu សម្រាប់របាយការណ៍ ប្រវត្តិ និងការកំណត់។</i>"
   },
+  "settings": {
     "menu_header": "<b>⚙️ ការកំណត់</b>\n\nនៅទីនេះ អ្នកអាចគ្រប់គ្រងចំណូលចិត្ត និងទិន្ន័យដំបូងរបស់អ្នក។\n\n<b>របៀបរូបិយប័ណ្ណ៖</b> {mode}\n\n<b>សមតុល្យដំបូង៖</b>\n{balance_text}\n\n<b>អត្រាប្តូរប្រាក់៖</b> {rate_text}\n",
     "ask_balance_account": "តើសមតុល្យដំបូងមួយណាដែលអ្នកចង់កំណត់/ធ្វើបច្ចុប្បន្នភាព?",
     "ask_balance_amount": "គណនី៖ <b>{currency}</b>\n\nតើសមតុល្យដំបូងថ្មីគឺជាអ្វី?\n(វានឹងមិនបង្កើតប្រតិបត្តិការទេ)។",
