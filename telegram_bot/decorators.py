@@ -3,11 +3,17 @@ from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 import api_client
 import logging
+from api_client import PremiumFeatureException, UpstreamUnavailable
 
 log = logging.getLogger(__name__)
 
 
 def authenticate_user(func):
+    """
+    Decorator to ensure the user is authenticated with Bifrost
+    and has a valid profile cached in context.user_data.
+    """
+
     @wraps(func)
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         if not update.effective_user:
@@ -17,86 +23,88 @@ def authenticate_user(func):
         user = update.effective_user
         user_id = user.id
 
-        # 1. Check if we have a JWT (api_client manages the cache)
-        # We attempt a 'soft' check by trying to login if the token is missing.
-        # Note: We don't access _USER_TOKENS directly; we rely on login_to_bifrost to handle it.
+        # 1. Check local cache (Context)
+        # We store the full profile in user_data['profile'] and the JWT in user_data['jwt']
+        cached_profile = context.user_data.get("profile")
+        cached_jwt = context.user_data.get("jwt")
 
-        # 2. Ensure we are logged in to Bifrost
-        # We verify by checking if we have a profile cached in context.user_data.
-        # If context is empty, we must fully authenticate (login -> get JWT -> fetch profile)
+        if not cached_profile or not cached_jwt:
+            log.info(f"User {user_id}: No valid session. Initiating Bifrost Login...")
 
-        cached_profile = context.user_data.get("user_profile")
-
-        if not cached_profile:
-            log.info(f"User {user_id}: No profile in cache. Starting authentication sequence.")
-
-            # A. Perform Bifrost Login (Headless Widget Flow)
+            # A. Perform Bifrost Handshake (Signs data -> Bifrost -> Returns JWT)
             jwt = api_client.login_to_bifrost(user)
 
             if not jwt:
-                msg = "⚠️ Authentication failed. Could not verify identity with Bifrost."
+                msg = "⚠️ **Authentication Failed**\nCould not verify your identity with the secure server."
                 if update.message:
-                    await update.message.reply_text(msg)
+                    await update.message.reply_text(msg, parse_mode='Markdown')
                 elif update.callback_query:
                     await context.bot.answer_callback_query(update.callback_query.id, text=msg, show_alert=True)
                 return ConversationHandler.END
 
             # B. Fetch Profile from Web Service using the new JWT
-            # The JWT is now internally cached by api_client for subsequent calls
-            profile_response = api_client.get_my_profile(user_id)
+            try:
+                # This returns { "profile": {...}, "role": "..." }
+                resp = api_client.get_my_profile(user_id=user_id)
 
-            if not profile_response:
-                msg = "⚠️ Connection error. Could not fetch user profile."
+                context.user_data["jwt"] = jwt
+                context.user_data["profile"] = resp["profile"]
+                context.user_data["role"] = resp.get("role", "user")
+
+                log.info(f"User {user_id}: Auth successful. Role: {resp.get('role')}")
+
+            except PremiumFeatureException:
+                # This shouldn't technically happen on /me, but handling safely
+                if update.message:
+                    await update.message.reply_text("🚫 Access Denied: Subscription issue.")
+                return ConversationHandler.END
+            except UpstreamUnavailable:
+                msg = "⚠️ System Unavailable. Please try again later."
                 if update.message:
                     await update.message.reply_text(msg)
                 elif update.callback_query:
                     await context.bot.answer_callback_query(update.callback_query.id, text=msg, show_alert=True)
                 return ConversationHandler.END
-
-            if profile_response.get("error"):
-                # Handle Access Denied (e.g., Subscription Inactive)
-                error_msg = profile_response["error"]
+            except Exception as e:
+                log.error(f"Profile fetch error: {e}")
                 if update.message:
-                    await update.message.reply_text(f"🚫 Access Denied: {error_msg}")
-                elif update.callback_query:
-                    await context.bot.answer_callback_query(
-                        callback_query_id=update.callback_query.id,
-                        text=f"🚫 Access Denied: {error_msg}",
-                        show_alert=True
-                    )
+                    await update.message.reply_text("⚠️ Connection Error.")
                 return ConversationHandler.END
 
-            # C. Cache the profile
-            # The endpoint returns { "profile": {...}, "role": ... }
-            context.user_data["user_profile"] = profile_response["profile"]
-            context.user_data["user_role"] = profile_response.get("role")
-            log.info(f"User {user_id}: Authentication successful. Profile cached.")
+        # 2. Onboarding Check
+        # We allow /start and specific onboarding callbacks to proceed even if incomplete
+        profile = context.user_data["profile"]
+        is_complete = profile.get("onboarding_complete", False)
 
-        else:
-            pass
-            # log.info(f"User {user_id}: Profile found in cache.")
+        command_text = update.message.text if update.message and update.message.text else ""
+        is_start_cmd = command_text.startswith("/start")
+        is_reset_cmd = command_text.startswith("/reset")
 
-        # 3. Onboarding Check
-        is_complete = context.user_data["user_profile"].get("onboarding_complete")
+        # Callbacks related to onboarding
+        is_onboarding_cb = False
+        if update.callback_query and update.callback_query.data:
+            cb = update.callback_query.data
+            if cb.startswith("start") or cb.startswith("reset_") or cb.startswith("change_lang") or cb.startswith(
+                    "set_balance") or cb.startswith("confirm_switch"):
+                is_onboarding_cb = True
 
-        # Allow users to re-run /start even if not onboarded, so they can restart the flow
-        # But block other commands
-        if not is_complete:
-            command = update.message.text if update.message and update.message.text else ""
-            is_start = command.startswith("/start") or (update.callback_query and update.callback_query.data == "start")
+        # Block if not onboarded and not trying to onboard
+        if not is_complete and not (is_start_cmd or is_reset_cmd or is_onboarding_cb):
+            # Special case: Allow the function 'onboarding_start' or similar if explicitly wrapped
+            # But usually checking the command is enough.
 
-            # If not running /start and not onboarded, block
-            if func.__name__ != 'onboarding_start' and not is_start:
-                log.info(f"User {user_id}: Onboarding incomplete. Blocking handler '{func.__name__}'.")
-                if update.message:
-                    await update.message.reply_text("Please complete the setup first. Type /start to begin.")
-                elif update.callback_query:
-                    await context.bot.answer_callback_query(
-                        callback_query_id=update.callback_query.id,
-                        text="Please complete the setup first. Type /start to begin.",
-                        show_alert=True,
-                    )
-                return ConversationHandler.END
+            log.info(f"User {user_id}: Onboarding incomplete. Blocking access.")
+            msg = "⚠️ **Setup Required**\n\nPlease complete your account setup first.\nType /start to begin."
+
+            if update.message:
+                await update.message.reply_text(msg, parse_mode='Markdown')
+            elif update.callback_query:
+                await context.bot.answer_callback_query(
+                    callback_query_id=update.callback_query.id,
+                    text="Please complete setup first. Type /start.",
+                    show_alert=True
+                )
+            return ConversationHandler.END
 
         return await func(update, context, *args, **kwargs)
 

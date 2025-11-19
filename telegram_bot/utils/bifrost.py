@@ -1,32 +1,35 @@
 import hashlib
 import hmac
 import time
-import json
-import os
+import logging
+
+log = logging.getLogger(__name__)
 
 
-def generate_telegram_hash(user_data: dict, bot_token: str) -> str:
+def generate_telegram_hash(data_dict: dict, bot_token: str) -> str:
     """
-    Generates the HMAC-SHA256 hash for Telegram login data,
-    mimicking the browser-based Telegram Login Widget.
+    Generates the HMAC-SHA256 hash for Telegram login data.
+    This mimics the signature generation of the Telegram Login Widget.
 
-    Bifrost requires this hash to verify the data originates from
-    a trusted source (us) that possesses the bot_token.
+    Bifrost will use this hash to verify the data originated from
+    this bot (which holds the token) and hasn't been tampered with.
     """
-    # 1. Filter out None values and the hash itself if present
+    # 1. Create the data-check-string
+    # Keys must be sorted alphabetically.
+    # Format: key=value\nkey=value...
     data_check_arr = []
-    for key, value in sorted(user_data.items()):
+    for key, value in sorted(data_dict.items()):
         if value is None or key == 'hash':
             continue
         data_check_arr.append(f"{key}={value}")
 
-    # 2. Construct data-check-string
     data_check_string = '\n'.join(data_check_arr)
 
-    # 3. Calculate Secret Key (SHA256 of the bot token)
+    # 2. Calculate the Secret Key
+    # The secret key is the SHA256 hash of the bot token (bytes)
     secret_key = hashlib.sha256(bot_token.encode('utf-8')).digest()
 
-    # 4. Calculate HMAC-SHA256 signature
+    # 3. Calculate the HMAC-SHA256 signature
     signature = hmac.new(
         secret_key,
         data_check_string.encode('utf-8'),
@@ -36,13 +39,23 @@ def generate_telegram_hash(user_data: dict, bot_token: str) -> str:
     return signature
 
 
-def prepare_bifrost_payload(user, bot_token):
+def prepare_bifrost_payload(user, bot_token: str) -> dict:
     """
-    Constructs the full payload required by Bifrost's /telegram-login endpoint.
+    Constructs the full signed payload for Bifrost's /telegram-login endpoint.
+
+    Args:
+        user: The telegram.User object.
+        bot_token: The Telegram Bot Token.
+
+    Returns:
+        dict: A dictionary containing id, first_name, etc., plus the 'hash'.
     """
+    if not bot_token:
+        raise ValueError("Bot token is missing. Cannot sign payload.")
+
     now = int(time.time())
 
-    # Structure matches what Telegram Widget sends
+    # Construct the data exactly as Telegram sends it
     tg_data = {
         "id": user.id,
         "first_name": user.first_name,
@@ -50,12 +63,14 @@ def prepare_bifrost_payload(user, bot_token):
         "auth_date": now
     }
 
+    # Optional fields
     if user.last_name:
         tg_data["last_name"] = user.last_name
-    if user.photo_url:  # Note: python-telegram-bot user object might not have photo_url directly available depending on context
-        tg_data["photo_url"] = user.photo_url
 
-    # Sign the data
+    # Note: The python-telegram-bot User object does not always expose photo_url
+    # in message updates, so we omit it to ensure signature consistency.
+
+    # Generate signature
     tg_data['hash'] = generate_telegram_hash(tg_data, bot_token)
 
     return tg_data
