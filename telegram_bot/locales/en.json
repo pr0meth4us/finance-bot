@@ -121,7 +121,7 @@
     "reset_cancel": "❌ No, Keep Data"
   },
   "help": {
-    "guide": "📚 <b>FinanceBot Cheat Sheet</b>\n\n<b>1. 💸 Log Money (Just Type It)</b>\n• Expense: <code>Coffee 2.50</code> (USD)\n• Expense: <code>Lunch 15000khr</code> (KHR)\n• Income: <code>Salary 500</code>\n\n<b>2. 🤝 Track Debts</b>\n• Lending: <code>Lent John 20</code>\n• Borrowing: <code>Borrowed Jane 50</code>\n• Repaying: <code>Paid Jane 50</code>\n• Receiving: <code>Repaid by John 20</code>\n\n<b>3. ⚙️ Controls</b>\n• <b>/menu</b> - Open Dashboard\n• <b>/cancel</b> - Stop current action\n• <b>/reset</b> - Reset profile\n\n<i>Tip: Use the buttons in the /menu for Reports, History, and Settings.</i>"
+    "guide": "📚 <b>FinanceBot Quick Guide</b>\n\n<b>💸 Smart Logging</b>\n<i>Type these commands to log transactions instantly:</i>\n• <code>Coffee 2.50</code> → Expense (USD)\n• <code>Lunch 15000khr</code> → Expense (KHR)\n• <code>Salary 500</code> → Income\n• <code>Taxi 5 \"to airport\"</code> → With description\n\n<b>🤝 Debt & Loans (IOU)</b>\n<i>Track who owes you and who you owe:</i>\n• <b>Lent:</b> <code>Lent John 50</code> (He owes you)\n• <b>Borrowed:</b> <code>Borrowed Jane 20</code> (You owe her)\n• <b>Repaying:</b> <code>Paid Jane 20</code> (You paid her back)\n• <b>Receiving:</b> <code>Repaid by John 50</code> (He paid you back)\n\n<b>🛠 Tools & Settings</b>\n• <b>Reports:</b> View charts and spending habits.\n• <b>History:</b> Edit or delete past transactions.\n• <b>Settings:</b> Toggle Dual Currency, Set Fixed Rate, or Manage Categories.\n\n<i>💡 Tip: Use <b>/reset</b> if you need to change your initial balances.</i>"
   },
   "settings": {
     "menu_header": "<b>⚙️ Bot Settings</b>\n\nHere you can manage your preferences and initial data.\n\n<b>Currency Mode:</b> {mode}\n\n<b>Initial Balances:</b>\n{balance_text}\n\n<b>Exchange Rate:</b> {rate_text}\n",
@@ -199,8 +199,8 @@
   "command": {
     "calculating": "🧮 Result: `{result}`",
     "calculator_fail": "Couldn't calculate that.\nPlease check the expression.",
-    "invalid_format_generic": "⚠️ Invalid format.\n`!{command} &lt;Category&gt; [\"Description\"] &lt;Amount&gt;[khr] [MM-DD]`\n\n(Tip: Use quotes for multi-word descriptions)",
-    "invalid_format_debt": "⚠️ Invalid format.\n`!{command} &lt;Person&gt; &lt;Amount&gt;[khr] [\"Purpose\"] [MM-DD]`\n\n(Tip: Use quotes for multi-word names or purposes)",
+    "invalid_format_generic": "⚠️ Invalid format.\n`!{command} <Category> [\"Description\"] <Amount>[khr] [MM-DD]`\n\n(Tip: Use quotes for multi-word descriptions)",
+    "invalid_format_debt": "⚠️ Invalid format.\n`!{command} <Person> <Amount>[khr] [\"Purpose\"] [MM-DD]`\n\n(Tip: Use quotes for multi-word names or purposes)",
     "invalid_format_missing_amount": "⚠️ Invalid format.\nAmount is missing.",
     "invalid_format_repayment": "⚠️ Format: {example}",
     "repayment_error": "❌ Error: {error}",
