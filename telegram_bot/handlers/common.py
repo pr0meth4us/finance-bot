@@ -119,7 +119,8 @@ async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the user guide."""
     help_text = t("help.guide", context)
-    await update.message.reply_text(help_text, parse_mode='Markdown')
+    # Updated to HTML for better formatting control
+    await update.message.reply_text(help_text, parse_mode='HTML')
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
