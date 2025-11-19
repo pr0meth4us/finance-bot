@@ -1,5 +1,3 @@
-# telegram_bot/api_client.py
-
 import os
 import requests
 import logging
@@ -70,6 +68,10 @@ def login_to_bifrost(user):
             log.error(f"Bifrost login failed: No JWT returned. Resp: {data}")
             return None
 
+    except requests.exceptions.HTTPError as e:
+        # LOG THE ACTUAL SERVER RESPONSE (JSON ERROR)
+        log.error(f"Bifrost Login Failed ({e.response.status_code}): {e.response.text}")
+        return None
     except requests.exceptions.RequestException as e:
         log.error(f"Bifrost connection error: {e}")
         return None
@@ -95,12 +97,10 @@ def ensure_auth(func):
             if e.response.status_code == 401:
                 log.warning(f"401 received for user {user_id}. Clearing token.")
                 _USER_TOKENS.pop(user_id, None)
-                # We propagate the error so the bot knows auth failed
+                # Propagate error so bot knows to re-login
                 raise e
-            # Re-raise other HTTP errors
             raise e
         except requests.exceptions.RequestException as e:
-            # Map generic connection errors to UpstreamUnavailable
             log.error(f"Connection error in {func.__name__}: {e}")
             raise UpstreamUnavailable("Service unreachable")
 
@@ -137,17 +137,15 @@ def get_detailed_summary(user_id):
         return res.json()
     except requests.exceptions.RequestException as e:
         log.error(f"API Error fetching detailed summary: {e}")
-        raise UpstreamUnavailable("Summary unavailable")
+        return None
 
 
 @ensure_auth
 def add_debt(data, user_id):
     try:
         res = requests.post(f"{BASE_URL}/debts/", json=data, headers=_get_headers(user_id), timeout=10)
-
         if res.status_code == 403:
             raise PremiumFeatureException("Premium required")
-
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
@@ -191,11 +189,12 @@ def get_open_debts_export(user_id):
         )
         if res.status_code == 403:
             raise PremiumFeatureException("Premium required")
-
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
         log.error(f"API Error fetching debts for export: {e}")
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 403:
+            raise PremiumFeatureException("Premium required")
         return []
 
 
