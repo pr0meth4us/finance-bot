@@ -1,3 +1,5 @@
+# telegram_bot/handlers/settings.py
+
 from telegram import Update
 from telegram.ext import (
     ContextTypes,
@@ -149,6 +151,7 @@ async def categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["profile"] = user_data.get("profile", {})
     cats = context.user_data["profile"].get('settings', {}).get('categories', {})
 
+    # Visual feedback for the user on what they have
     text = t("settings.categories_header", context,
              expense_cats=', '.join(cats.get('expense', [])) or 'None',
              income_cats=', '.join(cats.get('income', [])) or 'None')
@@ -158,7 +161,43 @@ async def categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def category_action_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handles the click on Add/Remove Category.
+    Enforces the 'Premium' gate logic in the UI.
+    """
     query = update.callback_query
+
+    # --- COMMERCIAL LOGIC START ---
+    # Check Tier locally before even asking the API
+    profile = context.user_data.get('profile', {})
+    tier = profile.get('subscription_tier', 'free')
+
+    # Hardcoded Admin Bypass
+    if str(update.effective_user.id) == "1836585300":
+        tier = 'premium'
+
+    if tier != 'premium':
+        await query.answer("🔒 Premium Feature", show_alert=True)
+
+        upsell_text = (
+            "🔒 <b>Manage Categories is Locked</b>\n\n"
+            "Free users are limited to the Basic categories (Food, Transport, etc.).\n\n"
+            "<b>Upgrade to Premium</b> to:\n"
+            "✅ Add custom categories (e.g., 'Gaming', 'Dog Food')\n"
+            "✅ Remove unused categories\n"
+            "✅ Track your specific lifestyle!"
+        )
+
+        # Edit the message to show the upsell, but stay in CATEGORIES_MENU state
+        # so the "Back" button works correctly.
+        await query.edit_message_text(
+            upsell_text,
+            parse_mode='HTML',
+            reply_markup=keyboards.manage_categories_keyboard(context)  # Reuse menu to allow going back
+        )
+        return CATEGORIES_MENU
+    # --- COMMERCIAL LOGIC END ---
+
     await query.answer()
     action = 'add' if 'add' in query.data else 'remove'
     context.user_data['category_action'] = action
@@ -188,11 +227,17 @@ async def received_category_name(update: Update, context: ContextTypes.DEFAULT_T
     jwt = context.user_data['jwt']
 
     if action == 'add':
-        api_client.add_category(jwt, cat_type, name)
-        msg = t("settings.category_add_success", context, name=name, type=cat_type)
+        res = api_client.add_category(jwt, cat_type, name)
+        if "error" in res:
+            msg = f"❌ {res['error']}"
+        else:
+            msg = t("settings.category_add_success", context, name=name, type=cat_type)
     else:
-        api_client.remove_category(jwt, cat_type, name)
-        msg = t("settings.category_remove_success", context, name=name, type=cat_type)
+        res = api_client.remove_category(jwt, cat_type, name)
+        if "error" in res:
+            msg = f"❌ {res['error']}"
+        else:
+            msg = t("settings.category_remove_success", context, name=name, type=cat_type)
 
     await update.message.reply_text(msg)
     return await settings_menu(update, context)

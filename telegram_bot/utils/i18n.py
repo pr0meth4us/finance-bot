@@ -1,3 +1,5 @@
+# telegram_bot/utils/i18n.py
+
 import json
 import os
 import logging
@@ -23,7 +25,7 @@ def load_translations():
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 _translations[lang] = json.load(f)
-                log.info(f"Loaded locale: {lang}")
+            log.info(f"Loaded locale: {lang}")
         except (FileNotFoundError, json.JSONDecodeError) as e:
             log.error(f"Failed to load locale '{lang}': {e}")
 
@@ -34,7 +36,10 @@ def load_translations():
 def t(key: str, context: ContextTypes.DEFAULT_TYPE, **kwargs) -> str:
     """
     Translates a dot-separated key into the user's preferred language.
-    Example: t("common.welcome", context, name="User")
+
+    Dynamic Fallback:
+    If a key starting with 'categories.' is missing (e.g. custom categories),
+    it returns the category name itself instead of the key path.
     """
     if not _translations:
         load_translations()
@@ -58,7 +63,18 @@ def t(key: str, context: ContextTypes.DEFAULT_TYPE, **kwargs) -> str:
         return key
 
     except (KeyError, TypeError):
-        log.warning(f"Translation missing for key '{key}' in lang '{lang}'")
+        # --- HYBRID LOGIC START ---
+        # If it's a category key (e.g., "categories.Sewing Fee"), fallback to the name itself.
+        if key.startswith("categories."):
+            try:
+                # Return the part after the first dot ("Sewing Fee")
+                return key.split(".", 1)[1]
+            except IndexError:
+                return key
+        # --- HYBRID LOGIC END ---
+
+        # Only log warnings for system keys, not user content
+        log.warning(f"Translation missing for system key '{key}' in lang '{lang}'")
         return key
     except Exception as e:
         log.error(f"Translation error for '{key}': {e}")

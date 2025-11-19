@@ -1,3 +1,5 @@
+# telegram_bot/handlers/common.py
+
 import telegram.error
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
@@ -24,12 +26,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if lang == 'km' and profile.get('name_km'):
         user_name = profile.get('name_km')
 
-    text = t("common.welcome", context, name=user_name)
-    keyboard = keyboards.main_menu_keyboard(context)
-
+    # Fetch summary
     summary_data = api_client.get_detailed_summary(jwt)
     summary_text = format_summary_message(summary_data, context)
-    final_text = text + summary_text
+
+    # --- UI FIX: Ensure spacing between Welcome and Summary ---
+    welcome_text = t("common.welcome", context, name=user_name)
+
+    # If summary exists, prepend newlines. If empty (new user), just show welcome.
+    if summary_text:
+        final_text = f"{welcome_text}\n\n{summary_text}"
+    else:
+        final_text = welcome_text
+    # ---------------------------------------------------------
+
+    keyboard = keyboards.main_menu_keyboard(context)
 
     if update.callback_query:
         await update.callback_query.answer()
@@ -65,7 +76,10 @@ async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     summary_data = api_client.get_detailed_summary(jwt)
     summary_text = format_summary_message(summary_data, context)
 
-    text = t("common.quick_check_header", context) + summary_text
+    # --- UI FIX: Ensure spacing here too ---
+    header = t("common.quick_check_header", context)
+    text = f"{header}\n{summary_text}"
+    # ---------------------------------------
 
     try:
         await query.edit_message_text(
