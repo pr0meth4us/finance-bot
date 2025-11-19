@@ -1,6 +1,7 @@
 import os
 import logging
 
+
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY")
     MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
@@ -10,8 +11,11 @@ class Config:
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
     # Bifrost Auth
-    # Support both naming conventions for compatibility
-    BIFROST_URL = os.getenv("BIFROST_URL").strip()
+    # Support both naming conventions, preferring BIFROST_URL
+    # AGGRESSIVELY STRIP WHITESPACE
+    raw_url = os.getenv("BIFROST_URL") or os.getenv("BIFROST_BASE_URL", "")
+    BIFROST_URL = raw_url.strip().rstrip('/')
+
     BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID", "").strip()
     BIFROST_CLIENT_SECRET = os.getenv("BIFROST_CLIENT_SECRET", "").strip()
 
@@ -28,5 +32,8 @@ class Config:
         missing = [var for var in required_vars if not getattr(Config, var)]
 
         if missing:
-            # Log prominently so it shows in build/startup logs
             logging.critical(f"######## CONFIG ERROR: Missing env vars: {', '.join(missing)} ########")
+        else:
+            # Log the ID being used (masked secret) to help debug mismatches
+            cid = Config.BIFROST_CLIENT_ID
+            logging.info(f"✅ Config Loaded. Bifrost Client ID: '{cid}' (Length: {len(cid)})")

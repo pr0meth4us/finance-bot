@@ -1,11 +1,11 @@
 import requests
+import logging
 from functools import wraps
 from flask import request, jsonify, g, current_app
 from requests.auth import HTTPBasicAuth
 from cachetools import TTLCache
 
 # Cache validation results for 5 minutes (300 seconds)
-# Max size 1024 tokens
 _token_cache = TTLCache(maxsize=1024, ttl=300)
 
 ROLE_HIERARCHY = {
@@ -23,7 +23,6 @@ def _get_role_level(role_name):
 def _validate_token_with_bifrost(token, bifrost_url, client_id, client_secret):
     """
     Validates token against Bifrost.
-    Returns: (success_bool, data_dict_or_error, status_code)
     """
     if token in _token_cache:
         return _token_cache[token]
@@ -32,8 +31,9 @@ def _validate_token_with_bifrost(token, bifrost_url, client_id, client_secret):
     payload = {"jwt": token}
 
     try:
+        # Identify ourselves to Bifrost
         auth = HTTPBasicAuth(client_id, client_secret)
-        response = requests.post(validate_url, auth=auth, json=payload, timeout=5)
+        response = requests.post(validate_url, auth=auth, json=payload, timeout=10)
 
         if response.status_code == 200:
             result = (True, response.json(), 200)
@@ -41,25 +41,31 @@ def _validate_token_with_bifrost(token, bifrost_url, client_id, client_secret):
             return result
 
         elif response.status_code == 401:
-            return (False, {"error": "Authentication service auth failed"}, 500)
+            # IMPORTANT: Log the specific reason Bifrost rejected us
+            # It could be "Invalid client_id/secret" OR "Token expired" OR "Audience mismatch"
+            err_resp = response.json() if response.is_json else {"error": response.text}
+            current_app.logger.warning(f"Bifrost Validation Failed (401): {err_resp}")
+
+            if "is_valid" in err_resp:
+                # This means Auth succeeded, but Token is invalid (e.g. expired, wrong aud)
+                return (True, err_resp, 200)  # Return success=True so wrapper handles the "is_valid": False logic
+            else:
+                # This means Basic Auth failed (Bad Service Credentials)
+                return (False, {"error": "Service Authentication Failed"}, 500)
 
         elif response.status_code == 403:
             return (False, response.json(), 403)
 
         else:
+            current_app.logger.error(f"Bifrost unexpected status {response.status_code}: {response.text}")
             return (False, {"error": "Authentication service unavailable"}, 503)
 
     except requests.exceptions.RequestException as e:
-        current_app.logger.error(f"Could not connect to Bifrost: {e}", exc_info=True)
+        current_app.logger.error(f"Bifrost Connection Error: {e}")
         return (False, {"error": "Authentication service connection error"}, 503)
 
 
 def auth_required(min_role="user"):
-    """
-    Decorator to protect routes using Bifrost JWT validation.
-    Populates g.account_id and g.role on success.
-    """
-
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
@@ -74,14 +80,8 @@ def auth_required(min_role="user"):
             except ValueError:
                 return jsonify({"error": "Invalid Authorization header format"}), 401
 
-            # Config Check
             config = current_app.config
-            if not all(
-                    [config.get("BIFROST_URL"), config.get("BIFROST_CLIENT_ID"), config.get("BIFROST_CLIENT_SECRET")]):
-                current_app.logger.error("Bifrost env vars are not set.")
-                return jsonify({"error": "Authentication system is misconfigured"}), 500
 
-            # Validate Token
             success, data, status_code = _validate_token_with_bifrost(
                 token,
                 config["BIFROST_URL"],
@@ -90,23 +90,18 @@ def auth_required(min_role="user"):
             )
 
             if not success:
-                if "error" in data and status_code == 500:
-                    current_app.logger.error(f"Bifrost auth failed: {data}")
                 return jsonify(data), status_code
 
+            # Check Validity
             if not data.get("is_valid"):
-                current_app.logger.warning(f"Bifrost validation failed: {data.get('error')}")
+                current_app.logger.warning(f"Token rejected: {data.get('error')}")
                 return jsonify({"error": "Invalid or expired token"}), 401
 
             # Check Role
-            user_role = data.get("app_specific_role", "user")
+            user_role = data.get("role", "user")
             if _get_role_level(user_role) < _get_role_level(min_role):
-                current_app.logger.warning(
-                    f"Auth denied for {data.get('account_id')}: Role '{user_role}' < min_role '{min_role}'"
-                )
                 return jsonify({"error": "Forbidden: Insufficient role"}), 403
 
-            # Context Setup
             g.account_id = data.get("account_id")
             g.role = user_role
 
