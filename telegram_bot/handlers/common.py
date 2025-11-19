@@ -48,7 +48,10 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     summary_text = ""
     try:
         summary_data = api_client.get_detailed_summary(jwt)
-        summary_text = format_summary_message(summary_data, context)
+        if summary_data:
+            summary_text = format_summary_message(summary_data, context)
+        else:
+            summary_text = t("common.summary_unavailable", context)
     except UpstreamUnavailable:
         summary_text = t("common.summary_unavailable", context)
     # ------------------------------
@@ -94,6 +97,11 @@ async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         summary_data = api_client.get_detailed_summary(jwt)
+
+        if not summary_data:
+            await query.answer(t("common.upstream_alert", context), show_alert=True)
+            return
+
         summary_text = format_summary_message(summary_data, context)
 
         header = t("common.quick_check_header", context)

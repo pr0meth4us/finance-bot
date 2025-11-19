@@ -1,9 +1,9 @@
 import os
 import requests
 import logging
-import urllib.parse
 from dotenv import load_dotenv
 from utils.bifrost import prepare_bifrost_payload
+import urllib.parse
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -38,7 +38,6 @@ def _get_headers(user_id):
 def login_to_bifrost(user):
     """
     Authenticates the Telegram user with Bifrost to get a JWT.
-    Uses Secure Headless Authentication (HMAC-SHA256).
     """
     if not BIFROST_CLIENT_ID or not TELEGRAM_TOKEN:
         log.error("Missing BIFROST_CLIENT_ID or TELEGRAM_TOKEN env vars")
@@ -53,6 +52,11 @@ def login_to_bifrost(user):
         "client_id": BIFROST_CLIENT_ID,
         "telegram_data": tg_data
     }
+
+    # --- DEBUG LOG ---
+    masked_id = BIFROST_CLIENT_ID[:5] + "***" if BIFROST_CLIENT_ID else "None"
+    log.info(f"Attempting Bifrost Login with ID: {masked_id} for User {user.id}")
+    # -----------------
 
     try:
         res = requests.post(url, json=payload, timeout=10)
@@ -102,7 +106,9 @@ def ensure_auth(func):
             raise e
         except requests.exceptions.RequestException as e:
             log.error(f"Connection error in {func.__name__}: {e}")
-            raise UpstreamUnavailable("Service unreachable")
+            # Instead of crashing with a raw exception, catch it or assume None is handled
+            # We return None here so the caller handles it via 'if not result:'
+            return None
 
     return wrapper
 
