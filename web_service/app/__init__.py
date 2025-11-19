@@ -15,6 +15,9 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 def create_app():
+    # Validate Env Vars immediately
+    Config.validate()
+
     app = Flask(__name__)
     app.config.from_object(Config)
 
