@@ -11,7 +11,6 @@ from telegram.ext import (
 )
 import api_client
 import keyboards
-# FIXED: Import 'menu' instead of 'start'
 from .common import menu, cancel
 from decorators import authenticate_user
 from utils.i18n import t
@@ -44,11 +43,19 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = api_client.get_user_settings(jwt)
     rate_data = api_client.get_exchange_rate(jwt)
 
+    # --- FIX: Handle None (Network Error) explicitly ---
+    if user_data is None or rate_data is None:
+        await message_interface.reply_text(t("common.error_generic", context))
+        return ConversationHandler.END
+
     if "error" in user_data or "error" in rate_data:
         await message_interface.reply_text(t("common.error_generic", context))
         return ConversationHandler.END
 
     context.user_data["profile"] = user_data.get("profile", {})
+    # Ensure profile_data structure exists
+    if "profile_data" not in context.user_data:
+        context.user_data["profile_data"] = {}
     context.user_data["profile_data"]["profile"] = user_data.get("profile", {})
 
     profile = context.user_data["profile"]
@@ -136,7 +143,7 @@ async def categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     user_data = api_client.get_user_settings(context.user_data['jwt'])
-    if "error" in user_data:
+    if user_data is None or "error" in user_data:
         return await settings_menu(update, context)
 
     context.user_data["profile"] = user_data.get("profile", {})
@@ -202,12 +209,18 @@ async def received_category_name(update: Update, context: ContextTypes.DEFAULT_T
 
     if action == 'add':
         res = api_client.add_category(jwt, cat_type, name)
-        msg = f"❌ {res['error']}" if "error" in res else t("settings.category_add_success", context, name=name,
-                                                           type=cat_type)
+        if res is None:
+            msg = "❌ Connection Error"
+        else:
+            msg = f"❌ {res['error']}" if "error" in res else t("settings.category_add_success", context, name=name,
+                                                               type=cat_type)
     else:
         res = api_client.remove_category(jwt, cat_type, name)
-        msg = f"❌ {res['error']}" if "error" in res else t("settings.category_remove_success", context, name=name,
-                                                           type=cat_type)
+        if res is None:
+            msg = "❌ Connection Error"
+        else:
+            msg = f"❌ {res['error']}" if "error" in res else t("settings.category_remove_success", context, name=name,
+                                                               type=cat_type)
 
     await update.message.reply_text(msg)
     return await settings_menu(update, context)
@@ -321,7 +334,6 @@ settings_conversation_handler = ConversationHandler(
             CallbackQueryHandler(categories_menu, pattern='^settings_manage_categories$'),
             CallbackQueryHandler(switch_to_dual_confirm, pattern='^settings_switch_to_dual$'),
             CallbackQueryHandler(change_language_start, pattern='^settings_change_language$'),
-            # FIXED: Use menu instead of start
             CallbackQueryHandler(menu, pattern='^menu$'),
         ],
         SETBALANCE_ACCOUNT: [CallbackQueryHandler(received_balance_account, pattern='^set_balance_')],
@@ -344,7 +356,6 @@ settings_conversation_handler = ConversationHandler(
         GET_MISSING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_missing_name_for_switch)],
     },
     fallbacks=[
-        # FIXED: Use menu
         CommandHandler('menu', menu),
         CommandHandler('cancel', cancel),
         CallbackQueryHandler(menu, pattern='^menu$'),
