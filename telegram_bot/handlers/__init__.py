@@ -8,12 +8,11 @@ from telegram.ext import (
     filters
 )
 
-# Import help_command and others
+# Import 'menu' for the dashboard, 'quick_check'/'cancel' for utilities, and 'help_command'
 from .common import menu, quick_check, cancel, help_command
 from .settings import settings_conversation_handler
 from .onboarding import onboarding_conversation_handler, onboarding_start
 
-# ... (Rest of imports remain the same) ...
 from .analytics import (
     report_menu, process_report_choice, received_report_start_date,
     received_report_end_date, habits_menu, process_habits_choice,
@@ -21,6 +20,7 @@ from .analytics import (
     CHOOSE_REPORT_PERIOD, REPORT_ASK_START_DATE, REPORT_ASK_END_DATE,
     CHOOSE_HABITS_PERIOD
 )
+
 from .iou import (
     iou_menu, iou_view, iou_person_detail, iou_detail, debt_analysis,
     iou_start, iou_received_date_choice, iou_received_custom_date,
@@ -32,6 +32,7 @@ from .iou import (
     IOU_ASK_DATE, IOU_CUSTOM_DATE, IOU_PERSON, IOU_AMOUNT, IOU_CURRENCY,
     IOU_PURPOSE, REPAY_LUMP_AMOUNT, IOU_EDIT_GET_VALUE
 )
+
 from .transaction import (
     add_transaction_start,
     forgot_log_start, received_forgot_day, received_forgot_custom_date,
@@ -48,6 +49,7 @@ from .transaction import (
     EDIT_CHOOSE_FIELD, EDIT_GET_NEW_VALUE, EDIT_GET_NEW_CATEGORY,
     EDIT_GET_CUSTOM_CATEGORY
 )
+
 from .utility import (
     set_reminder_start, received_reminder_purpose,
     received_reminder_date_choice, received_reminder_custom_date,
@@ -55,6 +57,7 @@ from .utility import (
     REMINDER_PURPOSE, REMINDER_ASK_DATE, REMINDER_CUSTOM_DATE,
     REMINDER_ASK_TIME
 )
+
 from .search import (
     search_menu_entry, search_start, received_period_choice,
     received_custom_start, received_custom_end,
@@ -64,17 +67,20 @@ from .search import (
     GET_CATEGORIES, GET_KEYWORDS, GET_KEYWORD_LOGIC, CHOOSE_ACTION
 )
 
-# Standard fallbacks for all conversations
+# --- STANDARD FALLBACKS ---
+# This list allows users to exit ANY active conversation (like adding a transaction)
+# by typing a global command or clicking a main menu button.
 STANDARD_FALLBACKS = [
     CommandHandler('cancel', cancel),
-    CommandHandler('start', onboarding_start),
-    CommandHandler('menu', menu),
-    CommandHandler('help', help_command),
-    CallbackQueryHandler(onboarding_start, pattern='^start$')
+    CommandHandler('start', onboarding_start), # /start checks onboarding/resets
+    CommandHandler('menu', menu),              # /menu goes to dashboard
+    CommandHandler('help', help_command),      # /help shows guide
+    CallbackQueryHandler(onboarding_start, pattern='^start$'),
+    CallbackQueryHandler(menu, pattern='^menu$') # Handle "Back to Main Menu" buttons
 ]
 
-# ... (Rest of the file remains the same with updated fallbacks logic if applied globally) ...
-# Note: Ensure tx_conversation_handler and others use STANDARD_FALLBACKS
+# --- Conversation Handlers ---
+
 tx_conversation_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(add_transaction_start, pattern='^(add_expense|add_income)$')],
     states={

@@ -1,3 +1,5 @@
+# telegram_bot/handlers/transaction.py
+
 import re
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
@@ -6,7 +8,8 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 import api_client
 import keyboards
-from .common import start
+# FIXED: Import 'menu' instead of 'start'
+from .common import menu, cancel
 from decorators import authenticate_user
 from utils.i18n import t
 
@@ -29,7 +32,6 @@ def _get_tx_settings(context):
 
 
 def parse_amount_and_currency_for_mode(amount_str: str, mode: str, primary_currency: str):
-    """Returns (amount, currency, is_ambiguous)."""
     s = amount_str.lower().strip()
     if mode == 'single':
         try:
@@ -41,8 +43,7 @@ def parse_amount_and_currency_for_mode(amount_str: str, mode: str, primary_curre
         return float(s.replace('khr', '').strip()), 'KHR', False
 
     try:
-        # Check if explicitly USD (regex would be better but simple check is okay for now)
-        return float(re.sub(r"[^0-9.]", "", s)), 'USD', True  # Ambiguous
+        return float(re.sub(r"[^0-9.]", "", s)), 'USD', True
     except ValueError:
         raise ValueError("Invalid amount")
 
@@ -54,7 +55,6 @@ async def add_transaction_start(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
 
-    # Reset tx state
     for k in ['tx_amount', 'tx_currency', 'tx_category', 'tx_remark', 'timestamp']:
         context.user_data.pop(k, None)
 
@@ -93,7 +93,6 @@ async def received_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
     curr = query.data.split('_')[1]
     context.user_data['tx_currency'] = curr
 
-    # Ensure tx_type exists; default to expense if missing (shouldn't happen in normal flow)
     if 'tx_type' not in context.user_data:
         context.user_data['tx_type'] = 'expense'
 
@@ -188,7 +187,6 @@ async def save_transaction_and_end(update: Update, context: ContextTypes.DEFAULT
     target = update.callback_query.message if update.callback_query else update.message
     await target.reply_text(msg, reply_markup=keyboards.main_menu_keyboard(context))
 
-    # Cleanup
     for k in ['tx_type', 'tx_amount', 'tx_currency', 'tx_category', 'tx_remark', 'timestamp']:
         context.user_data.pop(k, None)
 

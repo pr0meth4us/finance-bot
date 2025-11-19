@@ -1,3 +1,5 @@
+# telegram_bot/handlers/iou.py
+
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 from telegram import Update
@@ -16,6 +18,8 @@ from .helpers import (
 from .transaction import parse_amount_and_currency_for_mode
 from utils.i18n import t
 from api_client import PremiumFeatureException
+# FIXED: Import 'menu' instead of 'start'
+from .common import menu, cancel
 
 (
     IOU_ASK_DATE, IOU_CUSTOM_DATE, IOU_PERSON, IOU_AMOUNT, IOU_CURRENCY,
@@ -24,107 +28,10 @@ from api_client import PremiumFeatureException
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
+# ... (Rest of file remains unchanged, as it doesn't call 'start' explicitly other than via imports,
+# but we must ensure we don't use 'start' in any handlers if we removed it)
 
-def _get_iou_settings(context: ContextTypes.DEFAULT_TYPE):
-    profile = context.user_data.get('profile', {})
-    settings = profile.get('settings', {})
-    mode = settings.get('currency_mode', 'dual')
-    primary = settings.get('primary_currency', 'USD') if mode == 'single' else 'USD'
-    return mode, primary
-
-
-def _format_debt_details(debt, context):
-    status = debt['status'].title()
-    currency = debt.get('currency', 'USD')
-    fmt = ",.0f" if currency == 'KHR' else ",.2f"
-
-    direction = t("iou.debt_direction_lent", context) if debt['type'] == 'lent' else t("iou.debt_direction_borrowed",
-                                                                                       context)
-    created = datetime.fromisoformat(debt['created_at']).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
-
-    lines = [
-        t("iou.debt_details_header", context, status=status),
-        t("iou.debt_person", context, person=debt['person'], direction=direction),
-        t("iou.debt_created", context, date=created),
-    ]
-
-    if debt.get('purpose'):
-        lines.append(t("iou.debt_purpose", context, purpose=debt['purpose']))
-
-    lines.append(t("iou.debt_original", context, amount=f"{debt['originalAmount']:{fmt}}", currency=currency))
-    lines.append(t("iou.debt_remaining", context, amount=f"{debt['remainingAmount']:{fmt}}", currency=currency))
-
-    if debt.get('repayments'):
-        lines.append(t("iou.debt_repayments", context))
-        for r in debt['repayments']:
-            rdt = datetime.fromisoformat(r['date']).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y')
-            lines.append(
-                t("iou.debt_repayment_item", context, amount=f"{r['amount']:{fmt}}", currency=currency, date=rdt))
-
-    return "\n".join(lines)
-
-
-def _format_person_ledger(debts, context, is_settled=False):
-    if not debts:
-        return t("iou.person_fail", context, person="this person")
-
-    mode, _ = _get_iou_settings(context)
-    lines = []
-    totals = {'USD': 0, 'KHR': 0}
-    items = []
-
-    for d in debts:
-        curr = d.get('currency', 'USD')
-        fmt = ",.0f" if curr == 'KHR' else ",.2f"
-
-        if not is_settled:
-            totals[curr] += d['remainingAmount']
-
-        created = datetime.fromisoformat(d['created_at'])
-        icon = "✅" if d['status'] == 'settled' else ("❌" if d['status'] == 'canceled' else "🔹")
-        label = f"{icon} <b>{d['originalAmount']:{fmt}} {curr}</b> ({d.get('purpose', 'No purpose')})"
-
-        items.append((created, label))
-        for r in d.get('repayments', []):
-            rdt = datetime.fromisoformat(r['date'])
-            items.append((rdt, f"  <i>- Repaid {r['amount']:{fmt}} {curr}</i>"))
-
-    items.sort(key=lambda x: x[0])
-
-    # Totals Header
-    if not is_settled:
-        header = [t("iou.ledger_total_remaining", context)]
-        has_bal = False
-
-        if mode == 'dual':
-            if totals['USD'] > 0: header.append(f"  💵 {totals['USD']:,.2f} USD"); has_bal = True
-            if totals['KHR'] > 0: header.append(f"  ៛ {totals['KHR']:,.0f} KHR"); has_bal = True
-        else:
-            # Single mode display
-            primary = 'USD' if totals['USD'] > 0 else 'KHR'  # Simplification, usually one is 0
-            val = totals[primary]
-            if val > 0:
-                fmt = ",.0f" if primary == 'KHR' else ",.2f"
-                header.append(f"  <b>{val:{fmt}} {primary}</b>")
-                has_bal = True
-
-        if not has_bal: header.append(t("iou.ledger_none", context))
-        lines.append("\n".join(header) + "\n")
-
-    lines.append(t("iou.ledger_header", context))
-
-    last_date = None
-    for dt, text in items:
-        dstr = dt.astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y')
-        if dstr != last_date:
-            lines.append(f"\n<u>{dstr}</u>")
-            last_date = dstr
-        lines.append(text)
-
-    return "\n".join(lines)
-
-
-# --- Handlers ---
+# ... [Skipping to Handlers] ...
 
 @authenticate_user
 async def iou_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -133,7 +40,6 @@ async def iou_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text=t("iou.menu_header", context),
         reply_markup=keyboards.iou_menu_keyboard(context)
     )
-
 
 @authenticate_user
 async def iou_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -146,7 +52,6 @@ async def iou_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.callback_query.edit_message_text(text, reply_markup=kb, parse_mode='Markdown')
 
-
 @authenticate_user
 async def iou_view_settled(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
@@ -156,7 +61,6 @@ async def iou_view_settled(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = keyboards.iou_list_keyboard(debts, context, is_settled=True) if debts else keyboards.iou_menu_keyboard(context)
 
     await update.callback_query.edit_message_text(text, reply_markup=kb, parse_mode='Markdown')
-
 
 @authenticate_user
 async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -181,7 +85,6 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=keyboards.iou_person_actions_keyboard(person, dtype, context, False)
     )
 
-
 @authenticate_user
 async def iou_person_detail_settled(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -205,7 +108,6 @@ async def iou_person_detail_settled(update: Update, context: ContextTypes.DEFAUL
         reply_markup=keyboards.iou_person_actions_keyboard(person, dtype, context, True)
     )
 
-
 @authenticate_user
 async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -221,7 +123,6 @@ async def iou_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = _format_debt_details(debt, context)
     kb = keyboards.iou_detail_actions_keyboard(debt_id, person, debt['type'], is_settled, debt['status'], context)
     await query.edit_message_text(text, parse_mode='HTML', reply_markup=kb)
-
 
 @authenticate_user
 async def iou_manage_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -243,7 +144,6 @@ async def iou_manage_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         t("iou.manage_header", context),
         reply_markup=keyboards.iou_manage_list_keyboard(debts, person, dtype, is_settled, context)
     )
-
 
 @authenticate_user
 async def debt_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -518,3 +418,105 @@ async def iou_edit_received_value(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text(msg + format_summary_message(summary, context), parse_mode='HTML',
                                     reply_markup=keyboards.main_menu_keyboard(context))
     return ConversationHandler.END
+
+# --- Helper functions for formatting repeated in this file ---
+# (If these helper functions are large, they should be moved to helpers.py,
+# but for this fix I am keeping them if they were already here or using imports)
+# Note: In previous steps _format_person_ledger, _get_iou_settings etc were defined here.
+# I am ensuring they are present or imported.
+
+def _get_iou_settings(context: ContextTypes.DEFAULT_TYPE):
+    profile = context.user_data.get('profile', {})
+    settings = profile.get('settings', {})
+    mode = settings.get('currency_mode', 'dual')
+    primary = settings.get('primary_currency', 'USD') if mode == 'single' else 'USD'
+    return mode, primary
+
+
+def _format_debt_details(debt, context):
+    status = debt['status'].title()
+    currency = debt.get('currency', 'USD')
+    fmt = ",.0f" if currency == 'KHR' else ",.2f"
+
+    direction = t("iou.debt_direction_lent", context) if debt['type'] == 'lent' else t("iou.debt_direction_borrowed",
+                                                                                       context)
+    created = datetime.fromisoformat(debt['created_at']).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
+
+    lines = [
+        t("iou.debt_details_header", context, status=status),
+        t("iou.debt_person", context, person=debt['person'], direction=direction),
+        t("iou.debt_created", context, date=created),
+    ]
+
+    if debt.get('purpose'):
+        lines.append(t("iou.debt_purpose", context, purpose=debt['purpose']))
+
+    lines.append(t("iou.debt_original", context, amount=f"{debt['originalAmount']:{fmt}}", currency=currency))
+    lines.append(t("iou.debt_remaining", context, amount=f"{debt['remainingAmount']:{fmt}}", currency=currency))
+
+    if debt.get('repayments'):
+        lines.append(t("iou.debt_repayments", context))
+        for r in debt['repayments']:
+            rdt = datetime.fromisoformat(r['date']).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y')
+            lines.append(
+                t("iou.debt_repayment_item", context, amount=f"{r['amount']:{fmt}}", currency=currency, date=rdt))
+
+    return "\n".join(lines)
+
+
+def _format_person_ledger(debts, context, is_settled=False):
+    if not debts:
+        return t("iou.person_fail", context, person="this person")
+
+    mode, _ = _get_iou_settings(context)
+    lines = []
+    totals = {'USD': 0, 'KHR': 0}
+    items = []
+
+    for d in debts:
+        curr = d.get('currency', 'USD')
+        fmt = ",.0f" if curr == 'KHR' else ",.2f"
+
+        if not is_settled:
+            totals[curr] += d['remainingAmount']
+
+        created = datetime.fromisoformat(d['created_at'])
+        icon = "✅" if d['status'] == 'settled' else ("❌" if d['status'] == 'canceled' else "🔹")
+        label = f"{icon} <b>{d['originalAmount']:{fmt}} {curr}</b> ({d.get('purpose', 'No purpose')})"
+
+        items.append((created, label))
+        for r in d.get('repayments', []):
+            rdt = datetime.fromisoformat(r['date'])
+            items.append((rdt, f"  <i>- Repaid {r['amount']:{fmt}} {curr}</i>"))
+
+    items.sort(key=lambda x: x[0])
+
+    if not is_settled:
+        header = [t("iou.ledger_total_remaining", context)]
+        has_bal = False
+
+        if mode == 'dual':
+            if totals['USD'] > 0: header.append(f"  💵 {totals['USD']:,.2f} USD"); has_bal = True
+            if totals['KHR'] > 0: header.append(f"  ៛ {totals['KHR']:,.0f} KHR"); has_bal = True
+        else:
+            primary = 'USD' if totals['USD'] > 0 else 'KHR'
+            val = totals[primary]
+            if val > 0:
+                fmt = ",.0f" if primary == 'KHR' else ",.2f"
+                header.append(f"  <b>{val:{fmt}} {primary}</b>")
+                has_bal = True
+
+        if not has_bal: header.append(t("iou.ledger_none", context))
+        lines.append("\n".join(header) + "\n")
+
+    lines.append(t("iou.ledger_header", context))
+
+    last_date = None
+    for dt, text in items:
+        dstr = dt.astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y')
+        if dstr != last_date:
+            lines.append(f"\n<u>{dstr}</u>")
+            last_date = dstr
+        lines.append(text)
+
+    return "\n".join(lines)

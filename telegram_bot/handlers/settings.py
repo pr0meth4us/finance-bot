@@ -11,7 +11,8 @@ from telegram.ext import (
 )
 import api_client
 import keyboards
-from .common import start, cancel
+# FIXED: Import 'menu' instead of 'start'
+from .common import menu, cancel
 from decorators import authenticate_user
 from utils.i18n import t
 
@@ -47,7 +48,6 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message_interface.reply_text(t("common.error_generic", context))
         return ConversationHandler.END
 
-    # Update cache
     context.user_data["profile"] = user_data.get("profile", {})
     context.user_data["profile_data"]["profile"] = user_data.get("profile", {})
 
@@ -56,7 +56,6 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     balances = settings.get('initial_balances', {})
     mode = settings.get('currency_mode', 'dual')
 
-    # Formatting
     balance_text = ""
     if mode == 'dual':
         balance_text = f"  💵 ${balances.get('USD', 0):,.2f} USD\n  ៛ {balances.get('KHR', 0):,.0f} KHR"
@@ -79,15 +78,11 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SETTINGS_MENU
 
 
-# --- Balances ---
-
 async def set_balance_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     profile = context.user_data['profile']
     mode = profile.get('settings', {}).get('currency_mode', 'dual')
-
-    # Dummy currency tuple for single mode logic inside keyboard
     currencies = (profile.get('settings', {}).get('primary_currency', 'USD'),)
 
     await query.edit_message_text(
@@ -119,8 +114,6 @@ async def received_balance_amount(update: Update, context: ContextTypes.DEFAULT_
         return SETBALANCE_AMOUNT
 
 
-# --- Rate ---
-
 async def update_rate_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.edit_message_text(t("settings.ask_rate", context))
@@ -138,8 +131,6 @@ async def received_new_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return NEW_RATE
 
 
-# --- Categories ---
-
 async def categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -151,7 +142,6 @@ async def categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["profile"] = user_data.get("profile", {})
     cats = context.user_data["profile"].get('settings', {}).get('categories', {})
 
-    # Visual feedback for the user on what they have
     text = t("settings.categories_header", context,
              expense_cats=', '.join(cats.get('expense', [])) or 'None',
              income_cats=', '.join(cats.get('income', [])) or 'None')
@@ -161,42 +151,26 @@ async def categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def category_action_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Handles the click on Add/Remove Category.
-    Enforces the 'Premium' gate logic in the UI.
-    """
     query = update.callback_query
 
-    # --- COMMERCIAL LOGIC START ---
-    # Check Tier locally before even asking the API
     profile = context.user_data.get('profile', {})
     tier = profile.get('subscription_tier', 'free')
-
-    # Hardcoded Admin Bypass
     if str(update.effective_user.id) == "1836585300":
         tier = 'premium'
 
     if tier != 'premium':
         await query.answer("🔒 Premium Feature", show_alert=True)
-
         upsell_text = (
             "🔒 <b>Manage Categories is Locked</b>\n\n"
-            "Free users are limited to the Basic categories (Food, Transport, etc.).\n\n"
-            "<b>Upgrade to Premium</b> to:\n"
-            "✅ Add custom categories (e.g., 'Gaming', 'Dog Food')\n"
-            "✅ Remove unused categories\n"
-            "✅ Track your specific lifestyle!"
+            "Free users are limited to the Basic categories.\n"
+            "Upgrade to Premium to customize!"
         )
-
-        # Edit the message to show the upsell, but stay in CATEGORIES_MENU state
-        # so the "Back" button works correctly.
         await query.edit_message_text(
             upsell_text,
             parse_mode='HTML',
-            reply_markup=keyboards.manage_categories_keyboard(context)  # Reuse menu to allow going back
+            reply_markup=keyboards.manage_categories_keyboard(context)
         )
         return CATEGORIES_MENU
-    # --- COMMERCIAL LOGIC END ---
 
     await query.answer()
     action = 'add' if 'add' in query.data else 'remove'
@@ -228,22 +202,16 @@ async def received_category_name(update: Update, context: ContextTypes.DEFAULT_T
 
     if action == 'add':
         res = api_client.add_category(jwt, cat_type, name)
-        if "error" in res:
-            msg = f"❌ {res['error']}"
-        else:
-            msg = t("settings.category_add_success", context, name=name, type=cat_type)
+        msg = f"❌ {res['error']}" if "error" in res else t("settings.category_add_success", context, name=name,
+                                                           type=cat_type)
     else:
         res = api_client.remove_category(jwt, cat_type, name)
-        if "error" in res:
-            msg = f"❌ {res['error']}"
-        else:
-            msg = t("settings.category_remove_success", context, name=name, type=cat_type)
+        msg = f"❌ {res['error']}" if "error" in res else t("settings.category_remove_success", context, name=name,
+                                                           type=cat_type)
 
     await update.message.reply_text(msg)
     return await settings_menu(update, context)
 
-
-# --- Dual Mode Switch ---
 
 async def switch_to_dual_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
@@ -256,7 +224,7 @@ async def switch_to_dual_confirm(update: Update, context: ContextTypes.DEFAULT_T
 
 async def switch_to_dual_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    context.user_data['profile']['settings']['language'] = 'km'  # Temp switch for prompt
+    context.user_data['profile']['settings']['language'] = 'km'
     await update.callback_query.edit_message_text(t("settings.ask_name_km_switch", context))
     return SWITCH_TO_DUAL_GET_KM_NAME
 
@@ -275,8 +243,6 @@ async def received_km_name_for_switch(update: Update, context: ContextTypes.DEFA
     await update.message.reply_text(t("settings.switch_to_dual_success", context))
     return await settings_menu(update, context)
 
-
-# --- Language Switch ---
 
 async def change_language_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
@@ -338,9 +304,9 @@ async def _finalize_language_switch(update_obj, context, new_lang):
     msg = t("settings.language_switch_success", context)
     kb = keyboards.main_menu_keyboard(context)
 
-    if isinstance(update_obj, Update):  # From message
+    if isinstance(update_obj, Update):
         await update_obj.message.reply_text(msg, reply_markup=kb)
-    else:  # From callback query
+    else:
         await update_obj.edit_message_text(msg, reply_markup=kb)
 
     return ConversationHandler.END
@@ -355,7 +321,8 @@ settings_conversation_handler = ConversationHandler(
             CallbackQueryHandler(categories_menu, pattern='^settings_manage_categories$'),
             CallbackQueryHandler(switch_to_dual_confirm, pattern='^settings_switch_to_dual$'),
             CallbackQueryHandler(change_language_start, pattern='^settings_change_language$'),
-            CallbackQueryHandler(start, pattern='^start$'),
+            # FIXED: Use menu instead of start
+            CallbackQueryHandler(menu, pattern='^menu$'),
         ],
         SETBALANCE_ACCOUNT: [CallbackQueryHandler(received_balance_account, pattern='^set_balance_')],
         SETBALANCE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_balance_amount)],
@@ -377,9 +344,10 @@ settings_conversation_handler = ConversationHandler(
         GET_MISSING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_missing_name_for_switch)],
     },
     fallbacks=[
-        CommandHandler('start', start),
+        # FIXED: Use menu
+        CommandHandler('menu', menu),
         CommandHandler('cancel', cancel),
-        CallbackQueryHandler(start, pattern='^start$'),
+        CallbackQueryHandler(menu, pattern='^menu$'),
         CallbackQueryHandler(cancel, pattern='^cancel_conversation$')
     ],
     per_message=False
