@@ -1,3 +1,5 @@
+# telegram_bot/handlers/helpers.py
+
 import io
 import csv
 import pandas as pd
@@ -129,19 +131,24 @@ def format_summation_results(params, results, context: ContextTypes.DEFAULT_TYPE
     return header + "\n".join(meta) + "\n".join(stats)
 
 
-def _format_report_summary_message(data, context: ContextTypes.DEFAULT_TYPE):
+def _format_report_summary_message(data, context: ContextTypes.DEFAULT_TYPE, is_premium=False):
+    """
+    Generates the text report.
+    If is_premium is False, it truncates detailed sections and shows an upsell.
+    """
     s = data.get('summary', {})
     start = datetime.fromisoformat(data['startDate']).strftime('%b %d, %Y')
     end = datetime.fromisoformat(data['endDate']).strftime('%b %d, %Y')
 
+    # --- 1. Header & Balance (Everyone) ---
     header = t("analytics.report_header", context, start_date=start, end_date=end)
-
     balance = (
             t("analytics.balance_overview", context) +
             t("analytics.starting_balance", context, balance=s.get('balanceAtStartUSD', 0)) +
             t("analytics.ending_balance", context, balance=s.get('balanceAtEndUSD', 0))
     )
 
+    # --- 2. Operational Summary (Everyone) ---
     net = s.get('netSavingsUSD', 0)
     ops = (
             t("analytics.operational_summary", context) +
@@ -150,7 +157,73 @@ def _format_report_summary_message(data, context: ContextTypes.DEFAULT_TYPE):
             t("analytics.net_savings", context, net=net, emoji='✅' if net >= 0 else '🔻')
     )
 
-    return header + balance + ops
+    base_report = header + balance + ops
+
+    # --- 3. PREMIUM SECTIONS ---
+    if not is_premium:
+        # UPSell Message for Free Users
+        locked_msg = (
+            "\n🔒 <b>Detailed Insights Locked</b>\n"
+            "<i>Upgrade to Premium to see:</i>\n"
+            "  • 📊 Top Expense Categories\n"
+            "  • 📅 Busiest Spending Days\n"
+            "  • 💸 Debt & Loan Analysis\n"
+            "  • 🏆 Biggest Single Purchases\n"
+        )
+        return base_report + locked_msg
+
+    # -- Insights --
+    insights = data.get('expenseInsights', {})
+    top_exp = insights.get('topExpenseItem')
+    busiest = insights.get('mostExpensiveDay')
+
+    insights_text = t("analytics.expense_insights", context)
+    if top_exp:
+        insights_text += t("analytics.top_expense", context, amount=top_exp['amount_usd'],
+                           description=top_exp['description'], date=top_exp['date'])
+    if busiest:
+        insights_text += t("analytics.busiest_day", context, date=busiest['_id'], amount=busiest['total_spent_usd'])
+
+    # -- Categories --
+    cat_text = t("analytics.major_expenses", context)
+    breakdown = data.get('expenseBreakdown', [])
+    if breakdown:
+        # Sort by totalUSD descending
+        sorted_cats = sorted(breakdown, key=lambda x: x['totalUSD'], reverse=True)
+        for item in sorted_cats[:5]:  # Top 5
+            cat_name = item['category']
+            # Try to translate category if it's a system one
+            if not " " in cat_name:  # Simple heuristic or use existing t() logic
+                cat_display = t(f"categories.{cat_name}", context)
+            else:
+                cat_display = cat_name
+
+            cat_text += f"    - {cat_display}: ${item['totalUSD']:,.2f}\n"
+    else:
+        cat_text += t("analytics.no_major_expenses", context)
+
+    # -- Debt/Financials --
+    fin = data.get('financialSummary', {})
+    fin_text = t("analytics.loan_activity", context)
+    has_fin = False
+
+    if fin.get('totalLentUSD', 0) > 0:
+        fin_text += t("analytics.lent_to_others", context, amount=fin['totalLentUSD']);
+        has_fin = True
+    if fin.get('totalBorrowedUSD', 0) > 0:
+        fin_text += t("analytics.borrowed_from_others", context, amount=fin['totalBorrowedUSD']);
+        has_fin = True
+    if fin.get('totalRepaidToYouUSD', 0) > 0:
+        fin_text += t("analytics.repayments_received", context, amount=fin['totalRepaidToYouUSD']);
+        has_fin = True
+    if fin.get('totalYouRepaidUSD', 0) > 0:
+        fin_text += t("analytics.repayments_made", context, amount=fin['totalYouRepaidUSD']);
+        has_fin = True
+
+    if not has_fin:
+        fin_text += t("analytics.no_loan_activity", context)
+
+    return base_report + "\n" + insights_text + cat_text + fin_text
 
 
 def _format_habits_message(data):

@@ -1,3 +1,5 @@
+# telegram_bot/handlers/analytics.py
+
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from telegram import Update
@@ -15,7 +17,7 @@ from .helpers import (
     _create_csv_from_transactions
 )
 from utils.i18n import t
-from api_client import PremiumFeatureException
+from api_client import PremiumFeatureException, UpstreamUnavailable
 
 (
     CHOOSE_REPORT_PERIOD, REPORT_ASK_START_DATE, REPORT_ASK_END_DATE,
@@ -45,7 +47,6 @@ async def process_report_choice(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text(t("analytics.report_ask_start", context))
         return REPORT_ASK_START_DATE
 
-    # Calculate dates
     today = datetime.now(PHNOM_PENH_TZ).date()
     start, end = today, today
 
@@ -101,6 +102,12 @@ async def _generate_report(update, context, start, end):
     loading = await msg.reply_text(t("analytics.report_generating", context, start_date=start, end_date=end))
 
     try:
+        # 1. Determine User Tier
+        # Hardcoded admin bypass
+        user_id = str(update.effective_user.id)
+        role = context.user_data.get('role', 'user')
+        is_premium = (role in ['premium_user', 'admin']) or (user_id == "1836585300")
+
         data = api_client.get_detailed_report(context.user_data['jwt'], start, end)
         await loading.delete()
 
@@ -109,16 +116,21 @@ async def _generate_report(update, context, start, end):
                                            reply_markup=keyboards.main_menu_keyboard(context))
             return
 
-        summary = _format_report_summary_message(data, context)
+        # 2. Format Text (Tier-Aware)
+        summary = _format_report_summary_message(data, context, is_premium=is_premium)
         await context.bot.send_message(msg.chat.id, summary, parse_mode='HTML')
 
-        # Charts
+        # 3. Generate Charts (Tier-Aware)
+        # Basic chart for everyone
         if bar := _create_income_expense_chart(data, start, end):
             await context.bot.send_photo(msg.chat.id, bar)
-        if line := _create_spending_line_chart(data, start, end):
-            await context.bot.send_photo(msg.chat.id, line)
-        if pie := _create_expense_pie_chart(data, start, end):
-            await context.bot.send_photo(msg.chat.id, pie)
+
+        # Advanced charts for Premium only
+        if is_premium:
+            if line := _create_spending_line_chart(data, start, end):
+                await context.bot.send_photo(msg.chat.id, line)
+            if pie := _create_expense_pie_chart(data, start, end):
+                await context.bot.send_photo(msg.chat.id, pie)
 
         await context.bot.send_message(msg.chat.id, t("analytics.report_success", context),
                                        reply_markup=keyboards.report_actions_keyboard(start, end, context))
@@ -126,6 +138,10 @@ async def _generate_report(update, context, start, end):
     except PremiumFeatureException:
         await loading.delete()
         await context.bot.send_message(msg.chat.id, t("common.premium_required", context),
+                                       reply_markup=keyboards.main_menu_keyboard(context))
+    except UpstreamUnavailable:
+        await loading.delete()
+        await context.bot.send_message(msg.chat.id, t("common.upstream_error", context),
                                        reply_markup=keyboards.main_menu_keyboard(context))
     except Exception as e:
         await loading.delete()
@@ -155,7 +171,6 @@ async def process_habits_choice(update: Update, context: ContextTypes.DEFAULT_TY
                                       reply_markup=keyboards.report_period_keyboard(context))
         return CHOOSE_HABITS_PERIOD
 
-    # Reuse date logic (simplified duplication here for isolation)
     today = datetime.now(PHNOM_PENH_TZ).date()
     start, end = today, today
 
@@ -187,6 +202,9 @@ async def process_habits_choice(update: Update, context: ContextTypes.DEFAULT_TY
 
     except PremiumFeatureException:
         await query.edit_message_text(t("common.premium_required", context),
+                                      reply_markup=keyboards.main_menu_keyboard(context))
+    except UpstreamUnavailable:
+        await query.edit_message_text(t("common.upstream_error", context),
                                       reply_markup=keyboards.main_menu_keyboard(context))
     except Exception as e:
         await query.edit_message_text(f"Error: {e}", reply_markup=keyboards.main_menu_keyboard(context))
