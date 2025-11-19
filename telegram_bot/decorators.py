@@ -1,7 +1,10 @@
+# telegram_bot/decorators.py
+
 from functools import wraps
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 import api_client
+from api_client import UpstreamUnavailable
 import logging
 from utils.i18n import t
 
@@ -20,12 +23,24 @@ async def _send_auth_error(update: Update, context: ContextTypes.DEFAULT_TYPE, m
         )
 
 
+async def _send_upstream_error(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sends a friendly 'Service Unavailable' message."""
+    msg = t("common.upstream_error", context)
+
+    if update.callback_query:
+        # Answer query to stop loading animation, then send message
+        await context.bot.answer_callback_query(
+            callback_query_id=update.callback_query.id,
+            text=t("common.upstream_alert", context),
+            show_alert=True
+        )
+    elif update.message:
+        await update.message.reply_text(msg, parse_mode='Markdown')
+
+
 def authenticate_user(func):
     """
     Decorator for JWT authentication and profile fetching.
-    1. Checks/Refreshes Bifrost JWT.
-    2. Checks/Refreshes User Profile.
-    3. Enforces Onboarding completion (unless running onboarding itself).
     """
 
     @wraps(func)
@@ -87,11 +102,18 @@ def authenticate_user(func):
                     )
                 return ConversationHandler.END
 
+            # 4. Execute Handler
             return await func(update, context, *args, **kwargs)
+
+        except UpstreamUnavailable:
+            # Catches 500s/Timeouts from API calls inside auth OR inside the handler
+            log.warning(f"User {user_id}: UpstreamUnavailable caught in decorator.")
+            await _send_upstream_error(update, context)
+            return ConversationHandler.END
 
         except Exception as e:
             log.error(f"Auth decorator error for {user_id}: {e}", exc_info=True)
-            await _send_auth_error(update, context, "An unexpected authentication error occurred.")
+            await _send_auth_error(update, context, "An unexpected error occurred.")
             return ConversationHandler.END
 
     return wrapped

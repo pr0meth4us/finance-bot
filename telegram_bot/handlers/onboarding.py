@@ -1,4 +1,6 @@
-from telegram import Update
+# telegram_bot/handlers/onboarding.py
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ContextTypes,
     ConversationHandler,
@@ -9,8 +11,6 @@ from telegram.ext import (
 )
 import logging
 import api_client
-import keyboards
-from .helpers import format_summary_message
 from utils.i18n import t
 from decorators import authenticate_user
 
@@ -24,59 +24,97 @@ log = logging.getLogger(__name__)
     ASK_SINGLE_CURRENCY,
     ASK_USD_BALANCE,
     ASK_KHR_BALANCE,
-    ASK_SINGLE_BALANCE
-) = range(100, 108)
+    ASK_SINGLE_BALANCE,
+    CONFIRM_RESET
+) = range(100, 109)
 
 
 @authenticate_user
 async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Entry point for /start. Checks completion status or starts onboarding."""
+    """
+    Entry point for /start.
+    Logic:
+    - If user already onboarded -> Show 'Already Onboarded' message + End.
+    - If new user -> Start Setup.
+    """
     user_id = update.effective_user.id
     profile = context.user_data["profile"]
-    jwt = context.user_data["jwt"]
 
     if profile.get("onboarding_complete"):
-        log.info(f"User {user_id}: Already onboarded. Showing main menu.")
-
-        lang = profile.get('settings', {}).get('language', 'en')
-        user_name = profile.get('name_km') if lang == 'km' and profile.get('name_km') else profile.get('name_en',
-                                                                                                       'User')
-
-        summary_data = api_client.get_detailed_summary(jwt)
-        text = t("common.welcome", context, name=user_name) + format_summary_message(summary_data, context)
-
-        keyboard = keyboards.main_menu_keyboard(context)
-
-        if update.callback_query:
-            await update.callback_query.answer()
-            try:
-                await update.callback_query.edit_message_text(text, parse_mode='HTML', reply_markup=keyboard)
-            except Exception:
-                pass  # Message not modified
-        else:
-            await context.bot.send_message(update.effective_chat.id, text, parse_mode='HTML', reply_markup=keyboard)
-
+        msg = t("onboarding.already_onboarded", context)
+        await update.message.reply_text(msg, parse_mode='Markdown')
         return ConversationHandler.END
 
-    # Start Onboarding
-    log.info(f"User {user_id}: Starting onboarding.")
+    # New user? Go straight to setup
+    log.info(f"User {user_id}: Starting onboarding (First Time).")
+    return await _start_setup_flow(update, context)
+
+
+@authenticate_user
+async def reset_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Entry point for /reset.
+    Logic:
+    - If user already onboarded -> Show Confirmation Warning -> Then Start Setup.
+    - If new user -> Start Setup immediately.
+    """
+    user_id = update.effective_user.id
+    profile = context.user_data["profile"]
+
+    # Safety Check for existing users
+    if profile.get("onboarding_complete"):
+        log.info(f"User {user_id}: Triggered /reset. Asking confirmation.")
+
+        text = t("onboarding.reset_warning", context)
+        btn_yes = t("keyboards.reset_confirm", context)
+        btn_no = t("keyboards.reset_cancel", context)
+
+        keyboard = [
+            [InlineKeyboardButton(btn_yes, callback_data='reset_confirm')],
+            [InlineKeyboardButton(btn_no, callback_data='reset_cancel')]
+        ]
+
+        await update.message.reply_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+        return CONFIRM_RESET
+
+    # If they haven't onboarded yet, /reset just acts like /start
+    return await _start_setup_flow(update, context)
+
+
+async def confirm_reset_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == 'reset_cancel':
+        await query.edit_message_text(t("onboarding.reset_cancelled", context))
+        return ConversationHandler.END
+
+    log.info(f"User {update.effective_user.id}: Confirmed reset.")
+    return await _start_setup_flow(update, context)
+
+
+async def _start_setup_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The actual setup logic (Language -> Mode -> Balance)."""
     context.user_data['onboarding_data'] = {}
 
     msg = (
-        "Welcome to FinanceBot! Please select your language.\n"
+        "Welcome to FinanceBot!\n"
+        "Please select your language.\n"
         "➡️ For English, reply: en\n\n"
-        "សូមស្វាគមន៍មកកាន់ FinanceBot! សូមជ្រើសរើសភាសា។\n"
+        "សូមស្វាគមន៍មកកាន់ FinanceBot!\n"
+        "សូមជ្រើសរើសភាសា។\n"
         "➡️ សម្រាប់ភាសាខ្មែរ សូមឆ្លើយតប៖ km"
     )
 
     if update.callback_query:
-        await update.callback_query.answer()
         await update.callback_query.message.reply_text(msg)
     else:
         await update.message.reply_text(msg)
 
     return ASK_LANGUAGE
 
+
+# --- Step Handlers ---
 
 async def received_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     choice = update.message.text.strip().lower()
@@ -85,7 +123,6 @@ async def received_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ASK_LANGUAGE
 
     context.user_data['onboarding_data']['language'] = choice
-    # Update context profile immediately so t() works correctly for subsequent steps
     context.user_data['profile']['settings']['language'] = choice
 
     await update.message.reply_text(t("onboarding.ask_mode", context))
@@ -121,7 +158,6 @@ async def received_name_en(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t("onboarding.ask_primary_currency", context))
         return ASK_SINGLE_CURRENCY
     else:
-        # Dual mode
         if 'name_km' not in data:
             await update.message.reply_text(t("onboarding.ask_name_km", context))
             return ASK_NAME_KM
@@ -136,7 +172,6 @@ async def received_name_km(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t("onboarding.ask_primary_currency", context))
         return ASK_SINGLE_CURRENCY
     else:
-        # Dual mode
         if 'name_en' not in data:
             await update.message.reply_text(t("onboarding.ask_name_en", context))
             return ASK_NAME_EN
@@ -144,7 +179,6 @@ async def received_name_km(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _save_mode_and_names(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Helper to save initial config and transition to balance setup."""
     data = context.user_data['onboarding_data']
     jwt = context.user_data['jwt']
 
@@ -156,7 +190,6 @@ async def _save_mode_and_names(update: Update, context: ContextTypes.DEFAULT_TYP
         name_km=data.get('name_km')
     )
 
-    # Update local cache
     profile = context.user_data['profile']
     profile['name_en'] = data.get('name_en')
     profile['name_km'] = data.get('name_km')
@@ -216,12 +249,11 @@ async def received_khr_balance(update: Update, context: ContextTypes.DEFAULT_TYP
 
         api_client.complete_onboarding(jwt)
         context.user_data['profile']['onboarding_complete'] = True
-        # Also update the full profile_data structure
         if 'profile_data' in context.user_data:
             context.user_data['profile_data']['profile']['onboarding_complete'] = True
 
         await update.message.reply_text(t("onboarding.setup_complete", context))
-        return await onboarding_start(update, context)
+        return ConversationHandler.END
     except ValueError:
         await update.message.reply_text(t("onboarding.invalid_amount", context))
         return ASK_KHR_BALANCE
@@ -242,7 +274,7 @@ async def received_single_balance(update: Update, context: ContextTypes.DEFAULT_
             context.user_data['profile_data']['profile']['onboarding_complete'] = True
 
         await update.message.reply_text(t("onboarding.setup_complete", context))
-        return await onboarding_start(update, context)
+        return ConversationHandler.END
     except ValueError:
         await update.message.reply_text(t("onboarding.invalid_amount", context))
         return ASK_SINGLE_BALANCE
@@ -257,9 +289,13 @@ async def cancel_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE):
 onboarding_conversation_handler = ConversationHandler(
     entry_points=[
         CommandHandler('start', onboarding_start),
+        CommandHandler('reset', reset_start),
         CallbackQueryHandler(onboarding_start, pattern='^start$')
     ],
     states={
+        # CONFIRM RESET
+        CONFIRM_RESET: [CallbackQueryHandler(confirm_reset_callback, pattern='^reset_')],
+
         ASK_LANGUAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_language)],
         ASK_CURRENCY_MODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_currency_mode)],
         ASK_NAME_EN: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_name_en)],

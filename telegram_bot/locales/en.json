@@ -1,6 +1,10 @@
 {
   "common": {
     "welcome": "Welcome, {name}!",
+    "greeting_morning": "Good Morning, {name}! ☀️\nReady to track today's expenses?",
+    "greeting_afternoon": "Good Afternoon, {name}! 🌤\nDon't forget to log your lunch!",
+    "greeting_evening": "Good Evening, {name}! 🌆\nWrapping up the day?",
+    "greeting_night": "Burning the midnight oil, {name}? 🌙",
     "quick_check_header": "🔍 Here is your quick summary:",
     "cancel": "Operation cancelled.",
     "cancel_onboarding": "Onboarding cancelled.\nType /start to try again when you're ready.",
@@ -8,7 +12,10 @@
     "expense_word": "Expense",
     "income_word": "Income",
     "onboarding_required": "Please complete the setup first.\nType /start to begin.",
-    "premium_required": "🚫 This is a premium feature.\n\nPlease contact the administrator to upgrade your account."
+    "premium_required": "🚫 This is a premium feature.\n\nPlease contact the administrator to upgrade your account.",
+    "upstream_error": "⚠️ **Service Temporarily Unavailable**\nWe are experiencing connection issues with our server. Your data is safe. Please try again in a few minutes.",
+    "upstream_alert": "⚠️ Connection failed. Please try again.",
+    "summary_unavailable": "\n⚠️ *Summary unavailable (System Maintenance)*"
   },
   "summary": {
     "status_header": "\n\n--- Your Current Status ---",
@@ -109,10 +116,15 @@
     "edit_currency": "🪙 Currency",
     "edit_cancel": "‹ Cancel Edit",
     "delete_confirm": "✅ Yes, Delete",
-    "delete_cancel": "❌ No, Cancel"
+    "delete_cancel": "❌ No, Cancel",
+    "reset_confirm": "⚠️ Yes, Reset Account",
+    "reset_cancel": "❌ No, Keep Data"
   },
   "onboarding": {
     "welcome": "Welcome to FinanceBot!\n    Let’s set up your account.",
+    "already_onboarded": "✅ **You are already set up!**\n\n🔹 Use /menu to see your Dashboard.\n🔹 Use /help to see the User Guide.\n🔹 Use /reset if you want to re-configure your account (Dangerous).",
+    "reset_warning": "⚠️ **Warning: Existing Account Detected**\n\nYou have already set up your account. Running setup again will **overwrite your Initial Balances** and settings.\n(Your transaction history will remain, but balance calculations will change).\n\nAre you sure you want to reset?",
+    "reset_cancelled": "✅ Reset cancelled. Your settings are safe.",
     "ask_mode": "Would you like to track ONE currency or TWO currencies (USD & KHR)?\n\n(Reply with: `1` or `2`)",
     "invalid_mode": "Invalid choice.\n    Please reply with `1` or `2`.",
     "ask_language": "You've chosen 2 currencies.\n    What is your preferred language?\n\n(Reply with: `en` or `km`)",
@@ -125,6 +137,9 @@
     "ask_single_balance": "Great, {name}.\n    Let's set your starting balance.\n\nWhat is your current **{currency}** balance?\n\n(Reply with a number, e.g.: `150.50`)",
     "invalid_amount": "That doesn't look like a valid number.\n    Please try again (e.g., `100.50`).",
     "setup_complete": "🎉 Setup Complete!\n\nYou're all set.\n    Here is the main menu."
+  },
+  "help": {
+    "guide": "📚 **FinanceBot User Guide**\n\n**1. Logging Transactions (Smart Text)**\nSimply type what you spent!\n• `Coffee 2.50` (Default USD)\n• `Lunch 12000khr` (KHR)\n• `Salary 500` (Income detected automatically)\n\n**2. Managing Debts (IOUs)**\n• `Lent John 20` (You lent money)\n• `Borrowed Jane 50` (You borrowed)\n• `Paid Jane 25` (You repaid)\n• `Repaid by John 20` (John paid you back)\n\n**3. Commands**\n/menu - Show Main Dashboard\n/reset - Re-configure initial balances\n/cancel - Stop current action"
   },
   "settings": {
     "menu_header": "<b>⚙️ Bot Settings</b>\n\nHere you can manage your preferences and initial data.\n\n<b>Currency Mode:</b> {mode}\n\n<b>Initial Balances:</b>\n{balance_text}\n\n<b>Exchange Rate:</b> {rate_text}\n",

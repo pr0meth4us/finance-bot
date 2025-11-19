@@ -1,44 +1,64 @@
 # telegram_bot/handlers/common.py
 
 import telegram.error
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
 import keyboards
 import api_client
+from api_client import UpstreamUnavailable
 from decorators import authenticate_user
 from .helpers import format_summary_message
 from utils.i18n import t
 
+PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
+
 
 @authenticate_user
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Displays the main menu.
-    This handler handles the UI response; onboarding logic is handled by the
-    separate onboarding handler or the decorator checks.
+    Displays the main menu (Dashboard).
+    This is the single source of truth for showing the menu.
     """
-    profile = context.user_data['profile']
-    jwt = context.user_data['jwt']
+    profile = context.user_data.get('profile', {})
+    jwt = context.user_data.get('jwt')
 
     lang = profile.get('settings', {}).get('language', 'en')
     user_name = profile.get('name_en', 'User')
     if lang == 'km' and profile.get('name_km'):
         user_name = profile.get('name_km')
 
-    # Fetch summary
-    summary_data = api_client.get_detailed_summary(jwt)
-    summary_text = format_summary_message(summary_data, context)
+    # --- DYNAMIC GREETING LOGIC ---
+    now = datetime.now(PHNOM_PENH_TZ)
+    hour = now.hour
 
-    # --- UI FIX: Ensure spacing between Welcome and Summary ---
-    welcome_text = t("common.welcome", context, name=user_name)
-
-    # If summary exists, prepend newlines. If empty (new user), just show welcome.
-    if summary_text:
-        final_text = f"{welcome_text}\n\n{summary_text}"
+    if 5 <= hour < 12:
+        greeting_key = "common.greeting_morning"
+    elif 12 <= hour < 17:
+        greeting_key = "common.greeting_afternoon"
+    elif 17 <= hour < 21:
+        greeting_key = "common.greeting_evening"
     else:
-        final_text = welcome_text
-    # ---------------------------------------------------------
+        greeting_key = "common.greeting_night"
+    # ------------------------------
+
+    # --- GRACEFUL SUMMARY FETCH ---
+    summary_text = ""
+    try:
+        summary_data = api_client.get_detailed_summary(jwt)
+        summary_text = format_summary_message(summary_data, context)
+    except UpstreamUnavailable:
+        summary_text = t("common.summary_unavailable", context)
+    # ------------------------------
+
+    greeting_text = t(greeting_key, context, name=user_name)
+
+    if summary_text:
+        final_text = f"{greeting_text}\n\n{summary_text}"
+    else:
+        final_text = greeting_text
 
     keyboard = keyboards.main_menu_keyboard(context)
 
@@ -68,35 +88,42 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @authenticate_user
 async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Fetches and displays a quick summary of balances and debts."""
+    """Fetches and displays a quick summary."""
     query = update.callback_query
-    await query.answer("Fetching summary...")
-
     jwt = context.user_data['jwt']
-    summary_data = api_client.get_detailed_summary(jwt)
-    summary_text = format_summary_message(summary_data, context)
-
-    # --- UI FIX: Ensure spacing here too ---
-    header = t("common.quick_check_header", context)
-    text = f"{header}\n{summary_text}"
-    # ---------------------------------------
 
     try:
+        summary_data = api_client.get_detailed_summary(jwt)
+        summary_text = format_summary_message(summary_data, context)
+
+        header = t("common.quick_check_header", context)
+        text = f"{header}\n{summary_text}"
+
+        await query.answer("Fetching summary...")
         await query.edit_message_text(
             text=text,
             parse_mode='HTML',
             reply_markup=keyboards.main_menu_keyboard(context)
         )
+    except UpstreamUnavailable:
+        await query.answer(t("common.upstream_alert", context), show_alert=True)
     except telegram.error.BadRequest as e:
         if "Message is not modified" in str(e):
+            await query.answer()
             pass
         else:
             raise e
 
 
+@authenticate_user
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Displays the user guide."""
+    help_text = t("help.guide", context)
+    await update.message.reply_text(help_text, parse_mode='Markdown')
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cancels any active conversation and preserves auth state."""
-    # Preserve Auth Cache
+    """Cancels any active conversation."""
     jwt = context.user_data.get('jwt')
     profile_data = context.user_data.get('profile_data')
     profile = context.user_data.get('profile')

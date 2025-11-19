@@ -1,3 +1,5 @@
+# telegram_bot/handlers/__init__.py
+
 from telegram.ext import (
     ConversationHandler,
     CommandHandler,
@@ -6,10 +8,12 @@ from telegram.ext import (
     filters
 )
 
-from .common import start, quick_check, cancel
+# Import help_command and others
+from .common import menu, quick_check, cancel, help_command
 from .settings import settings_conversation_handler
-from .onboarding import onboarding_conversation_handler
+from .onboarding import onboarding_conversation_handler, onboarding_start
 
+# ... (Rest of imports remain the same) ...
 from .analytics import (
     report_menu, process_report_choice, received_report_start_date,
     received_report_end_date, habits_menu, process_habits_choice,
@@ -17,7 +21,6 @@ from .analytics import (
     CHOOSE_REPORT_PERIOD, REPORT_ASK_START_DATE, REPORT_ASK_END_DATE,
     CHOOSE_HABITS_PERIOD
 )
-
 from .iou import (
     iou_menu, iou_view, iou_person_detail, iou_detail, debt_analysis,
     iou_start, iou_received_date_choice, iou_received_custom_date,
@@ -29,7 +32,6 @@ from .iou import (
     IOU_ASK_DATE, IOU_CUSTOM_DATE, IOU_PERSON, IOU_AMOUNT, IOU_CURRENCY,
     IOU_PURPOSE, REPAY_LUMP_AMOUNT, IOU_EDIT_GET_VALUE
 )
-
 from .transaction import (
     add_transaction_start,
     forgot_log_start, received_forgot_day, received_forgot_custom_date,
@@ -46,7 +48,6 @@ from .transaction import (
     EDIT_CHOOSE_FIELD, EDIT_GET_NEW_VALUE, EDIT_GET_NEW_CATEGORY,
     EDIT_GET_CUSTOM_CATEGORY
 )
-
 from .utility import (
     set_reminder_start, received_reminder_purpose,
     received_reminder_date_choice, received_reminder_custom_date,
@@ -54,9 +55,8 @@ from .utility import (
     REMINDER_PURPOSE, REMINDER_ASK_DATE, REMINDER_CUSTOM_DATE,
     REMINDER_ASK_TIME
 )
-
 from .search import (
-    search_menu_entry, search_start, received_period_choice, 
+    search_menu_entry, search_start, received_period_choice,
     received_custom_start, received_custom_end,
     received_type_choice, received_categories, received_keywords,
     received_keyword_logic,
@@ -64,8 +64,17 @@ from .search import (
     GET_CATEGORIES, GET_KEYWORDS, GET_KEYWORD_LOGIC, CHOOSE_ACTION
 )
 
-# --- Conversation Handlers ---
+# Standard fallbacks for all conversations
+STANDARD_FALLBACKS = [
+    CommandHandler('cancel', cancel),
+    CommandHandler('start', onboarding_start),
+    CommandHandler('menu', menu),
+    CommandHandler('help', help_command),
+    CallbackQueryHandler(onboarding_start, pattern='^start$')
+]
 
+# ... (Rest of the file remains the same with updated fallbacks logic if applied globally) ...
+# Note: Ensure tx_conversation_handler and others use STANDARD_FALLBACKS
 tx_conversation_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(add_transaction_start, pattern='^(add_expense|add_income)$')],
     states={
@@ -76,7 +85,7 @@ tx_conversation_handler = ConversationHandler(
         ASK_REMARK: [CallbackQueryHandler(ask_remark, pattern='^remark_')],
         REMARK: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_remark)],
     },
-    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start), CallbackQueryHandler(start, pattern='^start$')],
+    fallbacks=STANDARD_FALLBACKS,
     per_message=False
 )
 
@@ -93,7 +102,7 @@ forgot_conversation_handler = ConversationHandler(
         ASK_REMARK: [CallbackQueryHandler(ask_remark, pattern='^remark_')],
         REMARK: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_remark)],
     },
-    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start), CallbackQueryHandler(start, pattern='^start$')],
+    fallbacks=STANDARD_FALLBACKS,
     per_message=False
 )
 
@@ -106,7 +115,7 @@ edit_tx_conversation_handler = ConversationHandler(
         EDIT_GET_CUSTOM_CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_received_custom_category)],
         EDIT_GET_NEW_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_received_new_date)],
     },
-    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start), CallbackQueryHandler(start, pattern='^start$')],
+    fallbacks=STANDARD_FALLBACKS,
     per_message=False
 )
 
@@ -120,7 +129,7 @@ iou_conversation_handler = ConversationHandler(
         IOU_CURRENCY: [CallbackQueryHandler(iou_received_currency, pattern='^curr_')],
         IOU_PURPOSE: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_received_purpose)],
     },
-    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start), CallbackQueryHandler(start, pattern='^start$')],
+    fallbacks=STANDARD_FALLBACKS,
     per_message=False
 )
 
@@ -129,7 +138,7 @@ iou_edit_conversation_handler = ConversationHandler(
     states={
         IOU_EDIT_GET_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, iou_edit_received_value)]
     },
-    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start), CallbackQueryHandler(start, pattern='^start$')],
+    fallbacks=STANDARD_FALLBACKS,
     per_message=False
 )
 
@@ -138,7 +147,7 @@ repay_lump_conversation_handler = ConversationHandler(
     states={
         REPAY_LUMP_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_lump_repayment_amount)],
     },
-    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start), CallbackQueryHandler(start, pattern='^start$')],
+    fallbacks=STANDARD_FALLBACKS,
     per_message=False
 )
 
@@ -150,7 +159,7 @@ reminder_conversation_handler = ConversationHandler(
         REMINDER_CUSTOM_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_reminder_custom_date)],
         REMINDER_ASK_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_reminder_time)],
     },
-    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start), CallbackQueryHandler(start, pattern='^start$')],
+    fallbacks=STANDARD_FALLBACKS,
     per_message=False
 )
 
@@ -161,7 +170,7 @@ report_conversation_handler = ConversationHandler(
         REPORT_ASK_START_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_report_start_date)],
         REPORT_ASK_END_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_report_end_date)],
     },
-    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start), CallbackQueryHandler(start, pattern='^start$')],
+    fallbacks=STANDARD_FALLBACKS,
     per_message=False
 )
 
@@ -170,7 +179,7 @@ habits_conversation_handler = ConversationHandler(
     states={
         CHOOSE_HABITS_PERIOD: [CallbackQueryHandler(process_habits_choice, pattern='^report_period_')]
     },
-    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start), CallbackQueryHandler(start, pattern='^start$')],
+    fallbacks=STANDARD_FALLBACKS,
     per_message=False
 )
 
@@ -192,6 +201,6 @@ search_conversation_handler = ConversationHandler(
         ],
         GET_KEYWORD_LOGIC: [CallbackQueryHandler(received_keyword_logic, pattern='^search_logic_')],
     },
-    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start), CallbackQueryHandler(start, pattern='^start$')],
+    fallbacks=STANDARD_FALLBACKS,
     per_message=False
 )

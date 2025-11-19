@@ -1,11 +1,16 @@
+# telegram_bot/bot.py
+
 import os
 import logging
 import asyncio
+import time
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.error import NetworkError
 from dotenv import load_dotenv
 
 from handlers import (
+    menu, help_command,
     quick_check, cancel,
     tx_conversation_handler,
     iou_conversation_handler,
@@ -37,7 +42,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
-# Reduce noise from libraries
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
@@ -45,18 +49,10 @@ logger = logging.getLogger("finance-bot")
 
 
 async def on_error(update: object, context):
-    """Logs errors caused by updates."""
     logger.error("--- Unhandled error processing update ---", exc_info=context.error)
-
-    if isinstance(update, Update):
-        logger.error(f"Update causing error: {update}")
-
-    if context and context.user_data:
-        logger.error(f"User Data at error: {context.user_data}")
 
 
 async def post_init(app: Application):
-    """Runs after Application build; cleans up webhooks."""
     try:
         logger.info("Running post_init: Deleting webhook...")
         await app.bot.delete_webhook(drop_pending_updates=True)
@@ -79,7 +75,9 @@ def main():
 
     # --- Handlers ---
 
-    # Global Commands
+    # Global Menu & Help
+    app.add_handler(CommandHandler("menu", menu))
+    app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("cancel", cancel))
 
     # Conversations
@@ -95,10 +93,10 @@ def main():
     app.add_handler(iou_edit_conversation_handler)
     app.add_handler(settings_conversation_handler)
 
-    # Onboarding (must be before unified message handler)
+    # Onboarding (Handles /start and /reset)
     app.add_handler(onboarding_conversation_handler)
 
-    # Fallback / Universal Input (must be last conversation)
+    # Fallback / Universal Input
     app.add_handler(unified_message_conversation_handler)
 
     # Callbacks
@@ -127,7 +125,21 @@ def main():
     app.add_handler(CallbackQueryHandler(download_debt_analysis_csv, pattern="^debt_analysis_csv$"))
 
     logger.info("🚀 Bot is polling...")
-    app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES, stop_signals=None)
+
+    while True:
+        try:
+            app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES, stop_signals=None)
+        except NetworkError as e:
+            logger.warning(f"⚠️ NetworkError during polling (likely Telegram issue): {e}")
+            logger.info("♻️ Retrying polling in 5 seconds...")
+            time.sleep(5)
+        except Exception as e:
+            logger.critical(f"🔥 Critical error in polling loop: {e}", exc_info=True)
+            logger.info("♻️ Restarting polling in 10 seconds...")
+            time.sleep(10)
+        else:
+            logger.info("Polling stopped cleanly.")
+            break
 
 
 if __name__ == "__main__":
