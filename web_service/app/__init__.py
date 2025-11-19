@@ -14,6 +14,29 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+
+def check_bifrost_connection(app):
+    """
+    Startup check to ensure Bifrost is reachable.
+    """
+    url = app.config.get("BIFROST_URL")
+    if not url:
+        log.critical("❌ BIFROST_URL is not set! Auth will fail.")
+        return
+
+    # Strip trailing slash + add /health endpoint
+    health_url = f"{url.rstrip('/')}/health"
+    try:
+        resp = requests.get(health_url, timeout=5)
+        if resp.status_code == 200:
+            log.info(f"✅ Connection to Bifrost ({url}) established.")
+        else:
+            log.error(f"⚠️ Connected to Bifrost but returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        log.critical(f"❌ FAILED to connect to Bifrost at {health_url}. Error: {e}")
+        log.critical("   -> Please check BIFROST_URL setting and ensure Bifrost is running.")
+
+
 def create_app():
     # Validate Env Vars immediately
     Config.validate()
@@ -21,7 +44,7 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    # Explicitly store config vars in app config for access in blueprints/utils
+    # Explicitly store config vars in app config
     app.config['MONGODB_URI'] = Config.MONGODB_URI
     app.config['DB_NAME'] = Config.DB_NAME
     app.config['TELEGRAM_TOKEN'] = Config.TELEGRAM_TOKEN
@@ -35,13 +58,17 @@ def create_app():
     _register_blueprints(app)
     _register_health_routes(app)
 
+    # Perform connection check
+    with app.app_context():
+        check_bifrost_connection(app)
+
     return app
+
 
 def _init_scheduler(app):
     """Initialize and start the background scheduler."""
     scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Phnom_Penh')
 
-    # Daily Reminder (9 PM)
     scheduler.add_job(
         send_daily_reminder_job,
         trigger=CronTrigger(hour=21, minute=0),
@@ -49,7 +76,6 @@ def _init_scheduler(app):
         replace_existing=True
     )
 
-    # Scheduled Reports
     scheduler.add_job(
         run_scheduled_report,
         args=['weekly'],
@@ -82,6 +108,7 @@ def _init_scheduler(app):
     scheduler.start()
     app.scheduler = scheduler
 
+
 def _register_blueprints(app):
     from .settings.routes import settings_bp
     from .analytics.routes import analytics_bp
@@ -99,6 +126,7 @@ def _register_blueprints(app):
     app.register_blueprint(reminders_bp)
     app.register_blueprint(users_bp)
 
+
 def _register_health_routes(app):
     @app.route("/health")
     def health_check():
@@ -106,7 +134,6 @@ def _register_health_routes(app):
 
     @app.route("/__egress_ip")
     def egress_ip():
-        """Returns public egress IP for debugging."""
         try:
             r = requests.get("https://api.ipify.org?format=json", timeout=5)
             return jsonify(r.json())
@@ -115,7 +142,6 @@ def _register_health_routes(app):
 
     @app.route("/__db_ping")
     def db_ping():
-        """Diagnostics for DB connection."""
         try:
             db = get_db()
             db.command("ping")
