@@ -1,12 +1,21 @@
 {
   "common": {
     "welcome": "Welcome, {name}!",
+    "greeting_morning": "Good Morning, {name}! ☀️\nReady to track today's expenses?",
+    "greeting_afternoon": "Good Afternoon, {name}! 🌤\nDon't forget to log your lunch!",
+    "greeting_evening": "Good Evening, {name}! 🌆\nWrapping up the day?",
+    "greeting_night": "Burning the midnight oil, {name}? 🌙",
     "quick_check_header": "🔍 Here is your quick summary:",
     "cancel": "Operation cancelled.",
-    "cancel_onboarding": "Onboarding cancelled. Type /start to try again when you're ready.",
-    "error_generic": "An error occurred.\n    Please try again later.",
+    "cancel_onboarding": "Onboarding cancelled.\nType /start to try again when you're ready.",
+    "error_generic": "An error occurred.\nPlease try again later.",
     "expense_word": "Expense",
-    "income_word": "Income"
+    "income_word": "Income",
+    "onboarding_required": "Please complete the setup first.\nType /start to begin.",
+    "premium_required": "🚫 This is a premium feature.\n\nPlease contact the administrator to upgrade your account.",
+    "upstream_error": "⚠️ **Service Temporarily Unavailable**\nWe are experiencing connection issues with our server. Your data is safe. Please try again in a few minutes.",
+    "upstream_alert": "⚠️ Connection failed. Please try again.",
+    "summary_unavailable": "\n⚠️ *Summary unavailable (System Maintenance)*"
   },
   "summary": {
     "status_header": "\n\n--- Your Current Status ---",
@@ -107,22 +116,12 @@
     "edit_currency": "🪙 Currency",
     "edit_cancel": "‹ Cancel Edit",
     "delete_confirm": "✅ Yes, Delete",
-    "delete_cancel": "❌ No, Cancel"
+    "delete_cancel": "❌ No, Cancel",
+    "reset_confirm": "⚠️ Yes, Reset Account",
+    "reset_cancel": "❌ No, Keep Data"
   },
-  "onboarding": {
-    "welcome": "Welcome to FinanceBot!\n    Let’s set up your account.",
-    "ask_mode": "Would you like to track ONE currency or TWO currencies (USD & KHR)?\n\n(Reply with: `1` or `2`)",
-    "invalid_mode": "Invalid choice.\n    Please reply with `1` or `2`.",
-    "ask_language": "You've chosen 2 currencies.\n    What is your preferred language?\n\n(Reply with: `en` or `km`)",
-    "invalid_language": "Invalid choice.\n    Please reply with `en` or `km`.",
-    "ask_name_en": "What is your name (in English)?\n\n(e.g., John Doe)",
-    "ask_name_km": "What is your name (in Khmer)?\n\n(e.g., ចន ដូ)",
-    "ask_primary_currency": "You've chosen 1 currency.\n    Which currency will be your primary one?\n\n(Reply with a currency code, e.g.: `USD`, `KHR`, `CNY`)",
-    "ask_usd_balance": "Great, {name}.\n    Let's set your starting balances.\n\nWhat is your current **USD** balance?\n\n(Reply with a number, e.g.: `100.50`)",
-    "ask_khr_balance": "Got it.\n    Now, what is your current **KHR** balance?\n\n(Reply with a number, e.g.: `50000`)",
-    "ask_single_balance": "Great, {name}.\n    Let's set your starting balance.\n\nWhat is your current **{currency}** balance?\n\n(Reply with a number, e.g.: `150.50`)",
-    "invalid_amount": "That doesn't look like a valid number.\n    Please try again (e.g., `100.50`).",
-    "setup_complete": "🎉 Setup Complete!\n\nYou're all set.\n    Here is the main menu."
+  "help": {
+    "guide": "📚 <b>FinanceBot Quick Guide</b>\n\n<b>💸 Smart Logging</b>\n<i>Type these commands to log transactions instantly:</i>\n• <code>Coffee 2.50</code> → Expense (USD)\n• <code>Lunch 15000khr</code> → Expense (KHR)\n• <code>Salary 500</code> → Income\n• <code>Taxi 5 \"to airport\"</code> → With description\n\n<b>🤝 Debt & Loans (IOU)</b>\n<i>Track who owes you and who you owe:</i>\n• <b>Lent:</b> <code>Lent John 50</code> (He owes you)\n• <b>Borrowed:</b> <code>Borrowed Jane 20</code> (You owe her)\n• <b>Repaying:</b> <code>Paid Jane 20</code> (You paid her back)\n• <b>Receiving:</b> <code>Repaid by John 50</code> (He paid you back)\n\n<b>🛠 Tools & Settings</b>\n• <b>Reports:</b> View charts and spending habits.\n• <b>History:</b> Edit or delete past transactions.\n• <b>Settings:</b> Toggle Dual Currency, Set Fixed Rate, or Manage Categories.\n\n<i>💡 Tip: Use <b>/reset</b> if you need to change your initial balances.</i>"
   },
   "settings": {
     "menu_header": "<b>⚙️ Bot Settings</b>\n\nHere you can manage your preferences and initial data.\n\n<b>Currency Mode:</b> {mode}\n\n<b>Initial Balances:</b>\n{balance_text}\n\n<b>Exchange Rate:</b> {rate_text}\n",
@@ -260,7 +259,7 @@
     "analysis_lent_none": "    - No one owes you money.\n",
     "analysis_borrow_header": "\n<b>Top People You've Borrowed From:</b>",
     "analysis_borrow_none": "    - You don't owe anyone money.\n",
-    "analysis_aging_header": "\n<b>Oldest Outstanding Debts (Avg.\nAge):</b>",
+    "analysis_aging_header": "\n<b>Oldest Outstanding Debts (Avg. Age):</b>",
     "analysis_aging_none": "    - No open debts to analyze.\n",
     "analysis_item": "    - {person}: ${total:,.2f}",
     "analysis_aging_item": "    - {person}: {days:.0f} days ({count} loans)",
@@ -304,7 +303,30 @@
     "habits_no_custom": "Custom date range is not available for habits analysis.\nPlease select a standard period.",
     "habits_generating": "🧠 Analyzing your habits...",
     "habits_fail": "Could not find enough data to analyze your habits for this period.",
-    "habits_invalid_period": "Invalid period selected."
+    "habits_invalid_period": "Invalid period selected.",
+    "report_header": "📊 <b>Financial Report</b>\n🗓️ <i>{start_date} to {end_date}</i>\n\n",
+    "balance_overview": "<b>Balance Overview (in USD):</b>\n",
+    "starting_balance": "▫️ Starting Balance: ${balance:,.2f}\n",
+    "ending_balance": "▫️ Ending Balance: ${balance:,.2f}\n\n",
+    "operational_summary": "<b>Operational Summary (in USD):</b>\n",
+    "total_income": "⬆️ Total Income: ${income:,.2f}\n",
+    "total_expense": "⬇️ Total Expense: ${expense:,.2f}\n",
+    "net_savings": "<b>Net Savings: ${net:,.2f}</b> {emoji}\n\n",
+    "expense_insights": "<b>Expense Insights:</b>\n",
+    "top_expense": "    - <b>Top Expense:</b> ${amount:,.2f} ({description}) on {date}\n",
+    "busiest_day": "    - <b>Busiest Day:</b> {date} (${amount:,.2f})\n",
+    "quietest_day": "    - <b>Quietest Day:</b> {date} (${amount:,.2f})\n",
+    "major_expenses": "\n<b>Major Expenses:</b>\n",
+    "no_major_expenses": "    - No major expenses recorded.\n",
+    "other_expenses": "\n<b>Other Expenses (grouped in chart):</b>\n",
+    "income_sources": "\n<b>Income Sources:</b>\n",
+    "no_income": "    - No income recorded.\n",
+    "loan_activity": "\n<b>Loan & Debt Activity (in USD):</b>\n",
+    "lent_to_others": "    - Lent to others: ${amount:,.2f}",
+    "borrowed_from_others": "    - Borrowed from others: ${amount:,.2f}",
+    "repayments_received": "    - Repayments received: ${amount:,.2f}",
+    "repayments_made": "    - Repayments made: ${amount:,.2f}",
+    "no_loan_activity": "    - No loan or debt activity."
   },
   "search": {
     "menu_header": "What type of search do you want to perform?",

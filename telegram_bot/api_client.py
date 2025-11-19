@@ -1,537 +1,288 @@
-# --- Start of modified file: telegram_bot/api_client.py ---
+# telegram_bot/api_client.py
+
 import os
-import requests
-from dotenv import load_dotenv
-import urllib.parse
 import logging
+import urllib.parse
+import requests
+import time
+from dotenv import load_dotenv
 
 log = logging.getLogger(__name__)
 
 load_dotenv()
 BASE_URL = os.getenv("WEB_SERVICE_URL")
+BIFROST_URL = os.getenv("BIFROST_BASE_URL")
+BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")
+
+# Global session for connection pooling
+_session = requests.Session()
 
 
-def find_or_create_user(telegram_id):
-    url = f"{BASE_URL}/auth/find_or_create"
-    data = {"telegram_user_id": str(telegram_id)}
-    try:
-        res = requests.post(url, json=data, timeout=10)
+class PremiumFeatureException(Exception):
+    """Raised when the API returns a 403 Forbidden indicating a premium feature."""
+    pass
 
-        if res.status_code == 200:
+
+class UpstreamUnavailable(Exception):
+    """Raised when the web service or Cloudflare/Koyeb is down (5xx, Timeout)."""
+    pass
+
+
+def _make_request(method, url, jwt=None, retries=3, **kwargs):
+    """
+    Helper to make authenticated requests with:
+    1. Retries for transient errors.
+    2. Truncated logging for HTML errors.
+    3. Specific exception handling.
+    """
+    headers = kwargs.pop("headers", {})
+    if jwt:
+        headers["Authorization"] = f"Bearer {jwt}"
+
+    for attempt in range(retries):
+        try:
+            res = _session.request(method, url, headers=headers, timeout=10, **kwargs)
+
+            # 1. Handle Specific Logic (Premium)
+            if res.status_code == 403:
+                raise PremiumFeatureException("This feature requires a premium subscription.")
+
+            # 2. Handle Server Errors (5xx) - Koyeb/Cloudflare issues
+            if res.status_code >= 500:
+                # Log snippet only, not the full HTML blob
+                snippet = res.text[:300]
+                log.error(f"Upstream {res.status_code} from {url}. Preview: {snippet}...")
+
+                if attempt < retries - 1:
+                    time.sleep(1)
+                    continue
+
+                raise UpstreamUnavailable(f"Service unavailable (Status {res.status_code})")
+
+            # 3. Check other 4xx errors
+            res.raise_for_status()
+
+            # 4. Success (No Content)
+            if res.status_code == 204:
+                return {"success": True}
+
+            # 5. Success (JSON)
             return res.json()
-        if res.status_code == 403:
-            return res.json()
 
-        log.error(f"[AUTH] HTTP {res.status_code}: {res.text}")
-        return {"error": f"Auth API error ({res.status_code})"}
-    except requests.exceptions.RequestException as e:
-        log.error(f"[AUTH] Network error reaching Auth API: {e}", exc_info=True)
-        return {"error": "Network error reaching Auth API"}
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            log.warning(f"Network attempt {attempt + 1}/{retries} failed for {url}: {e}")
+            if attempt < retries - 1:
+                time.sleep(1)
+                continue
+            log.error(f"Network error calling {url}", exc_info=True)
+            raise UpstreamUnavailable("Connection timed out.")
+
+        except requests.exceptions.HTTPError as http_err:
+            # This catches 4xx errors (except 403 handled above)
+            log.error(f"HTTP Client Error: {http_err}")
+            try:
+                return http_err.response.json()
+            except requests.exceptions.JSONDecodeError:
+                return {"error": f"API error ({http_err.response.status_code})"}
+
+        except requests.exceptions.RequestException as e:
+            # Catch-all for other request errors
+            log.error(f"Unexpected RequestException: {e}", exc_info=True)
+            raise UpstreamUnavailable("Network error.")
+
+    # Should be unreachable due to raise in loop, but safe fallback
+    raise UpstreamUnavailable("Max retries exceeded.")
 
 
-def get_detailed_summary(user_id):
-    """Fetches detailed summary for a specific user."""
+# --- Auth & User ---
+
+def bifrost_telegram_login(telegram_id):
+    """Logs in via Telegram ID to Bifrost and returns a JWT."""
+    url = f"{BIFROST_URL}/auth/api/telegram-login"
+    payload = {
+        "client_id": BIFROST_CLIENT_ID,
+        "telegram_id": str(telegram_id)
+    }
     try:
-        res = requests.get(
-            f"{BASE_URL}/summary/detailed",
-            params={'user_id': user_id},
-            timeout=10
-        )
+        # We use a shorter retry for auth since it should be fast
+        # We manually handle request here since it's an external service (Bifrost)
+        # but ideally _make_request could be adapted. For now, keeping existing logic
+        # but adding the timeout/exception safety.
+        res = _session.post(url, json=payload, timeout=10)
         res.raise_for_status()
-        return res.json()
+        data = res.json()
+        if "jwt" in data:
+            return data
+        else:
+            log.error(f"Bifrost login failed: {data.get('error', 'No JWT')}")
+            return {"error": data.get('error', 'Bifrost login failed')}
+
     except requests.exceptions.RequestException as e:
-        log.error(f"API Error fetching detailed summary: {e}", exc_info=True)
-        return None
+        log.error(f"Network error reaching Bifrost: {e}")
+        return {"error": "Auth Service Unavailable"}
 
 
-def add_debt(data, user_id):
-    """Adds a new debt for a specific user."""
+def get_my_profile(jwt):
+    return _make_request("get", f"{BASE_URL}/users/me", jwt)
+
+
+# --- Settings & Onboarding ---
+
+def get_user_settings(jwt):
+    return _make_request("get", f"{BASE_URL}/settings/", jwt)
+
+
+def update_initial_balance(jwt, currency, amount):
+    payload = {'currency': currency, 'amount': amount}
+    return _make_request("post", f"{BASE_URL}/settings/balance", jwt, json=payload)
+
+
+def update_user_mode(jwt, mode, language=None, name_en=None, name_km=None, primary_currency=None):
+    payload = {'mode': mode}
+    if language: payload['language'] = language
+    if name_en: payload['name_en'] = name_en
+    if name_km: payload['name_km'] = name_km
+    if primary_currency: payload['primary_currency'] = primary_currency
+    return _make_request("post", f"{BASE_URL}/settings/mode", jwt, json=payload)
+
+
+def complete_onboarding(jwt):
+    return _make_request("post", f"{BASE_URL}/settings/complete_onboarding", jwt, json={})
+
+
+def add_category(jwt, cat_type, cat_name):
+    payload = {'type': cat_type, 'name': cat_name}
+    return _make_request("post", f"{BASE_URL}/settings/category", jwt, json=payload)
+
+
+def remove_category(jwt, cat_type, cat_name):
+    payload = {'type': cat_type, 'name': cat_name}
+    return _make_request("delete", f"{BASE_URL}/settings/category", jwt, json=payload)
+
+
+def update_exchange_rate(rate, jwt):
+    return _make_request("post", f"{BASE_URL}/settings/rate", jwt, json={'rate': rate})
+
+
+def get_exchange_rate(jwt):
+    return _make_request("get", f"{BASE_URL}/settings/rate", jwt)
+
+
+# --- Transactions ---
+
+def add_transaction(data, jwt):
+    return _make_request("post", f"{BASE_URL}/transactions/", jwt, json=data)
+
+
+def get_recent_transactions(jwt):
+    return _make_request("get", f"{BASE_URL}/transactions/recent", jwt)
+
+
+def get_transaction_details(tx_id, jwt):
+    return _make_request("get", f"{BASE_URL}/transactions/{tx_id}", jwt)
+
+
+def update_transaction(tx_id, data, jwt):
+    return _make_request("put", f"{BASE_URL}/transactions/{tx_id}", jwt, json=data)
+
+
+def delete_transaction(tx_id, jwt):
     try:
-        data['user_id'] = user_id
-        res = requests.post(f"{BASE_URL}/debts/", json=data, timeout=10)
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error adding debt: {e}", exc_info=True)
-        return None
-
-
-def add_reminder(data, user_id):
-    """Adds a new reminder for a specific user."""
-    try:
-        data['user_id'] = user_id
-        res = requests.post(f"{BASE_URL}/reminders/", json=data, timeout=10)
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error adding reminder: {e}", exc_info=True)
-        return None
-
-
-def get_open_debts(user_id):
-    """Fetches open debts for a specific user."""
-    try:
-        res = requests.get(
-            f"{BASE_URL}/debts/", params={'user_id': user_id}, timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error fetching debts: {e}", exc_info=True)
-        return []
-
-
-def get_open_debts_export(user_id):
-    """Fetches a flat list of all open debts for export."""
-    try:
-        res = requests.get(
-            f"{BASE_URL}/debts/export/open",
-            params={'user_id': user_id},
-            timeout=15
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error fetching debts for export: {e}", exc_info=True)
-        return []
-
-
-def get_settled_debts_grouped(user_id):
-    """Fetches settled debts for a specific user."""
-    try:
-        res = requests.get(
-            f"{BASE_URL}/debts/list/settled",
-            params={'user_id': user_id},
-            timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error fetching settled debts: {e}", exc_info=True)
-        return []
-
-
-def get_debts_by_person_and_currency(person_name, currency, user_id):
-    """Fetches debts by person/currency for a specific user."""
-    try:
-        encoded_name = urllib.parse.quote(person_name)
-        res = requests.get(
-            f"{BASE_URL}/debts/person/{encoded_name}/{currency}",
-            params={'user_id': user_id},
-            timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(
-            f"API Error fetching debts for {person_name} ({currency}): {e}", exc_info=True
-        )
-        return []
-
-
-def get_all_debts_by_person(person_name, user_id):
-    """Fetches all open debts for a person, for a specific user."""
-    try:
-        encoded_name = urllib.parse.quote(person_name)
-        res = requests.get(
-            f"{BASE_URL}/debts/person/{encoded_name}/all",
-            params={'user_id': user_id},
-            timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error fetching all debts for {person_name}: {e}", exc_info=True)
-        return []
-
-
-def get_all_settled_debts_by_person(person_name, user_id):
-    """Fetches all settled debts for a person, for a specific user."""
-    try:
-        encoded_name = urllib.parse.quote(person_name)
-        res = requests.get(
-            f"{BASE_URL}/debts/person/{encoded_name}/all/settled",
-            params={'user_id': user_id},
-            timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(
-            f"API Error fetching all settled debts for {person_name}: {e}", exc_info=True
-        )
-        return []
-
-
-def get_debt_details(debt_id, user_id):
-    """Fetches debt details for a specific user."""
-    try:
-        res = requests.get(
-            f"{BASE_URL}/debts/{debt_id}",
-            params={'user_id': user_id},
-            timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error fetching debt details: {e}", exc_info=True)
-        return None
-
-
-def cancel_debt(debt_id, user_id):
-    """Cancels a debt for a specific user."""
-    try:
-        res = requests.post(
-            f"{BASE_URL}/debts/{debt_id}/cancel",
-            json={'user_id': user_id},
-            timeout=15
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error canceling debt: {e}", exc_info=True)
-        try:
-            return e.response.json()
-        except Exception:
-            return {'error': 'A network error occurred.'}
-
-
-def update_debt(debt_id, data, user_id):
-    """Updates a debt for a specific user."""
-    try:
-        data['user_id'] = user_id
-        res = requests.put(
-            f"{BASE_URL}/debts/{debt_id}", json=data, timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error updating debt: {e}", exc_info=True)
-        try:
-            return e.response.json()
-        except Exception:
-            return {'error': 'A network error occurred.'}
-
-
-def record_lump_sum_repayment(
-        person_name, currency, amount, debt_type, user_id, timestamp=None
-):
-    """Records a lump sum repayment for a specific user."""
-    try:
-        encoded_currency = urllib.parse.quote(currency)
-        url = f"{BASE_URL}/debts/person/{encoded_currency}/repay"
-        payload = {
-            'amount': amount,
-            'type': debt_type,
-            'person': person_name,
-            'user_id': user_id
-        }
-        if timestamp:
-            payload['timestamp'] = timestamp
-
-        res = requests.post(url, json=payload, timeout=15)
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error recording lump-sum repayment: {e}", exc_info=True)
-        try:
-            return e.response.json()
-        except Exception:
-            return {'error': 'A network error occurred.'}
-
-
-def update_exchange_rate(rate, user_id):
-    """Updates the *user's* fixed rate preference."""
-    try:
-        res = requests.post(
-            f"{BASE_URL}/settings/rate",
-            json={'rate': rate, 'user_id': user_id},
-            timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error updating rate: {e}", exc_info=True)
-        return None
-
-
-def get_exchange_rate(user_id):
-    """Fetches the exchange rate based on user's preference."""
-    try:
-        res = requests.get(
-            f"{BASE_URL}/settings/rate",
-            params={'user_id': user_id},
-            timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error fetching rate: {e}", exc_info=True)
-        return None
-
-
-def add_transaction(data, user_id):
-    """Adds a transaction for a specific user."""
-    try:
-        data['user_id'] = user_id
-        res = requests.post(
-            f"{BASE_URL}/transactions/", json=data, timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error adding transaction: {e}", exc_info=True)
-        return None
-
-
-def get_recent_transactions(user_id):
-    """Fetches recent transactions for a specific user."""
-    try:
-        res = requests.get(
-            f"{BASE_URL}/transactions/recent",
-            params={'user_id': user_id},
-            timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error fetching recent transactions: {e}", exc_info=True)
-        return []
-
-
-def get_transaction_details(tx_id, user_id):
-    """Fetches transaction details for a specific user."""
-    try:
-        res = requests.get(
-            f"{BASE_URL}/transactions/{tx_id}",
-            params={'user_id': user_id},
-            timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error fetching transaction details: {e}", exc_info=True)
-        return None
-
-
-def update_transaction(tx_id, data, user_id):
-    """Updates a transaction for a specific user."""
-    try:
-        data['user_id'] = user_id
-        res = requests.put(
-            f"{BASE_URL}/transactions/{tx_id}", json=data, timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error updating transaction: {e}", exc_info=True)
-        return None
-
-
-def delete_transaction(tx_id, user_id):
-    """Deletes a transaction for a specific user."""
-    try:
-        res = requests.delete(
-            f"{BASE_URL}/transactions/{tx_id}",
-            json={'user_id': user_id},
-            timeout=10
-        )
-        res.raise_for_status()
-        return True
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error deleting transaction: {e}", exc_info=True)
+        res = _make_request("delete", f"{BASE_URL}/transactions/{tx_id}", jwt)
+        return res.get("success", False) if isinstance(res, dict) else False
+    except UpstreamUnavailable:
         return False
 
 
-def get_detailed_report(user_id, start_date=None, end_date=None):
-    """Fetches a detailed report for a specific user."""
-    try:
-        params = {'user_id': user_id}
-        if start_date and end_date:
-            params['start_date'] = start_date.isoformat()
-            params['end_date'] = end_date.isoformat()
-
-        res = requests.get(
-            f"{BASE_URL}/analytics/report/detailed",
-            params=params,
-            timeout=15
-        )
-        if res.status_code == 200:
-            return res.json()
-
-        log.error(f"API Error fetching detailed report (HTTP {res.status_code}): {res.text}")
-        return None
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error fetching detailed report: {e}", exc_info=True)
-        return None
+def search_transactions_for_management(params, jwt):
+    return _make_request("post", f"{BASE_URL}/transactions/search", jwt, json=params)
 
 
-def get_spending_habits(user_id, start_date, end_date):
-    """Fetches spending habits for a specific user."""
-    try:
-        params = {
-            'user_id': user_id,
-            'start_date': start_date.isoformat(),
-            'end_date': end_date.isoformat()
-        }
-        res = requests.get(
-            f"{BASE_URL}/analytics/habits", params=params, timeout=20
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error fetching spending habits: {e}", exc_info=True)
-        return None
+# --- Debts (IOU) ---
+
+def add_debt(data, jwt):
+    return _make_request("post", f"{BASE_URL}/debts/", jwt, json=data)
 
 
-def get_debt_analysis(user_id):
-    """Fetches debt analysis for a specific user."""
-    try:
-        res = requests.get(
-            f"{BASE_URL}/debts/analysis",
-            params={'user_id': user_id},
-            timeout=15
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error fetching debt analysis: {e}", exc_info=True)
-        return None
+def get_open_debts(jwt):
+    return _make_request("get", f"{BASE_URL}/debts/", jwt)
 
 
-def search_transactions_for_management(params, user_id):
-    """Searches transactions for a specific user."""
-    try:
-        params['user_id'] = user_id
-        res = requests.post(
-            f"{BASE_URL}/transactions/search", json=params, timeout=20
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error searching transactions for management: {e}", exc_info=True)
-        return []
+def get_open_debts_export(jwt):
+    return _make_request("get", f"{BASE_URL}/debts/export/open", jwt)
 
 
-def sum_transactions_for_analytics(params, user_id):
-    """Sums transactions for a specific user."""
-    try:
-        params['user_id'] = user_id
-        res = requests.post(
-            f"{BASE_URL}/analytics/search", json=params, timeout=20
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error summing transactions: {e}", exc_info=True)
-        return None
+def get_settled_debts_grouped(jwt):
+    return _make_request("get", f"{BASE_URL}/debts/list/settled", jwt)
 
 
-# --- NEW SETTINGS FUNCTIONS ---
-
-def get_user_settings(user_id):
-    """Fetches all settings for a user."""
-    try:
-        res = requests.get(
-            f"{BASE_URL}/settings/", params={'user_id': user_id}, timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error fetching settings: {e}", exc_info=True)
-        return None
+def get_debt_details(debt_id, jwt):
+    return _make_request("get", f"{BASE_URL}/debts/{debt_id}", jwt)
 
 
-def update_initial_balance(user_id, currency, amount):
-    """Updates the user's initial balance for one currency."""
-    try:
-        payload = {
-            'user_id': user_id,
-            'currency': currency,
-            'amount': amount
-        }
-        res = requests.post(
-            f"{BASE_URL}/settings/balance", json=payload, timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error updating initial balance: {e}", exc_info=True)
-        return None
+def get_debts_by_person_and_currency(person_name, currency, jwt):
+    encoded = urllib.parse.quote(person_name)
+    return _make_request("get", f"{BASE_URL}/debts/person/{encoded}/{currency}", jwt)
 
 
-def update_user_mode(user_id, mode, language=None, name_en=None, name_km=None, primary_currency=None):
-    """Sets the user's currency mode and language during onboarding."""
-    try:
-        payload = {
-            'user_id': user_id,
-            'mode': mode,
-            'name_en': name_en
-        }
-        if language:
-            payload['language'] = language
-        if name_km:
-            payload['name_km'] = name_km
-        if primary_currency:
-            payload['primary_currency'] = primary_currency
-
-        res = requests.post(
-            f"{BASE_URL}/settings/mode", json=payload, timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error updating user mode: {e}", exc_info=True)
-        return None
+def get_all_debts_by_person(person_name, jwt):
+    encoded = urllib.parse.quote(person_name)
+    return _make_request("get", f"{BASE_URL}/debts/person/{encoded}/all", jwt)
 
 
-def complete_onboarding(user_id):
-    """Marks the user's onboarding as complete."""
-    try:
-        payload = {'user_id': user_id}
-        res = requests.post(
-            f"{BASE_URL}/settings/complete_onboarding", json=payload, timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error completing onboarding: {e}", exc_info=True)
-        return None
+def get_all_settled_debts_by_person(person_name, jwt):
+    encoded = urllib.parse.quote(person_name)
+    return _make_request("get", f"{BASE_URL}/debts/person/{encoded}/all/settled", jwt)
 
 
-def add_category(user_id, cat_type, cat_name):
-    """Adds a custom category for a user."""
-    try:
-        payload = {
-            'user_id': user_id,
-            'type': cat_type,
-            'name': cat_name
-        }
-        res = requests.post(
-            f"{BASE_URL}/settings/category", json=payload, timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error adding category: {e}", exc_info=True)
-        return None
+def update_debt(debt_id, data, jwt):
+    return _make_request("put", f"{BASE_URL}/debts/{debt_id}", jwt, json=data)
 
 
-def remove_category(user_id, cat_type, cat_name):
-    """Removes a custom category for a user."""
-    try:
-        payload = {
-            'user_id': user_id,
-            'type': cat_type,
-            'name': cat_name
-        }
-        res = requests.delete(
-            f"{BASE_URL}/settings/category", json=payload, timeout=10
-        )
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"API Error removing category: {e}", exc_info=True)
-        return None
+def cancel_debt(debt_id, jwt):
+    return _make_request("post", f"{BASE_URL}/debts/{debt_id}/cancel", jwt)
 
-# --- End of modified file ---
+
+def record_lump_sum_repayment(person_name, currency, amount, debt_type, jwt, timestamp=None):
+    encoded_currency = urllib.parse.quote(currency)
+    url = f"{BASE_URL}/debts/person/{encoded_currency}/repay"
+    payload = {'amount': amount, 'type': debt_type, 'person': person_name}
+    if timestamp:
+        payload['timestamp'] = timestamp
+    return _make_request("post", url, jwt, json=payload)
+
+
+def get_debt_analysis(jwt):
+    return _make_request("get", f"{BASE_URL}/debts/analysis", jwt)
+
+
+# --- Analytics & Summary ---
+
+def get_detailed_summary(jwt):
+    return _make_request("get", f"{BASE_URL}/summary/detailed", jwt)
+
+
+def get_detailed_report(jwt, start_date=None, end_date=None):
+    params = {}
+    if start_date and end_date:
+        params['start_date'] = start_date.isoformat()
+        params['end_date'] = end_date.isoformat()
+    return _make_request("get", f"{BASE_URL}/analytics/report/detailed", jwt, params=params)
+
+
+def get_spending_habits(jwt, start_date, end_date):
+    params = {
+        'start_date': start_date.isoformat(),
+        'end_date': end_date.isoformat()
+    }
+    return _make_request("get", f"{BASE_URL}/analytics/habits", jwt, params=params)
+
+
+def sum_transactions_for_analytics(params, jwt):
+    return _make_request("post", f"{BASE_URL}/analytics/search", jwt, json=params)
+
+
+# --- Reminders ---
+
+def add_reminder(data, jwt):
+    return _make_request("post", f"{BASE_URL}/reminders/", jwt, json=data)

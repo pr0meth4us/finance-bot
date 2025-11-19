@@ -1,21 +1,23 @@
-# --- Start of modified file: telegram_bot/handlers/analytics.py ---
+# telegram_bot/handlers/analytics.py
 
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
+
 import keyboards
 import api_client
 from decorators import authenticate_user
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 from .helpers import (
     _format_report_summary_message,
     _create_income_expense_chart,
     _create_expense_pie_chart,
     _format_habits_message,
     _create_spending_line_chart,
-    _create_csv_from_transactions  # <-- NEW IMPORT
+    _create_csv_from_transactions
 )
 from utils.i18n import t
+from api_client import PremiumFeatureException, UpstreamUnavailable
 
 (
     CHOOSE_REPORT_PERIOD, REPORT_ASK_START_DATE, REPORT_ASK_END_DATE,
@@ -23,23 +25,12 @@ from utils.i18n import t
 ) = range(4)
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
-REPORT_PERIOD_REGEX = '^(Today|This Week|Last Week|This Month|Last Month|Custom Range)$'
 
 
 @authenticate_user
 async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the menu for selecting a report period."""
-    query = update.callback_query
-    await query.answer()
-
-    # --- THIS IS THE FIX ---
-    # Preserve the user_profile, clear everything else, then restore it.
-    user_profile = context.user_data.get('user_profile')
-    context.user_data.clear()
-    context.user_data['user_profile'] = user_profile
-    # --- END FIX ---
-
-    await query.edit_message_text(
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text(
         t("analytics.report_ask_period", context),
         reply_markup=keyboards.report_period_keyboard(context)
     )
@@ -47,9 +38,7 @@ async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @authenticate_user
-async def process_report_choice(update: Update,
-                                context: ContextTypes.DEFAULT_TYPE):
-    """Handles standard period selection or transitions to custom date entry."""
+async def process_report_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     period = query.data.replace('report_period_', '')
@@ -59,141 +48,112 @@ async def process_report_choice(update: Update,
         return REPORT_ASK_START_DATE
 
     today = datetime.now(PHNOM_PENH_TZ).date()
-    end_of_last_month = today.replace(day=1) - timedelta(days=1)
-    start_of_last_month = end_of_last_month.replace(day=1)
-    date_ranges = {
-        "today": (today, today),
-        "this_week": (today - timedelta(days=today.weekday()),
-                      today - timedelta(days=today.weekday()) +
-                      timedelta(days=6)),
-        "last_week": (today - timedelta(days=today.weekday() + 7),
-                      today - timedelta(days=today.weekday() + 1)),
-        "this_month": (today.replace(day=1),
-                       (today.replace(day=28) +
-                        timedelta(days=4)).replace(day=1) -
-                       timedelta(days=1)),
-        "last_month": (start_of_last_month, end_of_last_month)
-    }
+    start, end = today, today
 
-    date_pair = date_ranges.get(period)
-    if date_pair:
-        start_date, end_date = date_pair
-        await _generate_report(update, context, start_date, end_date)
-    else:
-        await query.edit_message_text(
-            t("analytics.habits_invalid_period", context),
-            reply_markup=keyboards.main_menu_keyboard(context)
-        )
+    if period == 'this_week':
+        start = today - timedelta(days=today.weekday())
+        end = start + timedelta(days=6)
+    elif period == 'last_week':
+        end = today - timedelta(days=today.weekday() + 1)
+        start = end - timedelta(days=6)
+    elif period == 'this_month':
+        start = today.replace(day=1)
+        next_m = start.replace(day=28) + timedelta(days=4)
+        end = next_m - timedelta(days=next_m.day)
+    elif period == 'last_month':
+        end = today.replace(day=1) - timedelta(days=1)
+        start = end.replace(day=1)
 
+    await _generate_report(update, context, start, end)
     return ConversationHandler.END
 
 
 @authenticate_user
-async def received_report_start_date(update: Update,
-                                     context: ContextTypes.DEFAULT_TYPE):
-    """Receives and validates the custom start date."""
+async def received_report_start_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        start_date = datetime.strptime(update.message.text, "%Y-%m-%d").date()
-        context.user_data['report_start_date'] = start_date
-        await update.message.reply_text(
-            t("analytics.report_ask_end", context, date=start_date)
-        )
+        dt = datetime.strptime(update.message.text, "%Y-%m-%d").date()
+        context.user_data['report_start'] = dt
+        await update.message.reply_text(t("analytics.report_ask_end", context, date=dt))
         return REPORT_ASK_END_DATE
     except ValueError:
-        await update.message.reply_text(
-            t("analytics.report_invalid_date", context)
-        )
+        await update.message.reply_text(t("analytics.report_invalid_date", context))
         return REPORT_ASK_START_DATE
 
 
 @authenticate_user
-async def received_report_end_date(update: Update,
-                                   context: ContextTypes.DEFAULT_TYPE):
-    """Receives, validates end date, and generates the report."""
+async def received_report_end_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        end_date = datetime.strptime(update.message.text, "%Y-%m-%d").date()
-        start_date = context.user_data.get('report_start_date')
-        if not start_date or end_date < start_date:
-            await update.message.reply_text(
-                t("analytics.report_invalid_range", context)
-            )
+        end = datetime.strptime(update.message.text, "%Y-%m-%d").date()
+        start = context.user_data.pop('report_start', None)
+
+        if not start or end < start:
+            await update.message.reply_text(t("analytics.report_invalid_range", context))
             return REPORT_ASK_END_DATE
-        await _generate_report(update, context, start_date, end_date)
+
+        await _generate_report(update, context, start, end)
         return ConversationHandler.END
     except ValueError:
-        await update.message.reply_text(
-            t("analytics.report_invalid_date", context)
-        )
+        await update.message.reply_text(t("analytics.report_invalid_date", context))
         return REPORT_ASK_END_DATE
-    finally:
-        context.user_data.pop('report_start_date', None)
 
 
-async def _generate_report(update: Update,
-                           context: ContextTypes.DEFAULT_TYPE,
-                           start_date, end_date):
-    """Shared logic to generate and send report summary and charts."""
-    chat_id = update.effective_chat.id
-    user_id = context.user_data['user_profile']['_id']
+async def _generate_report(update, context, start, end):
+    msg = update.callback_query.message if update.callback_query else update.message
+    loading = await msg.reply_text(t("analytics.report_generating", context, start_date=start, end_date=end))
 
-    loading_text = t("analytics.report_generating", context,
-                     start_date=start_date, end_date=end_date)
+    try:
+        # 1. Determine User Tier
+        # Hardcoded admin bypass
+        user_id = str(update.effective_user.id)
+        role = context.user_data.get('role', 'user')
+        is_premium = (role in ['premium_user', 'admin']) or (user_id == "1836585300")
 
-    loading_message = await context.bot.send_message(
-        chat_id=chat_id, text=loading_text
-    )
-    if update.callback_query:
-        await update.callback_query.message.delete()
+        data = api_client.get_detailed_report(context.user_data['jwt'], start, end)
+        await loading.delete()
 
-    report_data = api_client.get_detailed_report(user_id, start_date, end_date)
-    await loading_message.delete()
+        if not data or "error" in data:
+            await context.bot.send_message(msg.chat.id, t("analytics.report_fail", context),
+                                           reply_markup=keyboards.main_menu_keyboard(context))
+            return
 
-    if report_data:
-        summary_message = _format_report_summary_message(report_data)
-        await context.bot.send_message(
-            chat_id=chat_id, text=summary_message, parse_mode='HTML'
-        )
+        # 2. Format Text (Tier-Aware)
+        summary = _format_report_summary_message(data, context, is_premium=is_premium)
+        await context.bot.send_message(msg.chat.id, summary, parse_mode='HTML')
 
-        if bar_chart := _create_income_expense_chart(
-                report_data, start_date, end_date):
-            await context.bot.send_photo(chat_id=chat_id, photo=bar_chart)
-        if line_chart := _create_spending_line_chart(
-                report_data, start_date, end_date):
-            await context.bot.send_photo(chat_id=chat_id, photo=line_chart)
-        if pie_chart := _create_expense_pie_chart(
-                report_data, start_date, end_date):
-            await context.bot.send_photo(chat_id=chat_id, photo=pie_chart)
+        # 3. Generate Charts (Tier-Aware)
+        # Basic chart for everyone
+        if bar := _create_income_expense_chart(data, start, end):
+            await context.bot.send_photo(msg.chat.id, bar)
 
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=t("analytics.report_success", context),
-            # --- MODIFICATION: Use new keyboard ---
-            reply_markup=keyboards.report_actions_keyboard(
-                start_date, end_date, context
-            )
-        )
-    else:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=t("analytics.report_fail", context),
-            reply_markup=keyboards.main_menu_keyboard(context)
-        )
+        # Advanced charts for Premium only
+        if is_premium:
+            if line := _create_spending_line_chart(data, start, end):
+                await context.bot.send_photo(msg.chat.id, line)
+            if pie := _create_expense_pie_chart(data, start, end):
+                await context.bot.send_photo(msg.chat.id, pie)
 
+        await context.bot.send_message(msg.chat.id, t("analytics.report_success", context),
+                                       reply_markup=keyboards.report_actions_keyboard(start, end, context))
+
+    except PremiumFeatureException:
+        await loading.delete()
+        await context.bot.send_message(msg.chat.id, t("common.premium_required", context),
+                                       reply_markup=keyboards.main_menu_keyboard(context))
+    except UpstreamUnavailable:
+        await loading.delete()
+        await context.bot.send_message(msg.chat.id, t("common.upstream_error", context),
+                                       reply_markup=keyboards.main_menu_keyboard(context))
+    except Exception as e:
+        await loading.delete()
+        await context.bot.send_message(msg.chat.id, f"Error: {e}", reply_markup=keyboards.main_menu_keyboard(context))
+
+
+# --- Habits ---
 
 @authenticate_user
 async def habits_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays menu to choose a period for habits analysis."""
-    query = update.callback_query
-    await query.answer()
-
-    # --- THIS IS THE FIX ---
-    # Preserve the user_profile, clear everything else, then restore it.
-    user_profile = context.user_data.get('user_profile')
-    context.user_data.clear()
-    context.user_data['user_profile'] = user_profile
-    # --- END FIX ---
-
-    await query.edit_message_text(
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text(
         t("analytics.habits_ask_period", context),
         reply_markup=keyboards.report_period_keyboard(context)
     )
@@ -201,111 +161,83 @@ async def habits_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @authenticate_user
-async def process_habits_choice(update: Update,
-                                context: ContextTypes.DEFAULT_TYPE):
-    """Generates and sends the habits report for the selected period."""
+async def process_habits_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     period = query.data.replace('report_period_', '')
 
-    if period == "custom":
-        await query.edit_message_text(
-            t("analytics.habits_no_custom", context),
-            reply_markup=keyboards.report_period_keyboard(context)
-        )
+    if period == 'custom':
+        await query.edit_message_text(t("analytics.habits_no_custom", context),
+                                      reply_markup=keyboards.report_period_keyboard(context))
         return CHOOSE_HABITS_PERIOD
 
     today = datetime.now(PHNOM_PENH_TZ).date()
-    end_of_last_month = today.replace(day=1) - timedelta(days=1)
-    start_of_last_month = end_of_last_month.replace(day=1)
-    date_ranges = {
-        "today": (today, today),
-        "this_week": (today - timedelta(days=today.weekday()),
-                      today - timedelta(days=today.weekday()) +
-                      timedelta(days=6)),
-        "last_week": (today - timedelta(days=today.weekday() + 7),
-                      today - timedelta(days=today.weekday() + 1)),
-        "this_month": (today.replace(day=1),
-                       (today.replace(day=28) +
-                        timedelta(days=4)).replace(day=1) -
-                       timedelta(days=1)),
-        "last_month": (start_of_last_month, end_of_last_month)
-    }
+    start, end = today, today
 
-    date_pair = date_ranges.get(period)
-    if date_pair:
-        start_date, end_date = date_pair
-        await query.edit_message_text(
-            t("analytics.habits_generating", context)
-        )
+    if period == 'this_week':
+        start = today - timedelta(days=today.weekday())
+        end = start + timedelta(days=6)
+    elif period == 'last_week':
+        end = today - timedelta(days=today.weekday() + 1)
+        start = end - timedelta(days=6)
+    elif period == 'this_month':
+        start = today.replace(day=1)
+        next_m = start.replace(day=28) + timedelta(days=4)
+        end = next_m - timedelta(days=next_m.day)
+    elif period == 'last_month':
+        end = today.replace(day=1) - timedelta(days=1)
+        start = end.replace(day=1)
 
-        user_id = context.user_data['user_profile']['_id']
-        habits_data = api_client.get_spending_habits(
-            user_id, start_date, end_date
-        )
+    await query.edit_message_text(t("analytics.habits_generating", context))
 
-        if habits_data:
-            message = _format_habits_message(habits_data)
-            await query.edit_message_text(
-                text=message,
-                parse_mode='HTML',
-                reply_markup=keyboards.main_menu_keyboard(context)
-            )
-        else:
-            await query.edit_message_text(
-                t("analytics.habits_fail", context),
-                reply_markup=keyboards.main_menu_keyboard(context)
-            )
-    else:
-        await query.edit_message_text(
-            t("analytics.habits_invalid_period", context),
-            reply_markup=keyboards.main_menu_keyboard(context)
-        )
+    try:
+        data = api_client.get_spending_habits(context.user_data['jwt'], start, end)
+        if not data or "error" in data:
+            await query.edit_message_text(t("analytics.habits_fail", context),
+                                          reply_markup=keyboards.main_menu_keyboard(context))
+            return
+
+        await query.edit_message_text(_format_habits_message(data), parse_mode='HTML',
+                                      reply_markup=keyboards.main_menu_keyboard(context))
+
+    except PremiumFeatureException:
+        await query.edit_message_text(t("common.premium_required", context),
+                                      reply_markup=keyboards.main_menu_keyboard(context))
+    except UpstreamUnavailable:
+        await query.edit_message_text(t("common.upstream_error", context),
+                                      reply_markup=keyboards.main_menu_keyboard(context))
+    except Exception as e:
+        await query.edit_message_text(f"Error: {e}", reply_markup=keyboards.main_menu_keyboard(context))
 
     return ConversationHandler.END
 
 
-# --- NEW HANDLER FOR CSV EXPORT ---
 @authenticate_user
-async def download_report_csv(update: Update,
-                              context: ContextTypes.DEFAULT_TYPE):
-    """Handles the 'Download Report CSV' button press."""
+async def download_report_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer(t("search.searching", context))
 
     try:
-        user_id = context.user_data['user_profile']['_id']
-        _, start_date_str, end_date_str = query.data.split(':')
-        start_date = datetime.fromisoformat(start_date_str).date()
-        end_date = datetime.fromisoformat(end_date_str).date()
+        _, s_str, e_str = query.data.split(':')
 
-        search_params = {
-            'start_date': start_date.isoformat(),
-            'end_date': end_date.isoformat()
-        }
-
-        # Use the existing search API to get all raw transactions
-        transactions = api_client.search_transactions_for_management(
-            search_params, user_id
+        # Use search API to get raw data
+        txs = api_client.search_transactions_for_management(
+            {'start_date': s_str, 'end_date': e_str},
+            context.user_data['jwt']
         )
 
-        if not transactions:
+        if not txs:
             await query.message.reply_text(t("search.no_results", context))
             return
 
-        # Generate CSV
-        csv_buffer = _create_csv_from_transactions(transactions)
-        file_name = f"report_{start_date.isoformat()}_to_{end_date.isoformat()}.csv"
+        csv_file = _create_csv_from_transactions(txs)
+        fname = f"report_{s_str}_to_{e_str}.csv"
 
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
-            document=csv_buffer,
-            filename=file_name,
-            caption=f"Here is your transaction export for {start_date} to {end_date}."
+            document=csv_file,
+            filename=fname,
+            caption=f"Transaction Export: {s_str} to {e_str}"
         )
-
     except Exception as e:
-        print(f"Error generating report CSV: {e}")
         await query.message.reply_text(t("common.error_generic", context, error=str(e)))
-
-# --- End of modified file ---

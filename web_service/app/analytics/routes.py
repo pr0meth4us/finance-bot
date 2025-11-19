@@ -1,476 +1,275 @@
-# --- Start of modified file: web_service/app/analytics/routes.py ---
-"""
-Handles all analytics and report generation endpoints.
-All endpoints are multi-tenant and require a valid user_id.
-"""
-import io
-from flask import Blueprint, Response, request, jsonify
+import re
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
-import matplotlib.pyplot as plt
-import re
-from app import get_db
-from app.utils.auth import get_user_id_from_request
+from flask import Blueprint, request, jsonify, g
+from bson import ObjectId
+
+from app.utils.db import get_db, settings_collection, transactions_collection
 from app.utils.currency import get_live_usd_to_khr_rate
+from app.utils.auth import auth_required
+from app.analytics import pipelines
 
 analytics_bp = Blueprint('analytics', __name__, url_prefix='/analytics')
-
-FINANCIAL_TRANSACTION_CATEGORIES = [
-    'Loan Lent',
-    'Debt Repayment',
-    'Loan Received',
-    'Debt Settled',
-    'Initial Balance' # Kept for v1 data, but excluded from new reports
-]
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 UTC_TZ = ZoneInfo("UTC")
 
 
-def _get_user_financial_base(db, user_id):
-    """
-    Helper to get the user's initial balance in USD and their preferred rate.
-    """
-    user = db.users.find_one(
-        {'_id': user_id},
-        {'settings': 1}
+def get_account_id():
+    try:
+        return ObjectId(g.account_id)
+    except Exception:
+        raise ValueError("Invalid account_id format")
+
+
+def _get_user_financial_base(account_id):
+    """Fetches user's initial balance in USD and their preferred rate."""
+    doc = settings_collection().find_one(
+        {'account_id': account_id},
+        {'settings.initial_balances': 1, 'settings.rate_preference': 1, 'settings.fixed_rate': 1}
     )
-    if not user:
-        raise Exception("User not found")
+    if not doc:
+        raise Exception("User settings not found")
 
-    settings = user.get('settings', {})
+    settings = doc.get('settings', {})
+    initial = settings.get('initial_balances', {})
 
-    # Get initial balances
-    initial_balances = settings.get('initial_balances', {})
-    initial_usd = initial_balances.get('USD', 0)
-    initial_khr = initial_balances.get('KHR', 0)
-
-    # Get rate
-    rate_preference = settings.get('rate_preference', 'live')
-    rate = 4100.0
-    if rate_preference == 'fixed':
+    rate = get_live_usd_to_khr_rate()
+    if settings.get('rate_preference') == 'fixed':
         rate = settings.get('fixed_rate', 4100.0)
-    else:
-        rate = get_live_usd_to_khr_rate()
 
-    # Calculate total initial balance in USD
-    initial_balance_in_usd = initial_usd + (initial_khr / rate)
-
-    return initial_balance_in_usd, rate
+    initial_usd = initial.get('USD', 0) + (initial.get('KHR', 0) / rate)
+    return initial_usd, rate
 
 
-def get_date_ranges_for_search():
-    """Helper for analytics endpoints to get UTC date ranges."""
+def get_utc_range_for_period(period):
+    """Helper to get UTC date ranges for named periods."""
     today = datetime.now(PHNOM_PENH_TZ).date()
-    start_of_week = today - timedelta(days=today.weekday())
-    start_of_month = today.replace(day=1)
-    end_of_last_week = start_of_week - timedelta(days=1)
-    start_of_last_week = end_of_last_week - timedelta(days=6)
 
-    def create_utc_range(start_local, end_local):
-        aware_start = datetime.combine(start_local, time.min, tzinfo=PHNOM_PENH_TZ)
-        aware_end = datetime.combine(end_local, time.max, tzinfo=PHNOM_PENH_TZ)
-        return aware_start.astimezone(UTC_TZ), aware_end.astimezone(UTC_TZ)
+    def to_utc(start, end):
+        s = datetime.combine(start, time.min, tzinfo=PHNOM_PENH_TZ).astimezone(UTC_TZ)
+        e = datetime.combine(end, time.max, tzinfo=PHNOM_PENH_TZ).astimezone(UTC_TZ)
+        return s, e
 
-    return {
-        "today": create_utc_range(today, today),
-        "this_week": create_utc_range(start_of_week, start_of_week + timedelta(days=6)),
-        "last_week": create_utc_range(start_of_last_week, end_of_last_week),
-        "this_month": create_utc_range(start_of_month,
-                                       (start_of_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(
-                                           days=1))
+    start_week = today - timedelta(days=today.weekday())
+    start_month = today.replace(day=1)
+
+    ranges = {
+        "today": to_utc(today, today),
+        "this_week": to_utc(start_week, start_week + timedelta(days=6)),
+        "last_week": to_utc(start_week - timedelta(days=7), start_week - timedelta(days=1)),
+        "this_month": to_utc(start_month,
+                             (start_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1))
     }
+    return ranges.get(period)
+
+
+def parse_date_params(args):
+    """Parses start/end date params or defaults to last 30 days."""
+    s_str = args.get('start_date')
+    e_str = args.get('end_date')
+
+    if s_str and e_str:
+        try:
+            s_local = datetime.fromisoformat(s_str).date()
+            e_local = datetime.fromisoformat(e_str).date()
+            s_aware = datetime.combine(s_local, time.min, tzinfo=PHNOM_PENH_TZ)
+            e_aware = datetime.combine(e_local, time.max, tzinfo=PHNOM_PENH_TZ)
+            return s_aware.astimezone(UTC_TZ), e_aware.astimezone(UTC_TZ), s_local, e_local
+        except ValueError:
+            raise ValueError("Invalid date format")
+
+    e_utc = datetime.now(UTC_TZ)
+    s_utc = e_utc - timedelta(days=30)
+    return s_utc, e_utc, s_utc.astimezone(PHNOM_PENH_TZ).date(), e_utc.astimezone(PHNOM_PENH_TZ).date()
 
 
 @analytics_bp.route('/search', methods=['POST'])
+@auth_required(min_role="premium_user")
 def search_transactions():
-    """Performs an advanced search and sums up matching transactions for a user."""
+    try:
+        account_id = get_account_id()
+    except ValueError:
+        return jsonify({'error': 'Invalid account_id format'}), 400
+
     params = request.json
-    db = get_db()
-
-    user_id, error = get_user_id_from_request()
-    if error: return error
-
-    match_stage = {'user_id': user_id}
-
+    match_stage = {'account_id': account_id}
     date_filter = {}
+
     if params.get('period'):
-        ranges = get_date_ranges_for_search()
-        if params['period'] in ranges:
-            start_utc, end_utc = ranges[params['period']]
-            date_filter['$gte'] = start_utc
-            date_filter['$lte'] = end_utc
+        if r := get_utc_range_for_period(params['period']):
+            date_filter = {'$gte': r[0], '$lte': r[1]}
     elif params.get('start_date') and params.get('end_date'):
-        start_local = datetime.fromisoformat(params['start_date']).date()
-        end_local = datetime.fromisoformat(params['end_date']).date()
-        aware_start = datetime.combine(start_local, time.min, tzinfo=PHNOM_PENH_TZ)
-        aware_end = datetime.combine(end_local, time.max, tzinfo=PHNOM_PENH_TZ)
-        date_filter['$gte'] = aware_start.astimezone(UTC_TZ)
-        date_filter['$lte'] = aware_end.astimezone(UTC_TZ)
+        try:
+            s_local = datetime.fromisoformat(params['start_date']).date()
+            e_local = datetime.fromisoformat(params['end_date']).date()
+            s_utc = datetime.combine(s_local, time.min, tzinfo=PHNOM_PENH_TZ).astimezone(UTC_TZ)
+            e_utc = datetime.combine(e_local, time.max, tzinfo=PHNOM_PENH_TZ).astimezone(UTC_TZ)
+            date_filter = {'$gte': s_utc, '$lte': e_utc}
+        except ValueError:
+            return jsonify({'error': 'Invalid date format'}), 400
 
     if date_filter:
         match_stage['timestamp'] = date_filter
+
     if params.get('transaction_type'):
         match_stage['type'] = params['transaction_type']
+
     if params.get('categories'):
-        categories_regex = [re.compile(f'^{re.escape(c.strip())}$', re.IGNORECASE) for c in params['categories']]
-        match_stage['categoryId'] = {'$in': categories_regex}
+        cats = [re.compile(f'^{re.escape(c.strip())}$', re.IGNORECASE) for c in params['categories']]
+        match_stage['categoryId'] = {'$in': cats}
+
     if params.get('keywords'):
         keywords = params['keywords']
-        keyword_logic = params.get('keyword_logic', 'OR').upper()
-        if keyword_logic == 'AND':
+        if params.get('keyword_logic', 'OR').upper() == 'AND':
             match_stage['$and'] = [{'description': re.compile(k, re.IGNORECASE)} for k in keywords]
         else:
             regex_str = '|'.join([re.escape(k) for k in keywords])
             match_stage['description'] = re.compile(regex_str, re.IGNORECASE)
 
-    pipeline = []
-    if match_stage:
-        pipeline.append({'$match': match_stage})
-
-    pipeline.append({
-        '$group': {
-            '_id': '$currency',
-            'totalAmount': {'$sum': '$amount'},
-            'count': {'$sum': 1},
-            'minAmount': {'$min': '$amount'},
-            'maxAmount': {'$max': '$amount'},
-            'minDate': {'$min': '$timestamp'},
-            'maxDate': {'$max': '$timestamp'}
-        }
-    })
-
-    results = list(db.transactions.aggregate(pipeline))
-
-    if not results:
-        return jsonify({'total_count': 0, 'totals_by_currency': []})
-
-    overall_min_date = None
-    overall_max_date = None
+    results = list(transactions_collection().aggregate(pipelines.build_search_pipeline(match_stage)))
 
     summary = {
         'total_count': 0,
-        'totals_by_currency': []
+        'totals_by_currency': [],
+        'earliest_log_utc': None,
+        'latest_log_utc': None
     }
 
+    if not results:
+        return jsonify(summary)
+
+    min_dates, max_dates = [], []
+
     for res in results:
-        currency = res['_id']
-        count = res['count']
-        total = res['totalAmount']
-
-        if not overall_min_date or res['minDate'] < overall_min_date:
-            overall_min_date = res['minDate']
-        if not overall_max_date or res['maxDate'] > overall_max_date:
-            overall_max_date = res['maxDate']
-
-        summary['total_count'] += count
+        summary['total_count'] += res['count']
         summary['totals_by_currency'].append({
-            'currency': currency,
-            'count': count,
-            'total': total,
-            'avg': total / count,
+            'currency': res['_id'],
+            'count': res['count'],
+            'total': res['totalAmount'],
+            'avg': res['totalAmount'] / res['count'],
             'min': res['minAmount'],
             'max': res['maxAmount']
         })
+        min_dates.append(res['minDate'])
+        max_dates.append(res['maxDate'])
 
-    summary['earliest_log_utc'] = overall_min_date.isoformat() if overall_min_date else None
-    summary['latest_log_utc'] = overall_max_date.isoformat() if overall_max_date else None
+    if min_dates:
+        summary['earliest_log_utc'] = min(min_dates).isoformat()
+    if max_dates:
+        summary['latest_log_utc'] = max(max_dates).isoformat()
 
     return jsonify(summary)
 
 
 @analytics_bp.route('/report/detailed', methods=['GET'])
+@auth_required(min_role="premium_user")
 def get_detailed_report():
-    """Generates a detailed report for the authenticated user."""
-    db = get_db()
-
-    user_id, error = get_user_id_from_request()
-    if error: return error
-
-    start_date_str = request.args.get('start_date')
-    end_date_str = request.args.get('end_date')
+    try:
+        account_id = get_account_id()
+    except ValueError:
+        return jsonify({'error': 'Invalid account_id format'}), 400
 
     try:
-        if start_date_str and end_date_str:
-            start_date_local_obj = datetime.fromisoformat(start_date_str).date()
-            end_date_local_obj = datetime.fromisoformat(end_date_str).date()
-            aware_start_local = datetime.combine(start_date_local_obj, time.min, tzinfo=PHNOM_PENH_TZ)
-            aware_end_local = datetime.combine(end_date_local_obj, time.max, tzinfo=PHNOM_PENH_TZ)
-            start_date_utc = aware_start_local.astimezone(UTC_TZ)
-            end_date_utc = aware_end_local.astimezone(UTC_TZ)
-        else:
-            end_date_utc = datetime.now(UTC_TZ)
-            start_date_utc = end_date_utc - timedelta(days=30)
-            start_date_local_obj = (end_date_utc - timedelta(days=30)).astimezone(PHNOM_PENH_TZ).date()
-            end_date_local_obj = end_date_utc.astimezone(PHNOM_PENH_TZ).date()
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
+        start_utc, end_utc, start_local, end_local = parse_date_params(request.args)
+    except ValueError:
+        return jsonify({"error": "Invalid date format"}), 400
 
-    # --- THIS IS THE FIX ---
     try:
-        initial_balance_in_usd, user_rate = _get_user_financial_base(db, user_id)
+        initial_usd, user_rate = _get_user_financial_base(account_id)
     except Exception as e:
-        return jsonify({"error": f"Could not load user settings: {str(e)}"}), 404
-    # --- END FIX ---
+        return jsonify({"error": str(e)}), 404
 
-    user_match = {'user_id': user_id}
+    user_match = {'account_id': account_id}
 
-    add_fields_stage = {
-        '$addFields': {
-            'amount_in_usd': {
-                '$cond': {
-                    'if': {'$eq': ['$currency', 'USD']},
-                    'then': '$amount',
-                    'else': {
-                        '$let': {
-                            'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', user_rate]}}, # Use user's rate
-                            'in': {'$cond': {'if': {'$gt': ['$$rate', 0]}, 'then': {'$divide': ['$amount', '$$rate']},
-                                             'else': {'$divide': ['$amount', user_rate]}}}
-                        }
-                    }
-                }
-            }
-        }
-    }
+    # 1. Start Balance
+    start_bal_res = list(transactions_collection().aggregate(
+        pipelines.build_start_balance_pipeline(start_utc, user_match, user_rate)
+    ))
+    start_inc = next((i['totalUSD'] for i in start_bal_res if i['_id'] == 'income'), 0)
+    start_exp = next((i['totalUSD'] for i in start_bal_res if i['_id'] == 'expense'), 0)
+    balance_at_start = initial_usd + start_inc - start_exp
 
-    # --- Balance at Start Calculation ---
-    start_balance_pipeline = [
-        {'$match': {'timestamp': {'$lt': start_date_utc}, **user_match}},
-        add_fields_stage,
-        {'$group': {'_id': '$type', 'totalUSD': {'$sum': '$amount_in_usd'}}}
-    ]
-    start_balance_data = list(db.transactions.aggregate(start_balance_pipeline))
-    start_income = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'income'), 0)
-    start_expense = next((item['totalUSD'] for item in start_balance_data if item['_id'] == 'expense'), 0)
+    # 2. Faceted Report
+    date_match = {'timestamp': {'$gte': start_utc, '$lte': end_utc}}
+    facet_res = list(transactions_collection().aggregate(
+        pipelines.build_faceted_report_pipeline(date_match, user_match, user_rate)
+    ))
 
-    # --- THIS IS THE FIX ---
-    # The starting balance is the Initial Balance + all transactions before the start date
-    balance_at_start_usd = initial_balance_in_usd + start_income - start_expense
-    # --- END FIX ---
+    facets = facet_res[0] if facet_res else {}
 
-    # --- Pipelines for the selected period ---
-    date_range_match = {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc}}
-
-    # Operational data (Exclude financial categories)
-    operational_pipeline = [
-        {'$match': {**date_range_match, 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
-        add_fields_stage,
-        {'$group': {'_id': {'type': '$type', 'category': '$categoryId'}, 'total': {'$sum': '$amount_in_usd'}}},
-        {'$sort': {'total': -1}}
-    ]
-
-    # Financial data
-    financial_pipeline = [
-        {'$match': {**date_range_match, 'categoryId': {'$in': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
-        add_fields_stage,
-        {'$group': {'_id': '$categoryId', 'total': {'$sum': '$amount_in_usd'}}}
-    ]
-
-    # Total cash flow (Used for calculating end balance correctly)
-    total_flow_pipeline = [
-        {'$match': {**date_range_match, **user_match}},
-        add_fields_stage,
-        {'$group': {'_id': '$type', 'totalUSD': {'$sum': '$amount_in_usd'}}}
-    ]
-
-    # Spending Over Time
-    spending_over_time_pipeline = [
-        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
-        add_fields_stage,
-        {
-            '$project': {
-                'date': {'$dateToString': {'format': '%Y-%m-%d', 'date': '$timestamp', 'timezone': 'Asia/Phnom_Penh'}},
-                'amount_in_usd': '$amount_in_usd'
-            }
-        },
-        {'$group': {'_id': '$date', 'total_spent_usd': {'$sum': '$amount_in_usd'}}},
-        {'$sort': {'_id': 1}},
-        {'$project': {'_id': 0, 'date': '$_id', 'total_spent_usd': '$total_spent_usd'}}
-    ]
-
-    # Daily Expense Stats
-    daily_stats_pipeline = [
-        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
-        add_fields_stage,
-        {
-            '$group': {
-                '_id': {'$dateToString': {'format': '%Y-%m-%d', 'date': '$timestamp', 'timezone': 'Asia/Phnom_Penh'}},
-                'total_spent_usd': {'$sum': '$amount_in_usd'}
-            }
-        },
-        {'$sort': {'total_spent_usd': -1}},
-    ]
-
-    # Top Expense Item
-    top_expense_pipeline = [
-        {'$match': {**date_range_match, 'type': 'expense', 'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}, **user_match}},
-        add_fields_stage,
-        {'$sort': {'amount_in_usd': -1}},
-        {'$limit': 1},
-        {
-            '$project': {
-                '_id': 0,
-                'description': '$description',
-                'category': '$categoryId',
-                'amount_usd': '$amount_in_usd',
-                'date': {'$dateToString': {'format': '%Y-%m-%d', 'date': '$timestamp', 'timezone': 'Asia/Phnom_Penh'}}
-            }
-        }
-    ]
-
-    # --- Execute All Pipelines ---
-    operational_data = list(db.transactions.aggregate(operational_pipeline))
-    financial_data = list(db.transactions.aggregate(financial_pipeline))
-    total_flow_data = list(db.transactions.aggregate(total_flow_pipeline))
-    spending_over_time_data = list(db.transactions.aggregate(spending_over_time_pipeline))
-    daily_stats_data = list(db.transactions.aggregate(daily_stats_pipeline))
-    top_expense_data = list(db.transactions.aggregate(top_expense_pipeline))
-
-    # --- Assemble Report ---
     report = {
-        "startDate": start_date_local_obj.isoformat(),
-        "endDate": end_date_local_obj.isoformat(),
+        "startDate": start_local.isoformat(),
+        "endDate": end_local.isoformat(),
         "summary": {
             "totalIncomeUSD": 0, "totalExpenseUSD": 0, "netSavingsUSD": 0,
-            "balanceAtStartUSD": balance_at_start_usd, "balanceAtEndUSD": 0
+            "balanceAtStartUSD": balance_at_start, "balanceAtEndUSD": 0
         },
-        "financialSummary": {"totalLentUSD": 0, "totalBorrowedUSD": 0, "totalRepaidToYouUSD": 0,
-                             "totalYouRepaidUSD": 0},
+        "financialSummary": {
+            "totalLentUSD": 0, "totalBorrowedUSD": 0,
+            "totalRepaidToYouUSD": 0, "totalYouRepaidUSD": 0
+        },
         "incomeBreakdown": [],
         "expenseBreakdown": [],
-        "spendingOverTime": spending_over_time_data,
+        "spendingOverTime": facets.get('spending_over_time', []),
         "expenseInsights": {
-            "topExpenseItem": top_expense_data[0] if top_expense_data else None,
-            "mostExpensiveDay": daily_stats_data[0] if daily_stats_data else None,
-            "leastExpensiveDay": daily_stats_data[-1] if daily_stats_data and (len(daily_stats_data) > 1 or daily_stats_data[0]['total_spent_usd'] > 0) else None
+            "topExpenseItem": facets.get('top_expense', [None])[0],
+            "mostExpensiveDay": facets.get('daily_stats', [None])[0],
+            "leastExpensiveDay": facets.get('daily_stats', [None])[-1] if facets.get('daily_stats') else None
         }
     }
 
-    # Populate Operational Summary
-    for item in operational_data:
+    # Process Operational
+    for item in facets.get('operational', []):
+        cat_data = {'category': item['_id']['category'], 'totalUSD': item['total']}
         if item['_id']['type'] == 'income':
             report['summary']['totalIncomeUSD'] += item['total']
-            report['incomeBreakdown'].append({'category': item['_id']['category'], 'totalUSD': item['total']})
+            report['incomeBreakdown'].append(cat_data)
         elif item['_id']['type'] == 'expense':
             report['summary']['totalExpenseUSD'] += item['total']
-            report['expenseBreakdown'].append({'category': item['_id']['category'], 'totalUSD': item['total']})
+            report['expenseBreakdown'].append(cat_data)
+
     report['summary']['netSavingsUSD'] = report['summary']['totalIncomeUSD'] - report['summary']['totalExpenseUSD']
 
-    # Populate Financial Summary
-    for item in financial_data:
-        category_map = {
-            'Loan Lent': 'totalLentUSD', 'Loan Received': 'totalBorrowedUSD',
-            'Debt Settled': 'totalRepaidToYouUSD', 'Debt Repayment': 'totalYouRepaidUSD'
-        }
-        if item['_id'] in category_map:
-            report['financialSummary'][category_map[item['_id']]] += item['total']
+    # Process Financial
+    fin_map = {
+        'Loan Lent': 'totalLentUSD', 'Loan Received': 'totalBorrowedUSD',
+        'Debt Settled': 'totalRepaidToYouUSD', 'Debt Repayment': 'totalYouRepaidUSD'
+    }
+    for item in facets.get('financial', []):
+        if key := fin_map.get(item['_id']):
+            report['financialSummary'][key] += item['total']
 
-    # Calculate correct Ending Balance
-    total_income_in_period = next((item['totalUSD'] for item in total_flow_data if item['_id'] == 'income'), 0)
-    total_expense_in_period = next((item['totalUSD'] for item in total_flow_data if item['_id'] == 'expense'), 0)
-    report['summary']['balanceAtEndUSD'] = balance_at_start_usd + total_income_in_period - total_expense_in_period
+    # End Balance
+    flow = facets.get('total_flow', [])
+    flow_inc = next((i['totalUSD'] for i in flow if i['_id'] == 'income'), 0)
+    flow_exp = next((i['totalUSD'] for i in flow if i['_id'] == 'expense'), 0)
+    report['summary']['balanceAtEndUSD'] = balance_at_start + flow_inc - flow_exp
 
     return jsonify(report)
 
 
 @analytics_bp.route('/habits', methods=['GET'])
+@auth_required(min_role="premium_user")
 def get_spending_habits():
-    """Analyzes spending habits for the authenticated user."""
-    db = get_db()
-
-    user_id, error = get_user_id_from_request()
-    if error: return error
-
-    start_date_str = request.args.get('start_date')
-    end_date_str = request.args.get('end_date')
+    try:
+        account_id = get_account_id()
+    except ValueError:
+        return jsonify({'error': 'Invalid account_id format'}), 400
 
     try:
-        if start_date_str and end_date_str:
-            start_date_local_obj = datetime.fromisoformat(start_date_str).date()
-            end_date_local_obj = datetime.fromisoformat(end_date_str).date()
-            aware_start_local = datetime.combine(start_date_local_obj, time.min, tzinfo=PHNOM_PENH_TZ)
-            aware_end_local = datetime.combine(end_date_local_obj, time.max, tzinfo=PHNOM_PENH_TZ)
-            start_date_utc = aware_start_local.astimezone(UTC_TZ)
-            end_date_utc = aware_end_local.astimezone(UTC_TZ)
-        else:
-            end_date_utc = datetime.now(UTC_TZ)
-            start_date_utc = end_date_utc - timedelta(days=30)
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid date format."}), 400
+        start_utc, end_utc, _, _ = parse_date_params(request.args)
+    except ValueError:
+        return jsonify({"error": "Invalid date format"}), 400
 
     try:
-        _, user_rate = _get_user_financial_base(db, user_id)
+        _, user_rate = _get_user_financial_base(account_id)
     except Exception as e:
-        return jsonify({"error": f"Could not load user settings: {str(e)}"}), 404
+        return jsonify({"error": str(e)}), 404
 
-    user_match = {'user_id': user_id}
+    day_pl, kw_pl = pipelines.build_habits_pipeline(start_utc, end_utc, {'account_id': account_id}, user_rate)
 
-    add_fields_stage = {
-        '$addFields': {
-            'amount_in_usd': {
-                '$cond': {
-                    'if': {'$eq': ['$currency', 'USD']},
-                    'then': '$amount',
-                    'else': {
-                        '$let': {
-                            'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', user_rate]}},
-                            'in': {'$cond': {'if': {'$gt': ['$$rate', 0]}, 'then': {'$divide': ['$amount', '$$rate']},
-                                             'else': {'$divide': ['$amount', user_rate]}}}
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    day_of_week_pipeline = [
-        {'$match': {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc}, 'type': 'expense', **user_match}},
-        add_fields_stage,
-        {'$group': {
-            '_id': {'$dayOfWeek': {'date': '$timestamp', 'timezone': 'Asia/Phnom_Penh'}},
-            'totalAmount': {'$sum': '$amount_in_usd'}
-        }},
-        {'$sort': {'_id': 1}},
-        {'$project': {
-            '_id': 0,
-            'day': {'$switch': {'branches': [
-                {'case': {'$eq': ["$_id", 1]}, 'then': 'Sunday'},
-                {'case': {'$eq': ["$_id", 2]}, 'then': 'Monday'},
-                {'case': {'$eq': ["$_id", 3]}, 'then': 'Tuesday'},
-                {'case': {'$eq': ["$_id", 4]}, 'then': 'Wednesday'},
-                {'case': {'$eq': ["$_id", 5]}, 'then': 'Thursday'},
-                {'case': {'$eq': ["$_id", 6]}, 'then': 'Friday'},
-                {'case': {'$eq': ["$_id", 7]}, 'then': 'Saturday'}
-            ]}},
-            'total': '$totalAmount'
-        }}
-    ]
-
-    keywords_pipeline = [
-        {'$match': {
-            'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc},
-            'type': 'expense',
-            'description': {'$exists': True, '$ne': ''},
-            **user_match
-        }},
-        {'$group': {
-            '_id': {'category': '$categoryId', 'keyword': {'$toLower': '$description'}},
-            'count': {'$sum': 1}
-        }},
-        {'$sort': {'count': -1}},
-        {'$group': {
-            '_id': '$_id.category',
-            'topKeywordsWithCount': {'$push': {'keyword': '$_id.keyword', 'count': '$count'}}
-        }},
-        {'$project': {
-            '_id': 0, 'category': '$_id',
-            'topKeywords': {'$slice': ['$topKeywordsWithCount.keyword', 3]}
-        }}
-    ]
-
-    habits = {
-        'byDayOfWeek': list(db.transactions.aggregate(day_of_week_pipeline)),
-        'keywordsByCategory': list(db.transactions.aggregate(keywords_pipeline))
-    }
-    return jsonify(habits)
-# --- End of modified file ---
+    return jsonify({
+        'byDayOfWeek': list(transactions_collection().aggregate(day_pl)),
+        'keywordsByCategory': list(transactions_collection().aggregate(kw_pl))
+    })

@@ -1,4 +1,4 @@
-# --- Start of file: web_service/app/auth/routes.py ---
+# web_service/app/auth/routes.py
 
 from flask import Blueprint, request, jsonify
 from datetime import datetime
@@ -12,27 +12,40 @@ log = logging.getLogger(__name__)
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 UTC_TZ = ZoneInfo("UTC")
 
-DEFAULT_EXPENSE_CATEGORIES = [
-    "Food", "Drink", "Transport", "Shopping", "Bills", "Utilities",
-    "Entertainment", "Personal Care", "Work", "Alcohol", "For Others",
-    "Health", "Investment", "Forgot"
+# --- COMMERCIAL CONFIGURATION ---
+
+# 1. The "Basic" List (For Free Users)
+# Minimal viable product. Good for survival, bad for lifestyle tracking.
+BASIC_EXPENSE_CATEGORIES = [
+    "Food", "Transport", "Bills", "Work"
 ]
-DEFAULT_INCOME_CATEGORIES = [
-    "Salary", "Bonus", "Freelance", "Commission", "Allowance", "Gift",
-    "Investment"
+BASIC_INCOME_CATEGORIES = [
+    "Salary", "Allowance"
 ]
 
+# 2. The "Full" Default List (For Premium Users, or upsell target)
+# This includes "Fun" and "Growth" categories.
+FULL_EXPENSE_CATEGORIES = [
+    "Food", "Drink", "Transport", "Shopping", "Bills", "Utilities",
+    "Entertainment", "Personal Care", "Work", "Alcohol", "For Others",
+    "Health", "Investment", "Forgot", "Travel", "Education"
+]
+FULL_INCOME_CATEGORIES = [
+    "Salary", "Bonus", "Freelance", "Commission", "Allowance", "Gift",
+    "Investment", "Other"
+]
 
 def get_default_settings_for_user():
     """
-    Generates the default user profile document for any new user.
-    All users start as 'inactive'.
+    Generates the default user profile document.
+    CRITICAL: New users start with BASIC categories only.
     """
-    # No more role field. Everyone gets the same default document.
     return {
         "name_en": None,
         "name_km": None,
+        "role": "user",
         "subscription_status": "inactive",
+        "subscription_tier": "free", # Explicitly track tier
         "settings": {
             "language": None,
             "currency_mode": None,
@@ -44,13 +57,13 @@ def get_default_settings_for_user():
                 "report": None
             },
             "initial_balances": {"USD": 0, "KHR": 0},
+            # --- FEATURE FENCING ---
             "categories": {
-                "expense": DEFAULT_EXPENSE_CATEGORIES,
-                "income": DEFAULT_INCOME_CATEGORIES
+                "expense": BASIC_EXPENSE_CATEGORIES,
+                "income": BASIC_INCOME_CATEGORIES
             }
         }
     }
-
 
 def serialize_user(user):
     """Serializes user document for JSON, converting ObjectId."""
@@ -58,13 +71,10 @@ def serialize_user(user):
         user['_id'] = str(user['_id'])
     return user
 
-
 @auth_bp.route('/find_or_create', methods=['POST'])
 def find_or_create_user():
     """
-    This is the primary authentication endpoint for the bot.
-    It finds a user by their telegram_id or creates them if they don't exist.
-    Access is gated *only* by subscription_status.
+    Finds a user by their telegram_id or creates them if they don't exist.
     """
     try:
         db = get_db()
@@ -86,7 +96,7 @@ def find_or_create_user():
         return jsonify({"error": "Database query failed", "details": str(e)}), 500
 
     if not user:
-        # Get the standard default profile for a new user
+        # New user? Give them the restricted BASIC profile
         default_profile = get_default_settings_for_user()
 
         new_user_doc = {
@@ -105,15 +115,8 @@ def find_or_create_user():
     if not user:
         return jsonify({"error": "Failed to find or create user"}), 500
 
-    # Access is gated *only* by the subscription_status.
-    if user['subscription_status'] != 'active':
-        error_msg = (
-            "🚫 Subscription not active.\n"
-            "🚫 ការជាវ (Subscription) មិនទាន់ដំណើរការទេ។\n\n"
-            "សូមទាក់ទង @pr0meth4us ដើម្បីធ្វើការជាវ និងប្រើប្រាស់ Bot នេះ។\n"
-            "For subscription info, please contact: @pr0meth4us"
-        )
-        return jsonify({"error": error_msg}), 403
+    # Check active status (for banning/suspension logic)
+    if user.get('subscription_status') == 'banned':
+         return jsonify({"error": "Account suspended."}), 403
 
     return jsonify(serialize_user(user))
-# --- End of file ---
