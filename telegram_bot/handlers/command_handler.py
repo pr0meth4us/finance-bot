@@ -1,3 +1,5 @@
+# telegram_bot/handlers/command_handler.py
+
 import re
 import shlex
 import logging
@@ -14,7 +16,8 @@ import api_client
 import keyboards
 from decorators import authenticate_user
 from .helpers import format_summary_message
-from .common import cancel, start
+# FIXED: Import 'menu' instead of 'start'
+from .common import cancel, menu
 from utils.i18n import t
 
 log = logging.getLogger(__name__)
@@ -371,6 +374,10 @@ unified_message_conversation_handler = ConversationHandler(
         SELECT_CATEGORY: [CallbackQueryHandler(received_category_for_unknown, pattern='^cat_')],
         GET_CUSTOM_CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_custom_category_unknown)],
     },
-    fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
+    fallbacks=[
+        CommandHandler('cancel', cancel),
+        # FIXED: Support menu command
+        CommandHandler('menu', menu)
+    ],
     per_message=False
 )
