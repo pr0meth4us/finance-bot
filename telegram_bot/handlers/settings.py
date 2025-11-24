@@ -44,11 +44,19 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = api_client.get_user_settings(jwt)
     rate_data = api_client.get_exchange_rate(jwt)
 
+    # --- FIX: Handle None responses (Connection/Auth errors) ---
+    if not user_data or not rate_data:
+        await message_interface.reply_text(t("common.upstream_error", context))
+        return ConversationHandler.END
+
     if "error" in user_data or "error" in rate_data:
         await message_interface.reply_text(t("common.error_generic", context))
         return ConversationHandler.END
 
     context.user_data["profile"] = user_data.get("profile", {})
+    # Ensure nested profile_data exists if accessed elsewhere
+    if "profile_data" not in context.user_data:
+        context.user_data["profile_data"] = {}
     context.user_data["profile_data"]["profile"] = user_data.get("profile", {})
 
     profile = context.user_data["profile"]
@@ -136,7 +144,9 @@ async def categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     user_data = api_client.get_user_settings(context.user_data['jwt'])
-    if "error" in user_data:
+
+    # --- FIX: Handle None ---
+    if not user_data or "error" in user_data:
         return await settings_menu(update, context)
 
     context.user_data["profile"] = user_data.get("profile", {})
@@ -202,12 +212,16 @@ async def received_category_name(update: Update, context: ContextTypes.DEFAULT_T
 
     if action == 'add':
         res = api_client.add_category(jwt, cat_type, name)
-        msg = f"❌ {res['error']}" if "error" in res else t("settings.category_add_success", context, name=name,
-                                                           type=cat_type)
+        if res and "error" not in res:
+            msg = t("settings.category_add_success", context, name=name, type=cat_type)
+        else:
+            msg = f"❌ {res.get('error', 'Unknown Error')}" if res else t("common.error_generic", context)
     else:
         res = api_client.remove_category(jwt, cat_type, name)
-        msg = f"❌ {res['error']}" if "error" in res else t("settings.category_remove_success", context, name=name,
-                                                           type=cat_type)
+        if res and "error" not in res:
+            msg = t("settings.category_remove_success", context, name=name, type=cat_type)
+        else:
+            msg = f"❌ {res.get('error', 'Unknown Error')}" if res else t("common.error_generic", context)
 
     await update.message.reply_text(msg)
     return await settings_menu(update, context)
