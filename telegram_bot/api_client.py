@@ -6,13 +6,16 @@ import urllib.parse
 import requests
 import time
 from dotenv import load_dotenv
+from utils.bifrost import prepare_bifrost_payload
 
 log = logging.getLogger(__name__)
 
 load_dotenv()
 BASE_URL = os.getenv("WEB_SERVICE_URL")
-BIFROST_URL = os.getenv("BIFROST_BASE_URL")
+# Support both naming conventions from your configs
+BIFROST_URL = os.getenv("BIFROST_URL") or os.getenv("BIFROST_BASE_URL")
 BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 # Global session for connection pooling
 _session = requests.Session()
@@ -30,10 +33,7 @@ class UpstreamUnavailable(Exception):
 
 def _make_request(method, url, jwt=None, retries=3, **kwargs):
     """
-    Helper to make authenticated requests with:
-    1. Retries for transient errors.
-    2. Truncated logging for HTML errors.
-    3. Specific exception handling.
+    Helper to make authenticated requests with retries and error handling.
     """
     headers = kwargs.pop("headers", {})
     if jwt:
@@ -43,90 +43,92 @@ def _make_request(method, url, jwt=None, retries=3, **kwargs):
         try:
             res = _session.request(method, url, headers=headers, timeout=10, **kwargs)
 
-            # 1. Handle Specific Logic (Premium)
+            # 1. Handle Premium/Permission errors
             if res.status_code == 403:
                 raise PremiumFeatureException("This feature requires a premium subscription.")
 
-            # 2. Handle Server Errors (5xx) - Koyeb/Cloudflare issues
+            # 2. Handle Server Errors (5xx)
             if res.status_code >= 500:
-                # Log snippet only, not the full HTML blob
-                snippet = res.text[:300]
-                log.error(f"Upstream {res.status_code} from {url}. Preview: {snippet}...")
-
+                log.error(f"Upstream {res.status_code} from {url}. Response: {res.text[:200]}")
                 if attempt < retries - 1:
                     time.sleep(1)
                     continue
-
                 raise UpstreamUnavailable(f"Service unavailable (Status {res.status_code})")
 
-            # 3. Check other 4xx errors
+            # 3. Check other 4xx errors (like 401)
             res.raise_for_status()
 
-            # 4. Success (No Content)
+            # 4. Success
             if res.status_code == 204:
                 return {"success": True}
-
-            # 5. Success (JSON)
             return res.json()
 
+        except requests.exceptions.HTTPError as http_err:
+            log.error(f"HTTP Client Error: {http_err}")
+            # If it's a 401, we return it so the bot can trigger a re-login
+            if http_err.response.status_code == 401:
+                return {"error": "Unauthorized", "status": 401}
+
+            try:
+                return http_err.response.json()
+            except Exception:
+                return {"error": f"API error ({http_err.response.status_code})"}
+
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-            log.warning(f"Network attempt {attempt + 1}/{retries} failed for {url}: {e}")
+            log.warning(f"Network attempt {attempt + 1}/{retries} failed: {e}")
             if attempt < retries - 1:
                 time.sleep(1)
                 continue
-            log.error(f"Network error calling {url}", exc_info=True)
             raise UpstreamUnavailable("Connection timed out.")
 
-        except requests.exceptions.HTTPError as http_err:
-            # This catches 4xx errors (except 403 handled above)
-            log.error(f"HTTP Client Error: {http_err}")
-            try:
-                return http_err.response.json()
-            except requests.exceptions.JSONDecodeError:
-                return {"error": f"API error ({http_err.response.status_code})"}
-
-        except requests.exceptions.RequestException as e:
-            # Catch-all for other request errors
-            log.error(f"Unexpected RequestException: {e}", exc_info=True)
+        except Exception as e:
+            log.error(f"Unexpected error calling {url}: {e}", exc_info=True)
             raise UpstreamUnavailable("Network error.")
 
-    # Should be unreachable due to raise in loop, but safe fallback
     raise UpstreamUnavailable("Max retries exceeded.")
 
 
-# --- Auth & User ---
+# --- Auth ---
 
-def bifrost_telegram_login(telegram_id):
-    """Logs in via Telegram ID to Bifrost and returns a JWT."""
+def login_to_bifrost(user):
+    """
+    Authenticates via Telegram ID with Bifrost and returns a JWT.
+    """
+    if not BIFROST_CLIENT_ID or not TELEGRAM_TOKEN:
+        log.error("Missing BIFROST_CLIENT_ID or TELEGRAM_TOKEN")
+        return None
+
     url = f"{BIFROST_URL}/auth/api/telegram-login"
+
+    # Generate signed payload
+    tg_data = prepare_bifrost_payload(user, TELEGRAM_TOKEN)
+
     payload = {
         "client_id": BIFROST_CLIENT_ID,
-        "telegram_id": str(telegram_id)
+        "telegram_data": tg_data
     }
+
     try:
-        # We use a shorter retry for auth since it should be fast
-        # We manually handle request here since it's an external service (Bifrost)
-        # but ideally _make_request could be adapted. For now, keeping existing logic
-        # but adding the timeout/exception safety.
-        res = _session.post(url, json=payload, timeout=10)
+        # Direct request for auth to avoid circular logic
+        res = requests.post(url, json=payload, timeout=10)
         res.raise_for_status()
         data = res.json()
+
         if "jwt" in data:
-            return data
+            return data["jwt"]
         else:
-            log.error(f"Bifrost login failed: {data.get('error', 'No JWT')}")
-            return {"error": data.get('error', 'Bifrost login failed')}
+            log.error(f"Bifrost login failed: {data}")
+            return None
+    except Exception as e:
+        log.error(f"Bifrost Auth Error: {e}")
+        return None
 
-    except requests.exceptions.RequestException as e:
-        log.error(f"Network error reaching Bifrost: {e}")
-        return {"error": "Auth Service Unavailable"}
 
+# --- User & Settings ---
 
 def get_my_profile(jwt):
     return _make_request("get", f"{BASE_URL}/users/me", jwt)
 
-
-# --- Settings & Onboarding ---
 
 def get_user_settings(jwt):
     return _make_request("get", f"{BASE_URL}/settings/", jwt)
@@ -189,8 +191,8 @@ def update_transaction(tx_id, data, jwt):
 def delete_transaction(tx_id, jwt):
     try:
         res = _make_request("delete", f"{BASE_URL}/transactions/{tx_id}", jwt)
-        return res.get("success", False) if isinstance(res, dict) else False
-    except UpstreamUnavailable:
+        return True if res and "success" in res else False
+    except Exception:
         return False
 
 

@@ -28,7 +28,6 @@ async def _send_upstream_error(update: Update, context: ContextTypes.DEFAULT_TYP
     msg = t("common.upstream_error", context)
 
     if update.callback_query:
-        # Answer query to stop loading animation, then send message
         await context.bot.answer_callback_query(
             callback_query_id=update.callback_query.id,
             text=t("common.upstream_alert", context),
@@ -48,35 +47,44 @@ def authenticate_user(func):
         if not update.effective_user:
             return ConversationHandler.END
 
-        user_id = update.effective_user.id
+        user = update.effective_user
+        user_id = user.id
 
         try:
             # 1. Auth: Get or Refresh JWT
             jwt = context.user_data.get("jwt")
+
             if not jwt:
                 log.info(f"User {user_id}: Logging in via Bifrost.")
-                login_data = api_client.bifrost_telegram_login(user_id)
+                # New api_client returns the JWT string directly or None
+                jwt = api_client.login_to_bifrost(user)
 
-                if "error" in login_data:
-                    msg = login_data.get("error", "Auth API login failed.")
-                    log.error(f"User {user_id}: Bifrost login failed: {msg}")
+                if not jwt:
+                    msg = "Authentication failed."
+                    log.error(f"User {user_id}: Bifrost login returned None.")
                     await _send_auth_error(update, context, msg)
                     return ConversationHandler.END
 
-                jwt = login_data.get("jwt")
                 context.user_data["jwt"] = jwt
 
             # 2. Profile: Get or Refresh
             profile_data = context.user_data.get("profile_data")
             if not profile_data:
+                # Pass JWT explicitly
                 profile_data = api_client.get_my_profile(jwt)
 
-                if "error" in profile_data:
-                    msg = profile_data.get("error", "Failed to fetch user profile.")
-                    log.error(f"User {user_id}: Profile fetch failed: {msg}")
-
-                    # Invalidate JWT to force re-login next time
+                # Handle Auth Errors (401 from Web Service)
+                if profile_data and profile_data.get("status") == 401:
+                    log.warning(f"User {user_id}: JWT expired. Clearing session.")
                     context.user_data.pop("jwt", None)
+                    # Optional: Retry once? For now, ask user to retry
+                    await _send_auth_error(update, context, "Session expired. Please try again.")
+                    return ConversationHandler.END
+
+                if not profile_data or "error" in profile_data:
+                    msg = profile_data.get("error", "Failed to fetch profile.") if profile_data else "Connection error."
+                    log.error(f"User {user_id}: Profile fetch failed: {msg}")
+                    context.user_data.pop("jwt", None)  # Clear invalid token
                     await _send_auth_error(update, context, msg)
                     return ConversationHandler.END
 
@@ -87,8 +95,12 @@ def authenticate_user(func):
             # 3. Onboarding Check
             is_complete = context.user_data.get("profile", {}).get("onboarding_complete")
 
-            # Allow 'onboarding_start' to proceed even if not complete
             if not is_complete and func.__name__ != 'onboarding_start':
+                # Check if user is trying to run start/reset
+                msg_text = update.message.text if update.message else ""
+                if msg_text and (msg_text.startswith("/start") or msg_text.startswith("/reset")):
+                    return await func(update, context, *args, **kwargs)
+
                 log.info(f"User {user_id}: Onboarding incomplete. Blocking {func.__name__}.")
                 message = t("common.onboarding_required", context)
 
@@ -102,11 +114,9 @@ def authenticate_user(func):
                     )
                 return ConversationHandler.END
 
-            # 4. Execute Handler
             return await func(update, context, *args, **kwargs)
 
         except UpstreamUnavailable:
-            # Catches 500s/Timeouts from API calls inside auth OR inside the handler
             log.warning(f"User {user_id}: UpstreamUnavailable caught in decorator.")
             await _send_upstream_error(update, context)
             return ConversationHandler.END
