@@ -1,8 +1,10 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from flask import Blueprint, jsonify, g, current_app
+from flask import Blueprint, jsonify, g, current_app, request
 from bson import ObjectId
 from pymongo import ReturnDocument
+import requests
+from requests.auth import HTTPBasicAuth
 
 from app.utils.db import settings_collection
 from app.utils.auth import auth_required
@@ -55,7 +57,7 @@ def _get_default_settings(account_id_obj):
 def get_my_profile():
     """
     Finds or creates the user's profile in the settings collection.
-    Returns the profile document and the user's role.
+    Returns the profile document, the user's role, AND email from auth check.
     """
     try:
         account_id = ObjectId(g.account_id)
@@ -63,6 +65,10 @@ def get_my_profile():
         return jsonify({'error': 'Invalid account_id format'}), 400
 
     user_role = g.role
+
+    # g.email is now populated by our updated auth_required decorator (see utils/auth.py below)
+    # If not, we default to None
+    user_email = getattr(g, 'email', None)
 
     # Atomically find or create the profile
     user_profile = settings_collection().find_one_and_update(
@@ -76,7 +82,56 @@ def get_my_profile():
         current_app.logger.error(f"Failed to find or create profile for {account_id}")
         return jsonify({"error": "Failed to find or create user profile"}), 500
 
+    # Merge the email from the Identity Provider into the response
+    response_data = serialize_profile(user_profile)
+    response_data['email'] = user_email
+
     return jsonify({
-        "profile": serialize_profile(user_profile),
+        "profile": response_data,
         "role": user_role
     }), 200
+
+
+@users_bp.route('/me/credentials', methods=['POST'])
+@auth_required(min_role="user")
+def set_credentials():
+    """
+    Updates the email and password for the current user via Bifrost.
+    """
+    try:
+        account_id = g.account_id  # String from auth decorator
+    except Exception:
+        return jsonify({'error': 'Invalid session'}), 400
+
+    data = request.json
+    if not data or 'email' not in data or 'password' not in data:
+        return jsonify({'error': 'Email and password are required'}), 400
+
+    # Server-to-Server call to Bifrost
+    config = current_app.config
+    bifrost_url = config["BIFROST_URL"].rstrip('/')
+    url = f"{bifrost_url}/internal/set-credentials"
+
+    payload = {
+        "account_id": account_id,
+        "email": data['email'],
+        "password": data['password']
+    }
+
+    try:
+        auth = HTTPBasicAuth(config["BIFROST_CLIENT_ID"], config["BIFROST_CLIENT_SECRET"])
+        response = requests.post(url, json=payload, auth=auth, timeout=10)
+
+        if response.status_code == 200:
+            return jsonify({"message": "Credentials updated successfully"})
+
+        # Pass through Bifrost errors (e.g., "Email already in use")
+        try:
+            err = response.json()
+            return jsonify(err), response.status_code
+        except:
+            return jsonify({"error": "Failed to update credentials"}), response.status_code
+
+    except Exception as e:
+        current_app.logger.error(f"Failed to contact Bifrost: {e}")
+        return jsonify({"error": "Internal service error"}), 500
