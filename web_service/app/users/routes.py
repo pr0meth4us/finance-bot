@@ -66,8 +66,7 @@ def get_my_profile():
 
     user_role = g.role
 
-    # g.email is now populated by our updated auth_required decorator (see utils/auth.py below)
-    # If not, we default to None
+    # g.email is populated by our updated auth_required decorator
     user_email = getattr(g, 'email', None)
 
     # Atomically find or create the profile
@@ -92,11 +91,12 @@ def get_my_profile():
     }), 200
 
 
-@users_bp.route('/me/credentials', methods=['POST'])
+@users_bp.route('/credentials', methods=['POST'])
 @auth_required(min_role="user")
 def set_credentials():
     """
     Updates the email and password for the current user via Bifrost.
+    Proxies the request to Bifrost's internal API.
     """
     try:
         account_id = g.account_id  # String from auth decorator
