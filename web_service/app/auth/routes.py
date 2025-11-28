@@ -1,10 +1,9 @@
-# web_service/app/auth/routes.py
-
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from bson import ObjectId
 from app import get_db
 from zoneinfo import ZoneInfo
+from app.utils.auth import get_user_id_from_request  # Ensure this import is present
 import logging
 
 log = logging.getLogger(__name__)
@@ -12,40 +11,26 @@ log = logging.getLogger(__name__)
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 UTC_TZ = ZoneInfo("UTC")
 
-# --- COMMERCIAL CONFIGURATION ---
-
-# 1. The "Basic" List (For Free Users)
-# Minimal viable product. Good for survival, bad for lifestyle tracking.
-BASIC_EXPENSE_CATEGORIES = [
-    "Food", "Transport", "Bills", "Work"
-]
-BASIC_INCOME_CATEGORIES = [
-    "Salary", "Allowance"
-]
-
-# 2. The "Full" Default List (For Premium Users, or upsell target)
-# This includes "Fun" and "Growth" categories.
-FULL_EXPENSE_CATEGORIES = [
+DEFAULT_EXPENSE_CATEGORIES = [
     "Food", "Drink", "Transport", "Shopping", "Bills", "Utilities",
     "Entertainment", "Personal Care", "Work", "Alcohol", "For Others",
-    "Health", "Investment", "Forgot", "Travel", "Education"
+    "Health", "Investment", "Forgot"
 ]
-FULL_INCOME_CATEGORIES = [
+DEFAULT_INCOME_CATEGORIES = [
     "Salary", "Bonus", "Freelance", "Commission", "Allowance", "Gift",
-    "Investment", "Other"
+    "Investment"
 ]
+
 
 def get_default_settings_for_user():
     """
-    Generates the default user profile document.
-    CRITICAL: New users start with BASIC categories only.
+    Generates the default user profile document for any new user.
+    All users start as 'inactive'.
     """
     return {
         "name_en": None,
         "name_km": None,
-        "role": "user",
         "subscription_status": "inactive",
-        "subscription_tier": "free", # Explicitly track tier
         "settings": {
             "language": None,
             "currency_mode": None,
@@ -57,19 +42,20 @@ def get_default_settings_for_user():
                 "report": None
             },
             "initial_balances": {"USD": 0, "KHR": 0},
-            # --- FEATURE FENCING ---
             "categories": {
-                "expense": BASIC_EXPENSE_CATEGORIES,
-                "income": BASIC_INCOME_CATEGORIES
+                "expense": DEFAULT_EXPENSE_CATEGORIES,
+                "income": DEFAULT_INCOME_CATEGORIES
             }
         }
     }
+
 
 def serialize_user(user):
     """Serializes user document for JSON, converting ObjectId."""
     if '_id' in user:
         user['_id'] = str(user['_id'])
     return user
+
 
 @auth_bp.route('/find_or_create', methods=['POST'])
 def find_or_create_user():
@@ -96,9 +82,7 @@ def find_or_create_user():
         return jsonify({"error": "Database query failed", "details": str(e)}), 500
 
     if not user:
-        # New user? Give them the restricted BASIC profile
         default_profile = get_default_settings_for_user()
-
         new_user_doc = {
             "telegram_user_id": telegram_user_id,
             "created_at": datetime.now(UTC_TZ),
@@ -115,8 +99,55 @@ def find_or_create_user():
     if not user:
         return jsonify({"error": "Failed to find or create user"}), 500
 
-    # Check active status (for banning/suspension logic)
-    if user.get('subscription_status') == 'banned':
-         return jsonify({"error": "Account suspended."}), 403
+    if user.get('subscription_status') != 'active':
+        error_msg = (
+            "🚫 Subscription not active.\n"
+            "Please contact support to activate your account."
+        )
+        return jsonify({"error": error_msg}), 403
 
     return jsonify(serialize_user(user))
+
+
+# --- NEW ENDPOINTS START HERE ---
+
+@auth_bp.route('/me', methods=['GET'])
+def get_current_user():
+    """
+    Returns the profile of the currently authenticated user.
+    Used by the frontend AuthGuard to check for missing email.
+    """
+    db = get_db()
+    user_id, error = get_user_id_from_request()
+    if error: return error
+
+    user = db.users.find_one({"_id": user_id})
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    return jsonify(serialize_user(user))
+
+
+@auth_bp.route('/profile', methods=['PUT'])
+def update_profile():
+    """
+    Updates the user's profile (specifically email for onboarding).
+    """
+    db = get_db()
+    user_id, error = get_user_id_from_request()
+    if error: return error
+
+    data = request.json
+    updates = {}
+
+    if 'email' in data:
+        updates['email'] = data['email']
+
+    # Add other fields here as needed (e.g., name updates)
+
+    if not updates:
+        return jsonify({"error": "No fields to update"}), 400
+
+    db.users.update_one({"_id": user_id}, {"$set": updates})
+
+    return jsonify({"message": "Profile updated successfully"})
