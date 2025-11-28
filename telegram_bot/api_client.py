@@ -4,6 +4,7 @@ import logging
 from dotenv import load_dotenv
 from utils.bifrost import prepare_bifrost_payload
 import urllib.parse
+from requests.auth import HTTPBasicAuth
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -11,6 +12,7 @@ log = logging.getLogger(__name__)
 BASE_URL = os.getenv("WEB_SERVICE_URL")
 BIFROST_URL = os.getenv("BIFROST_URL", "http://bifrost:5000")
 BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")
+BIFROST_CLIENT_SECRET = os.getenv("BIFROST_CLIENT_SECRET")  # Added
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 # In-memory token storage: { user_id: "jwt_token" }
@@ -35,9 +37,38 @@ def _get_headers(user_id):
     return {}
 
 
+# --- NEW AUTH METHOD ---
+def get_login_code(telegram_id):
+    """
+    Asks Bifrost to generate a login code for this Telegram ID.
+    Uses Basic Auth (Client Credentials) to talk to Bifrost Internal API.
+    """
+    if not BIFROST_URL or not BIFROST_CLIENT_ID or not BIFROST_CLIENT_SECRET:
+        log.error("Missing Bifrost config for OTP generation")
+        return None
+
+    url = f"{BIFROST_URL}/internal/generate-otp"
+    payload = {"telegram_id": str(telegram_id)}
+
+    # Authenticate as the FinanceBot Service
+    auth = HTTPBasicAuth(BIFROST_CLIENT_ID, BIFROST_CLIENT_SECRET)
+
+    try:
+        res = requests.post(url, json=payload, auth=auth, timeout=10)
+        res.raise_for_status()
+        return res.json().get('code')
+    except Exception as e:
+        log.error(f"Failed to generate OTP from Bifrost: {e}")
+        return None
+
+
+# -----------------------
+
+
 def login_to_bifrost(user):
     """
     Authenticates the Telegram user with Bifrost to get a JWT.
+    (Kept for internal bot operations / legacy flows)
     """
     if not BIFROST_CLIENT_ID or not TELEGRAM_TOKEN:
         log.error("Missing BIFROST_CLIENT_ID or TELEGRAM_TOKEN env vars")
@@ -52,11 +83,6 @@ def login_to_bifrost(user):
         "client_id": BIFROST_CLIENT_ID,
         "telegram_data": tg_data
     }
-
-    # --- DEBUG LOG ---
-    masked_id = BIFROST_CLIENT_ID[:5] + "***" if BIFROST_CLIENT_ID else "None"
-    log.info(f"Attempting Bifrost Login with ID: {masked_id} for User {user.id}")
-    # -----------------
 
     try:
         res = requests.post(url, json=payload, timeout=10)
@@ -73,7 +99,6 @@ def login_to_bifrost(user):
             return None
 
     except requests.exceptions.HTTPError as e:
-        # LOG THE ACTUAL SERVER RESPONSE (JSON ERROR)
         log.error(f"Bifrost Login Failed ({e.response.status_code}): {e.response.text}")
         return None
     except requests.exceptions.RequestException as e:
@@ -106,8 +131,6 @@ def ensure_auth(func):
             raise e
         except requests.exceptions.RequestException as e:
             log.error(f"Connection error in {func.__name__}: {e}")
-            # Instead of crashing with a raw exception, catch it or assume None is handled
-            # We return None here so the caller handles it via 'if not result:'
             return None
 
     return wrapper

@@ -29,6 +29,7 @@ from handlers import (
     iou_edit_conversation_handler,
     get_current_rate
 )
+from handlers.auth import login_command  # <--- IMPORTED HERE
 from handlers.analytics import download_report_csv
 from handlers.iou import download_debt_analysis_csv
 from handlers.command_handler import unified_message_conversation_handler
@@ -79,6 +80,10 @@ def main():
     app.add_handler(CommandHandler("menu", menu))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("cancel", cancel))
+
+    # Auth Handlers
+    app.add_handler(CommandHandler("login", login_command))  # <--- ADDED
+    app.add_handler(CommandHandler("web", login_command))  # <--- ADDED (Alias)
 
     # Conversations
     app.add_handler(tx_conversation_handler)
