@@ -67,6 +67,10 @@ def auth_required(min_role="user"):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
+            # Allow CORS preflight requests to pass without auth
+            if request.method == 'OPTIONS':
+                return f(*args, **kwargs)
+
             auth_header = request.headers.get("Authorization")
             if not auth_header:
                 return jsonify({"error": "Authorization header is missing"}), 401

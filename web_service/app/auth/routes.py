@@ -1,9 +1,9 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from datetime import datetime
 from bson import ObjectId
 from app import get_db
 from zoneinfo import ZoneInfo
-from app.utils.auth import get_user_id_from_request  # Ensure this import is present
+from app.utils.auth import auth_required
 import logging
 
 log = logging.getLogger(__name__)
@@ -109,17 +109,21 @@ def find_or_create_user():
     return jsonify(serialize_user(user))
 
 
-# --- NEW ENDPOINTS START HERE ---
+# --- AUTHENTICATED ROUTES ---
 
 @auth_bp.route('/me', methods=['GET'])
+@auth_required(min_role="user")
 def get_current_user():
     """
     Returns the profile of the currently authenticated user.
     Used by the frontend AuthGuard to check for missing email.
     """
     db = get_db()
-    user_id, error = get_user_id_from_request()
-    if error: return error
+    try:
+        # g.account_id comes from the auth_required decorator
+        user_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({"error": "Invalid user ID"}), 400
 
     user = db.users.find_one({"_id": user_id})
     if not user:
@@ -129,13 +133,16 @@ def get_current_user():
 
 
 @auth_bp.route('/profile', methods=['PUT'])
+@auth_required(min_role="user")
 def update_profile():
     """
     Updates the user's profile (specifically email for onboarding).
     """
     db = get_db()
-    user_id, error = get_user_id_from_request()
-    if error: return error
+    try:
+        user_id = ObjectId(g.account_id)
+    except Exception:
+        return jsonify({"error": "Invalid user ID"}), 400
 
     data = request.json
     updates = {}
