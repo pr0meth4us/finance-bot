@@ -2,11 +2,8 @@
 
 import os
 import logging
-import asyncio
-import time
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
-from telegram.error import NetworkError
 from dotenv import load_dotenv
 
 from handlers import (
@@ -131,20 +128,8 @@ def main():
 
     logger.info("🚀 Bot is polling...")
 
-    while True:
-        try:
-            app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES, stop_signals=None)
-        except NetworkError as e:
-            logger.warning(f"⚠️ NetworkError during polling (likely Telegram issue): {e}")
-            logger.info("♻️ Retrying polling in 5 seconds...")
-            time.sleep(5)
-        except Exception as e:
-            logger.critical(f"🔥 Critical error in polling loop: {e}", exc_info=True)
-            logger.info("♻️ Restarting polling in 10 seconds...")
-            time.sleep(10)
-        else:
-            logger.info("Polling stopped cleanly.")
-            break
+    # --- UPDATED: No manual restart loop. Let Docker handle restarts. ---
+    app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES, stop_signals=None)
 
 
 if __name__ == "__main__":

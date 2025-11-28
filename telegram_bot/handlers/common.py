@@ -20,7 +20,6 @@ PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Displays the main menu (Dashboard).
-    This is the single source of truth for showing the menu.
     """
     profile = context.user_data.get('profile', {})
     jwt = context.user_data.get('jwt')
@@ -47,11 +46,15 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- GRACEFUL SUMMARY FETCH ---
     summary_text = ""
     try:
+        # Pass JWT explicitly
         summary_data = api_client.get_detailed_summary(jwt)
-        if summary_data:
+
+        # Handle potential error dictionary return (non-exception 401 handling)
+        if summary_data and "error" not in summary_data:
             summary_text = format_summary_message(summary_data, context)
         else:
             summary_text = t("common.summary_unavailable", context)
+
     except UpstreamUnavailable:
         summary_text = t("common.summary_unavailable", context)
     # ------------------------------
@@ -98,7 +101,7 @@ async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         summary_data = api_client.get_detailed_summary(jwt)
 
-        if not summary_data:
+        if not summary_data or "error" in summary_data:
             await query.answer(t("common.upstream_alert", context), show_alert=True)
             return
 
@@ -127,7 +130,6 @@ async def quick_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the user guide."""
     help_text = t("help.guide", context)
-    # Updated to HTML for better formatting control
     await update.message.reply_text(help_text, parse_mode='HTML')
 
 

@@ -41,16 +41,14 @@ def _validate_token_with_bifrost(token, bifrost_url, client_id, client_secret):
             return result
 
         elif response.status_code == 401:
-            # IMPORTANT: Log the specific reason Bifrost rejected us
-            # It could be "Invalid client_id/secret" OR "Token expired" OR "Audience mismatch"
             err_resp = response.json() if response.is_json else {"error": response.text}
             current_app.logger.warning(f"Bifrost Validation Failed (401): {err_resp}")
 
             if "is_valid" in err_resp:
-                # This means Auth succeeded, but Token is invalid (e.g. expired, wrong aud)
-                return (True, err_resp, 200)  # Return success=True so wrapper handles the "is_valid": False logic
+                # Auth succeeded, but Token is invalid
+                return (True, err_resp, 200)
             else:
-                # This means Basic Auth failed (Bad Service Credentials)
+                # Basic Auth failed
                 return (False, {"error": "Service Authentication Failed"}, 500)
 
         elif response.status_code == 403:
@@ -98,12 +96,13 @@ def auth_required(min_role="user"):
                 return jsonify({"error": "Invalid or expired token"}), 401
 
             # Check Role
-            user_role = data.get("role", "user")
+            user_role = data.get("app_specific_role", "user")
             if _get_role_level(user_role) < _get_role_level(min_role):
                 return jsonify({"error": "Forbidden: Insufficient role"}), 403
 
             g.account_id = data.get("account_id")
             g.role = user_role
+            g.email = data.get("email") # Capture email from Bifrost response
 
             return f(*args, **kwargs)
 
