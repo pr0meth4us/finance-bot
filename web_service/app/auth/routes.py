@@ -1,8 +1,8 @@
 from flask import Blueprint, request, jsonify, g
 from datetime import datetime
 from bson import ObjectId
-from app import get_db
 from zoneinfo import ZoneInfo
+from app import get_db
 from app.utils.auth import auth_required
 import logging
 
@@ -52,8 +52,15 @@ def get_default_settings_for_user():
 
 def serialize_user(user):
     """Serializes user document for JSON, converting ObjectId."""
-    if '_id' in user:
+    if not user:
+        return None
+
+    if '_id' in user and isinstance(user['_id'], ObjectId):
         user['_id'] = str(user['_id'])
+
+    if 'created_at' in user and isinstance(user['created_at'], datetime):
+        user['created_at'] = user['created_at'].isoformat()
+
     return user
 
 
@@ -61,20 +68,20 @@ def serialize_user(user):
 def find_or_create_user():
     """
     Finds a user by their telegram_id or creates them if they don't exist.
+    Called by Telegram/Bifrost.
     """
     try:
         db = get_db()
     except Exception as e:
         return jsonify({"error": "Failed to connect to database", "details": str(e)}), 500
 
-    data = request.json
+    data = request.json or {}
     telegram_user_id = data.get('telegram_user_id')
 
     if not telegram_user_id:
         return jsonify({"error": "telegram_user_id is required"}), 400
 
     telegram_user_id = str(telegram_user_id)
-    user = None
 
     try:
         user = db.users.find_one({"telegram_user_id": telegram_user_id})
@@ -99,6 +106,8 @@ def find_or_create_user():
     if not user:
         return jsonify({"error": "Failed to find or create user"}), 500
 
+    # If you want to block inactive users completely, keep this.
+    # If you want Telegram to still work while web is locked, you can relax it.
     if user.get('subscription_status') != 'active':
         error_msg = (
             "🚫 Subscription not active.\n"
@@ -106,20 +115,28 @@ def find_or_create_user():
         )
         return jsonify({"error": error_msg}), 403
 
-    return jsonify(serialize_user(user))
+    return jsonify(serialize_user(user)), 200
 
 
-# --- AUTHENTICATED ROUTES ---
-
-@auth_bp.route('/me', methods=['GET'])
+# ---------------------------------------------------------------------
+# AUTHENTICATED ROUTES (used by Savvify web)
+# ---------------------------------------------------------------------
+@auth_bp.route('/me', methods=['GET', 'OPTIONS'])
 @auth_required(min_role="user")
 def get_current_user():
     """
     Returns the profile of the currently authenticated user.
+
+    - Browser will send OPTIONS (preflight) first.
+    - Because methods include 'OPTIONS', Flask will route it here,
+      and your auth_required decorator can return 200 for preflight.
     """
+    if request.method == 'OPTIONS':
+        # Safety net; usually handled by decorator, but harmless.
+        return jsonify({"status": "ok"}), 200
+
     db = get_db()
     try:
-        # Use g.account_id which is set by the auth_required decorator
         user_id = ObjectId(g.account_id)
     except Exception:
         return jsonify({"error": "Invalid user ID from token"}), 400
@@ -128,14 +145,14 @@ def get_current_user():
     if not user:
         return jsonify({"error": "User not found"}), 404
 
-    return jsonify(serialize_user(user))
+    return jsonify(serialize_user(user)), 200
 
 
 @auth_bp.route('/profile', methods=['PUT'])
 @auth_required(min_role="user")
 def update_profile():
     """
-    Updates the user's profile (specifically email for onboarding).
+    Updates the user's profile (currently only email).
     """
     db = get_db()
     try:
@@ -143,7 +160,7 @@ def update_profile():
     except Exception:
         return jsonify({"error": "Invalid user ID from token"}), 400
 
-    data = request.json
+    data = request.json or {}
     updates = {}
 
     if 'email' in data:
@@ -153,5 +170,9 @@ def update_profile():
         return jsonify({"error": "No fields to update"}), 400
 
     db.users.update_one({"_id": user_id}, {"$set": updates})
+    updated = db.users.find_one({"_id": user_id})
 
-    return jsonify({"message": "Profile updated successfully"})
+    return jsonify({
+        "message": "Profile updated successfully",
+        "user": serialize_user(updated)
+    }), 200

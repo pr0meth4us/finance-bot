@@ -2,7 +2,7 @@ import certifi
 import io
 import requests
 import matplotlib.pyplot as plt
-from flask import Flask, jsonify
+from flask import Flask, jsonify, current_app
 from flask_cors import CORS
 from pymongo import MongoClient
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -14,13 +14,29 @@ from bson import ObjectId
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 UTC_TZ = ZoneInfo("UTC")
+
 FINANCIAL_TRANSACTION_CATEGORIES = [
     'Loan Lent', 'Debt Repayment', 'Loan Received', 'Debt Settled', 'Initial Balance'
 ]
 
 
-# --- HELPER FUNCTIONS FOR SCHEDULED JOBS ---
+# ---------------------------------------------------------------------
+# DB HELPER
+# ---------------------------------------------------------------------
+def get_db(app=None):
+    """
+    Helper to get MongoDB database instance.
+    - In request context: use current_app.db
+    - Outside: you can pass an app explicitly.
+    """
+    if app is not None:
+        return app.db
+    return current_app.db
 
+
+# ---------------------------------------------------------------------
+# TELEGRAM HELPERS
+# ---------------------------------------------------------------------
 def send_telegram_message(chat_id, text, token, parse_mode='HTML'):
     """A simple function to send a message via the Telegram API."""
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -46,6 +62,9 @@ def send_telegram_photo(chat_id, photo_bytes, token, caption=""):
         print(f"Failed to send scheduled photo to {chat_id}: {e}")
 
 
+# ---------------------------------------------------------------------
+# REPORT LOGIC
+# ---------------------------------------------------------------------
 def get_report_data(start_date_local_obj, end_date_local_obj, db):
     """Internal logic to fetch detailed report data."""
     aware_start_local = datetime.combine(start_date_local_obj, time.min, tzinfo=PHNOM_PENH_TZ)
@@ -62,8 +81,13 @@ def get_report_data(start_date_local_obj, end_date_local_obj, db):
                     'else': {
                         '$let': {
                             'vars': {'rate': {'$ifNull': ['$exchangeRateAtTime', 4100.0]}},
-                            'in': {'$cond': {'if': {'$gt': ['$$rate', 0]}, 'then': {'$divide': ['$amount', '$$rate']},
-                                             'else': {'$divide': ['$amount', 4100.0]}}}
+                            'in': {
+                                '$cond': {
+                                    'if': {'$gt': ['$$rate', 0]},
+                                    'then': {'$divide': ['$amount', '$$rate']},
+                                    'else': {'$divide': ['$amount', 4100.0]}
+                                }
+                            }
                         }
                     }
                 }
@@ -82,10 +106,19 @@ def get_report_data(start_date_local_obj, end_date_local_obj, db):
     balance_at_start_usd = start_income - start_expense
 
     operational_pipeline = [
-        {'$match': {'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc},
-                    'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}}},
+        {
+            '$match': {
+                'timestamp': {'$gte': start_date_utc, '$lte': end_date_utc},
+                'categoryId': {'$nin': FINANCIAL_TRANSACTION_CATEGORIES}
+            }
+        },
         add_fields_stage,
-        {'$group': {'_id': {'type': '$type', 'category': '$categoryId'}, 'total': {'$sum': '$amount_in_usd'}}},
+        {
+            '$group': {
+                '_id': {'type': '$type', 'category': '$categoryId'},
+                'total': {'$sum': '$amount_in_usd'}
+            }
+        },
         {'$sort': {'total': -1}}
     ]
     operational_data = list(db.transactions.aggregate(operational_pipeline))
@@ -93,8 +126,12 @@ def get_report_data(start_date_local_obj, end_date_local_obj, db):
     report = {
         "startDate": start_date_local_obj.isoformat(),
         "endDate": end_date_local_obj.isoformat(),
-        "summary": {"totalIncomeUSD": 0, "totalExpenseUSD": 0, "netSavingsUSD": 0,
-                    "balanceAtStartUSD": balance_at_start_usd},
+        "summary": {
+            "totalIncomeUSD": 0,
+            "totalExpenseUSD": 0,
+            "netSavingsUSD": 0,
+            "balanceAtStartUSD": balance_at_start_usd
+        },
         "expenseBreakdown": []
     }
 
@@ -103,8 +140,14 @@ def get_report_data(start_date_local_obj, end_date_local_obj, db):
             report['summary']['totalIncomeUSD'] += item['total']
         elif item['_id']['type'] == 'expense':
             report['summary']['totalExpenseUSD'] += item['total']
-            report['expenseBreakdown'].append({'category': item['_id']['category'], 'totalUSD': item['total']})
-    report['summary']['netSavingsUSD'] = report['summary']['totalIncomeUSD'] - report['summary']['totalExpenseUSD']
+            report['expenseBreakdown'].append({
+                'category': item['_id']['category'],
+                'totalUSD': item['total']
+            })
+
+    report['summary']['netSavingsUSD'] = (
+            report['summary']['totalIncomeUSD'] - report['summary']['totalExpenseUSD']
+    )
     return report
 
 
@@ -117,12 +160,14 @@ def format_scheduled_report_message(data):
     income = summary.get('totalIncomeUSD', 0)
     expense = summary.get('totalExpenseUSD', 0)
     net = summary.get('netSavingsUSD', 0)
+
     summary_text = (
         f"<b>Summary (in USD):</b>\n"
         f"⬆️ Income: ${income:,.2f}\n"
         f"⬇️ Expense: ${expense:,.2f}\n"
         f"<b>Net: ${net:,.2f}</b> {'✅' if net >= 0 else '🔻'}\n\n"
     )
+
     expense_breakdown = data.get('expenseBreakdown', [])
     expense_text = "<b>Top Expenses:</b>\n"
     if expense_breakdown:
@@ -130,6 +175,7 @@ def format_scheduled_report_message(data):
             expense_text += f"    - {item['category']}: ${item['totalUSD']:,.2f}\n"
     else:
         expense_text += "    - No expenses recorded.\n"
+
     return header + summary_text + expense_text
 
 
@@ -141,14 +187,15 @@ def create_pie_chart_from_data(data, start_date, end_date):
 
     threshold = 4.0
     new_labels, new_sizes, other_total = [], [], 0
-    if total_expense > 0:
-        for item in expense_breakdown:
-            percentage = (item['totalUSD'] / total_expense) * 100
-            if percentage < threshold:
-                other_total += item['totalUSD']
-            else:
-                new_labels.append(item['category'])
-                new_sizes.append(item['totalUSD'])
+
+    for item in expense_breakdown:
+        percentage = (item['totalUSD'] / total_expense) * 100
+        if percentage < threshold:
+            other_total += item['totalUSD']
+        else:
+            new_labels.append(item['category'])
+            new_sizes.append(item['totalUSD'])
+
     if other_total > 0:
         new_labels.append('Other')
         new_sizes.append(other_total)
@@ -168,7 +215,9 @@ def create_pie_chart_from_data(data, start_date, end_date):
     return buf.getvalue()
 
 
-# --- SCHEDULED JOB DEFINITIONS ---
+# ---------------------------------------------------------------------
+# SCHEDULED JOBS
+# ---------------------------------------------------------------------
 def _send_report_job(period_name, start_date, end_date, db, token, chat_id):
     """Generic helper to generate and send a report."""
     report_data = get_report_data(start_date, end_date, db)
@@ -179,7 +228,10 @@ def _send_report_job(period_name, start_date, end_date, db, token, chat_id):
         if pie_chart_bytes:
             send_telegram_photo(chat_id, pie_chart_bytes, token)
     else:
-        message = f"📊 No significant activity recorded for the {period_name} ({start_date.strftime('%b %d')} - {end_date.strftime('%b %d')})."
+        message = (
+            f"📊 No significant activity recorded for the {period_name} "
+            f"({start_date.strftime('%b %d')} - {end_date.strftime('%b %d')})."
+        )
         send_telegram_message(chat_id, message, token)
 
 
@@ -197,6 +249,7 @@ def run_scheduled_report(period):
         return
 
     today = datetime.now(PHNOM_PENH_TZ).date()
+
     if period == 'weekly':
         end_date = today - timedelta(days=today.weekday() + 1)
         start_date = end_date - timedelta(days=6)
@@ -206,11 +259,11 @@ def run_scheduled_report(period):
         start_date = end_date.replace(day=1)
         _send_report_job('previous month', start_date, end_date, db, token, chat_id)
     elif period == 'semesterly':
-        if today.month == 1:  # January, report on Jul-Dec
+        if today.month == 1:  # January → Jul–Dec of last year
             end_date = today.replace(year=today.year - 1, month=12, day=31)
             start_date = today.replace(year=today.year - 1, month=7, day=1)
             _send_report_job('last semester', start_date, end_date, db, token, chat_id)
-        elif today.month == 7:  # July, report on Jan-Jun
+        elif today.month == 7:  # July → Jan–Jun of this year
             end_date = today.replace(month=6, day=30)
             start_date = today.replace(month=1, day=1)
             _send_report_job('first semester', start_date, end_date, db, token, chat_id)
@@ -224,42 +277,48 @@ def run_scheduled_report(period):
 
 
 def send_daily_reminder_job():
-    # This job is different, so it keeps its own logic
     client = MongoClient(Config.MONGODB_URI, tls=True, tlsCAFile=certifi.where())
     db = client[Config.DB_NAME]
     now_in_phnom_penh = datetime.now(PHNOM_PENH_TZ)
     today_start_local_aware = datetime.combine(now_in_phnom_penh.date(), time.min, tzinfo=PHNOM_PENH_TZ)
-    today_start_utc = today_start_local_aware.astimezone(ZoneInfo("UTC"))
+    today_start_utc = today_start_local_aware.astimezone(UTC_TZ)
+
     count = db.transactions.count_documents({'timestamp': {'$gte': today_start_utc}})
     if count == 0 and Config.TELEGRAM_TOKEN and Config.TELEGRAM_CHAT_ID:
         token, chat_id = Config.TELEGRAM_TOKEN, Config.TELEGRAM_CHAT_ID
-        message = "Hey! 잊지마! (Don't forget!)\n\nLooks like you haven't logged any transactions today. Take a moment to log your activity! ✍️"
+        message = (
+            "Hey! 잊지마! (Don't forget!)\n\n"
+            "Looks like you haven't logged any transactions today. "
+            "Take a moment to log your activity! ✍️"
+        )
         send_telegram_message(chat_id, message, token, parse_mode='Markdown')
         print("Sent daily transaction reminder.")
     else:
         print("Skipped daily transaction reminder, transactions found or config missing.")
+
     client.close()
 
 
-# --- APP CREATION ---
-
+# ---------------------------------------------------------------------
+# APP FACTORY
+# ---------------------------------------------------------------------
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    # --- CORS CONFIGURATION (UPDATED) ---
-    # Explicitly allowing Authorization headers and methods to fix preflight failures
-    CORS(app, resources={
-        r"/*": {
-            "origins": [
-                "https://savvify-web.vercel.app",  # Production
-                "http://localhost:3000"            # Local Dev
-            ],
-            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True
-        }
-    })
+    # --- CORS CONFIG (fixed) ---
+    CORS(
+        app,
+        resources={
+            r"/*": {
+                "origins": [
+                    "https://savvify-web.vercel.app",  # Production
+                    "http://localhost:3000",           # Local dev
+                ]
+            }
+        },
+        supports_credentials=True,
+    )
 
     client = MongoClient(Config.MONGODB_URI, tls=True, tlsCAFile=certifi.where())
     app.db = client[Config.DB_NAME]
@@ -267,18 +326,40 @@ def create_app():
 
     scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Phnom_Penh')
 
-    # Schedule all jobs
-    scheduler.add_job(send_daily_reminder_job, trigger=CronTrigger(hour=21, minute=0), id='daily_reminder',
-                      replace_existing=True)
-    scheduler.add_job(run_scheduled_report, args=['weekly'], trigger=CronTrigger(day_of_week='mon', hour=8, minute=0),
-                      id='weekly_report', replace_existing=True)
-    scheduler.add_job(run_scheduled_report, args=['monthly'], trigger=CronTrigger(day=1, hour=8, minute=30),
-                      id='monthly_report', replace_existing=True)
-    scheduler.add_job(run_scheduled_report, args=['semesterly'],
-                      trigger=CronTrigger(month='1,7', day=1, hour=9, minute=0), id='semesterly_report',
-                      replace_existing=True)
-    scheduler.add_job(run_scheduled_report, args=['yearly'], trigger=CronTrigger(month=1, day=1, hour=9, minute=30),
-                      id='yearly_report', replace_existing=True)
+    scheduler.add_job(
+        send_daily_reminder_job,
+        trigger=CronTrigger(hour=21, minute=0),
+        id='daily_reminder',
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        run_scheduled_report,
+        args=['weekly'],
+        trigger=CronTrigger(day_of_week='mon', hour=8, minute=0),
+        id='weekly_report',
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        run_scheduled_report,
+        args=['monthly'],
+        trigger=CronTrigger(day=1, hour=8, minute=30),
+        id='monthly_report',
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        run_scheduled_report,
+        args=['semesterly'],
+        trigger=CronTrigger(month='1,7', day=1, hour=9, minute=0),
+        id='semesterly_report',
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        run_scheduled_report,
+        args=['yearly'],
+        trigger=CronTrigger(month=1, day=1, hour=9, minute=30),
+        id='yearly_report',
+        replace_existing=True,
+    )
 
     scheduler.start()
     app.scheduler = scheduler
