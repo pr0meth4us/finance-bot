@@ -112,10 +112,12 @@ def set_credentials():
     bifrost_url = config["BIFROST_URL"].rstrip('/')
     url = f"{bifrost_url}/internal/set-credentials"
 
+    # Forward the proof_token provided by the frontend (for Telegram Mini App verification)
     payload = {
         "account_id": account_id,
         "email": data['email'],
-        "password": data['password']
+        "password": data['password'],
+        "proof_token": data.get('proof_token')
     }
 
     try:
