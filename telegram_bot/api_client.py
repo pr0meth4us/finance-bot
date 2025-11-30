@@ -1,6 +1,7 @@
 import os
 import requests
 import logging
+import time
 from dotenv import load_dotenv
 from utils.bifrost import prepare_bifrost_payload
 import urllib.parse
@@ -12,8 +13,11 @@ log = logging.getLogger(__name__)
 BASE_URL = os.getenv("WEB_SERVICE_URL")
 BIFROST_URL = os.getenv("BIFROST_URL", "http://bifrost:5000")
 BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")
-BIFROST_CLIENT_SECRET = os.getenv("BIFROST_CLIENT_SECRET")  # Added
+BIFROST_CLIENT_SECRET = os.getenv("BIFROST_CLIENT_SECRET")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+
+# Increased timeout to handle PaaS "cold starts" (sleeping instances)
+DEFAULT_TIMEOUT = 60
 
 # In-memory token storage: { user_id: "jwt_token" }
 _USER_TOKENS = {}
@@ -42,6 +46,7 @@ def get_login_code(telegram_id):
     """
     Asks Bifrost to generate a login code for this Telegram ID.
     Uses Basic Auth (Client Credentials) to talk to Bifrost Internal API.
+    Includes Retry logic for sleeping services.
     """
     if not BIFROST_URL or not BIFROST_CLIENT_ID or not BIFROST_CLIENT_SECRET:
         log.error("Missing Bifrost config for OTP generation")
@@ -53,13 +58,23 @@ def get_login_code(telegram_id):
     # Authenticate as the FinanceBot Service
     auth = HTTPBasicAuth(BIFROST_CLIENT_ID, BIFROST_CLIENT_SECRET)
 
-    try:
-        res = requests.post(url, json=payload, auth=auth, timeout=10)
-        res.raise_for_status()
-        return res.json().get('code')
-    except Exception as e:
-        log.error(f"Failed to generate OTP from Bifrost: {e}")
-        return None
+    # Retry logic for cold starts
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            res = requests.post(url, json=payload, auth=auth, timeout=DEFAULT_TIMEOUT)
+            res.raise_for_status()
+            return res.json().get('code')
+        except requests.exceptions.ReadTimeout:
+            log.warning(f"Bifrost request timed out (Attempt {attempt+1}/{max_retries}). The service might be waking up.")
+            if attempt < max_retries - 1:
+                time.sleep(2)  # Wait a bit before retrying
+                continue
+            log.error("Failed to generate OTP from Bifrost: Read timed out after retries.")
+            return None
+        except Exception as e:
+            log.error(f"Failed to generate OTP from Bifrost: {e}")
+            return None
 
 
 # -----------------------
@@ -85,7 +100,7 @@ def login_to_bifrost(user):
     }
 
     try:
-        res = requests.post(url, json=payload, timeout=10)
+        res = requests.post(url, json=payload, timeout=DEFAULT_TIMEOUT)
         res.raise_for_status()
         data = res.json()
 
@@ -141,7 +156,7 @@ def ensure_auth(func):
 @ensure_auth
 def get_my_profile(user_id):
     try:
-        res = requests.get(f"{BASE_URL}/users/me", headers=_get_headers(user_id), timeout=10)
+        res = requests.get(f"{BASE_URL}/users/me", headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT)
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
@@ -160,7 +175,7 @@ def get_detailed_summary(user_id):
         res = requests.get(
             f"{BASE_URL}/summary/detailed",
             headers=_get_headers(user_id),
-            timeout=10
+            timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -172,7 +187,7 @@ def get_detailed_summary(user_id):
 @ensure_auth
 def add_debt(data, user_id):
     try:
-        res = requests.post(f"{BASE_URL}/debts/", json=data, headers=_get_headers(user_id), timeout=10)
+        res = requests.post(f"{BASE_URL}/debts/", json=data, headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT)
         if res.status_code == 403:
             raise PremiumFeatureException("Premium required")
         res.raise_for_status()
@@ -187,7 +202,7 @@ def add_debt(data, user_id):
 @ensure_auth
 def add_reminder(data, user_id):
     try:
-        res = requests.post(f"{BASE_URL}/reminders/", json=data, headers=_get_headers(user_id), timeout=10)
+        res = requests.post(f"{BASE_URL}/reminders/", json=data, headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT)
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
@@ -199,7 +214,7 @@ def add_reminder(data, user_id):
 def get_open_debts(user_id):
     try:
         res = requests.get(
-            f"{BASE_URL}/debts/", headers=_get_headers(user_id), timeout=10
+            f"{BASE_URL}/debts/", headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -214,7 +229,7 @@ def get_open_debts_export(user_id):
         res = requests.get(
             f"{BASE_URL}/debts/export/open",
             headers=_get_headers(user_id),
-            timeout=15
+            timeout=DEFAULT_TIMEOUT
         )
         if res.status_code == 403:
             raise PremiumFeatureException("Premium required")
@@ -233,7 +248,7 @@ def get_settled_debts_grouped(user_id):
         res = requests.get(
             f"{BASE_URL}/debts/list/settled",
             headers=_get_headers(user_id),
-            timeout=10
+            timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -249,7 +264,7 @@ def get_debts_by_person_and_currency(person_name, currency, user_id):
         res = requests.get(
             f"{BASE_URL}/debts/person/{encoded_name}/{currency}",
             headers=_get_headers(user_id),
-            timeout=10
+            timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -267,7 +282,7 @@ def get_all_debts_by_person(person_name, user_id):
         res = requests.get(
             f"{BASE_URL}/debts/person/{encoded_name}/all",
             headers=_get_headers(user_id),
-            timeout=10
+            timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -283,7 +298,7 @@ def get_all_settled_debts_by_person(person_name, user_id):
         res = requests.get(
             f"{BASE_URL}/debts/person/{encoded_name}/all/settled",
             headers=_get_headers(user_id),
-            timeout=10
+            timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -300,7 +315,7 @@ def get_debt_details(debt_id, user_id):
         res = requests.get(
             f"{BASE_URL}/debts/{debt_id}",
             headers=_get_headers(user_id),
-            timeout=10
+            timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -316,7 +331,7 @@ def cancel_debt(debt_id, user_id):
             f"{BASE_URL}/debts/{debt_id}/cancel",
             json={},  # Body is empty now, user_id in header
             headers=_get_headers(user_id),
-            timeout=15
+            timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -332,7 +347,7 @@ def cancel_debt(debt_id, user_id):
 def update_debt(debt_id, data, user_id):
     try:
         res = requests.put(
-            f"{BASE_URL}/debts/{debt_id}", json=data, headers=_get_headers(user_id), timeout=10
+            f"{BASE_URL}/debts/{debt_id}", json=data, headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -360,7 +375,7 @@ def record_lump_sum_repayment(
         if timestamp:
             payload['timestamp'] = timestamp
 
-        res = requests.post(url, json=payload, headers=_get_headers(user_id), timeout=15)
+        res = requests.post(url, json=payload, headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT)
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
@@ -378,7 +393,7 @@ def update_exchange_rate(rate, user_id):
             f"{BASE_URL}/settings/rate",
             json={'rate': rate},  # user_id handled by header
             headers=_get_headers(user_id),
-            timeout=10
+            timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -393,7 +408,7 @@ def get_exchange_rate(user_id):
         res = requests.get(
             f"{BASE_URL}/settings/rate",
             headers=_get_headers(user_id),
-            timeout=10
+            timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -406,7 +421,7 @@ def get_exchange_rate(user_id):
 def add_transaction(data, user_id):
     try:
         res = requests.post(
-            f"{BASE_URL}/transactions/", json=data, headers=_get_headers(user_id), timeout=10
+            f"{BASE_URL}/transactions/", json=data, headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -421,7 +436,7 @@ def get_recent_transactions(user_id):
         res = requests.get(
             f"{BASE_URL}/transactions/recent",
             headers=_get_headers(user_id),
-            timeout=10
+            timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -436,7 +451,7 @@ def get_transaction_details(tx_id, user_id):
         res = requests.get(
             f"{BASE_URL}/transactions/{tx_id}",
             headers=_get_headers(user_id),
-            timeout=10
+            timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -449,7 +464,7 @@ def get_transaction_details(tx_id, user_id):
 def update_transaction(tx_id, data, user_id):
     try:
         res = requests.put(
-            f"{BASE_URL}/transactions/{tx_id}", json=data, headers=_get_headers(user_id), timeout=10
+            f"{BASE_URL}/transactions/{tx_id}", json=data, headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -465,7 +480,7 @@ def delete_transaction(tx_id, user_id):
             f"{BASE_URL}/transactions/{tx_id}",
             json={},  # Body empty, user_id in header
             headers=_get_headers(user_id),
-            timeout=10
+            timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return True
@@ -486,7 +501,7 @@ def get_detailed_report(user_id, start_date=None, end_date=None):
             f"{BASE_URL}/analytics/report/detailed",
             params=params,
             headers=_get_headers(user_id),
-            timeout=15
+            timeout=DEFAULT_TIMEOUT
         )
         if res.status_code == 403:
             raise PremiumFeatureException("Premium required")
@@ -511,7 +526,7 @@ def get_spending_habits(user_id, start_date, end_date):
             'end_date': end_date.isoformat()
         }
         res = requests.get(
-            f"{BASE_URL}/analytics/habits", params=params, headers=_get_headers(user_id), timeout=20
+            f"{BASE_URL}/analytics/habits", params=params, headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT
         )
         if res.status_code == 403:
             raise PremiumFeatureException("Premium required")
@@ -530,7 +545,7 @@ def get_debt_analysis(user_id):
         res = requests.get(
             f"{BASE_URL}/debts/analysis",
             headers=_get_headers(user_id),
-            timeout=15
+            timeout=DEFAULT_TIMEOUT
         )
         if res.status_code == 403:
             raise PremiumFeatureException("Premium required")
@@ -548,7 +563,7 @@ def get_debt_analysis(user_id):
 def search_transactions_for_management(params, user_id):
     try:
         res = requests.post(
-            f"{BASE_URL}/transactions/search", json=params, headers=_get_headers(user_id), timeout=20
+            f"{BASE_URL}/transactions/search", json=params, headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT
         )
 
         if res.status_code == 403:
@@ -567,7 +582,7 @@ def search_transactions_for_management(params, user_id):
 def sum_transactions_for_analytics(params, user_id):
     try:
         res = requests.post(
-            f"{BASE_URL}/analytics/search", json=params, headers=_get_headers(user_id), timeout=20
+            f"{BASE_URL}/analytics/search", json=params, headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT
         )
         if res.status_code == 403:
             raise PremiumFeatureException("Premium required")
@@ -585,7 +600,7 @@ def sum_transactions_for_analytics(params, user_id):
 def get_user_settings(user_id):
     try:
         res = requests.get(
-            f"{BASE_URL}/settings/", headers=_get_headers(user_id), timeout=10
+            f"{BASE_URL}/settings/", headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -602,7 +617,7 @@ def update_initial_balance(user_id, currency, amount):
             'amount': amount
         }
         res = requests.post(
-            f"{BASE_URL}/settings/balance", json=payload, headers=_get_headers(user_id), timeout=10
+            f"{BASE_URL}/settings/balance", json=payload, headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -626,7 +641,7 @@ def update_user_mode(user_id, mode, language=None, name_en=None, name_km=None, p
             payload['primary_currency'] = primary_currency
 
         res = requests.post(
-            f"{BASE_URL}/settings/mode", json=payload, headers=_get_headers(user_id), timeout=10
+            f"{BASE_URL}/settings/mode", json=payload, headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -639,7 +654,7 @@ def update_user_mode(user_id, mode, language=None, name_en=None, name_km=None, p
 def complete_onboarding(user_id):
     try:
         res = requests.post(
-            f"{BASE_URL}/settings/complete_onboarding", json={}, headers=_get_headers(user_id), timeout=10
+            f"{BASE_URL}/settings/complete_onboarding", json={}, headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT
         )
         res.raise_for_status()
         return res.json()
@@ -656,7 +671,7 @@ def add_category(user_id, cat_type, cat_name):
             'name': cat_name
         }
         res = requests.post(
-            f"{BASE_URL}/settings/category", json=payload, headers=_get_headers(user_id), timeout=10
+            f"{BASE_URL}/settings/category", json=payload, headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT
         )
         if res.status_code == 403:
             raise PremiumFeatureException("Premium required")
@@ -678,7 +693,7 @@ def remove_category(user_id, cat_type, cat_name):
             'name': cat_name
         }
         res = requests.delete(
-            f"{BASE_URL}/settings/category", json=payload, headers=_get_headers(user_id), timeout=10
+            f"{BASE_URL}/settings/category", json=payload, headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT
         )
         if res.status_code == 403:
             raise PremiumFeatureException("Premium required")
