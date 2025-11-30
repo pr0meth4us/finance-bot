@@ -116,14 +116,13 @@ def find_or_create_user():
 def get_current_user():
     """
     Returns the profile of the currently authenticated user.
-    Used by the frontend AuthGuard to check for missing email.
     """
     db = get_db()
     try:
-        # g.account_id comes from the auth_required decorator
+        # Use g.account_id which is set by the auth_required decorator
         user_id = ObjectId(g.account_id)
     except Exception:
-        return jsonify({"error": "Invalid user ID"}), 400
+        return jsonify({"error": "Invalid user ID from token"}), 400
 
     user = db.users.find_one({"_id": user_id})
     if not user:
@@ -142,15 +141,13 @@ def update_profile():
     try:
         user_id = ObjectId(g.account_id)
     except Exception:
-        return jsonify({"error": "Invalid user ID"}), 400
+        return jsonify({"error": "Invalid user ID from token"}), 400
 
     data = request.json
     updates = {}
 
     if 'email' in data:
         updates['email'] = data['email']
-
-    # Add other fields here as needed (e.g., name updates)
 
     if not updates:
         return jsonify({"error": "No fields to update"}), 400
