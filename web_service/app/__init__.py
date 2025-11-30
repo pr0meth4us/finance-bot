@@ -180,7 +180,7 @@ def _send_report_job(period_name, start_date, end_date, db, token, chat_id):
             send_telegram_photo(chat_id, pie_chart_bytes, token)
     else:
         message = f"📊 No significant activity recorded for the {period_name} ({start_date.strftime('%b %d')} - {end_date.strftime('%b %d')})."
-    send_telegram_message(chat_id, message, token)
+        send_telegram_message(chat_id, message, token)
 
 
 def run_scheduled_report(period):
@@ -247,14 +247,17 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    # --- CORS CONFIGURATION ---
-    # Allow specific origins to access the API
+    # --- CORS CONFIGURATION (UPDATED) ---
+    # Explicitly allowing Authorization headers and methods to fix preflight failures
     CORS(app, resources={
         r"/*": {
             "origins": [
-                "https://savvify-web.vercel.app",  # Your production frontend
-                "http://localhost:3000"            # Local development
-            ]
+                "https://savvify-web.vercel.app",  # Production
+                "http://localhost:3000"            # Local Dev
+            ],
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+            "supports_credentials": True
         }
     })
 
@@ -288,6 +291,8 @@ def create_app():
     from .debts.routes import debts_bp
     from .summary.routes import summary_bp
     from .reminders.routes import reminders_bp
+    from .auth.routes import auth_bp
+    from .users.routes import users_bp
 
     app.register_blueprint(settings_bp)
     app.register_blueprint(analytics_bp)
@@ -295,6 +300,8 @@ def create_app():
     app.register_blueprint(debts_bp)
     app.register_blueprint(summary_bp)
     app.register_blueprint(reminders_bp)
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(users_bp)
 
     @app.route("/health")
     def health_check():
