@@ -307,18 +307,16 @@ def create_app():
     app.config.from_object(Config)
 
     # --- CORS CONFIG (fixed) ---
-    CORS(
-        app,
-        resources={
-            r"/*": {
-                "origins": [
-                    "https://savvify-web.vercel.app",  # Production
-                    "http://localhost:3000",           # Local dev
-                ]
-            }
-        },
-        supports_credentials=True,
-    )
+    CORS(app, resources={
+        r"/*": {
+            "origins": [
+                "https://savvify-web.vercel.app",
+                "http://localhost:3000"
+            ],
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"]
+        }
+    })
 
     client = MongoClient(Config.MONGODB_URI, tls=True, tlsCAFile=certifi.where())
     app.db = client[Config.DB_NAME]
