@@ -37,7 +37,7 @@ def _get_headers(user_id_or_token):
     """
     Returns headers with the Bearer token.
     Accepts either a Telegram User ID (int/str) to look up in cache,
-    [cite_start]or a raw JWT string directly[cite: 8].
+    or a raw JWT string directly.
     """
     # 1. Check if the argument is likely a raw JWT (long string)
     if isinstance(user_id_or_token, str) and len(user_id_or_token) > 50:
@@ -229,10 +229,14 @@ def get_open_debts(user_id):
         res = requests.get(
             f"{BASE_URL}/debts/", headers=_get_headers(user_id), timeout=DEFAULT_TIMEOUT
         )
+        if res.status_code == 403:
+            raise PremiumFeatureException("Premium required")
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
         log.error(f"API Error fetching debts: {e}")
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 403:
+            raise PremiumFeatureException("Premium required")
         return []
 
 
@@ -263,10 +267,14 @@ def get_settled_debts_grouped(user_id):
             headers=_get_headers(user_id),
             timeout=DEFAULT_TIMEOUT
         )
+        if res.status_code == 403:
+            raise PremiumFeatureException("Premium required")
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
         log.error(f"API Error fetching settled debts: {e}")
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 403:
+            raise PremiumFeatureException("Premium required")
         return []
 
 

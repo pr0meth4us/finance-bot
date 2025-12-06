@@ -28,10 +28,6 @@ from .common import menu, cancel
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
-# ... (Rest of file remains unchanged, as it doesn't call 'start' explicitly other than via imports,
-# but we must ensure we don't use 'start' in any handlers if we removed it)
-
-# ... [Skipping to Handlers] ...
 
 @authenticate_user
 async def iou_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -44,23 +40,31 @@ async def iou_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @authenticate_user
 async def iou_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    debts = api_client.get_open_debts(context.user_data['jwt'])
-
-    text = t("iou.view_header_open", context) if debts else t("iou.view_no_open", context)
-    kb = keyboards.iou_list_keyboard(debts, context, is_settled=False) if debts else keyboards.iou_menu_keyboard(
-        context)
-
-    await update.callback_query.edit_message_text(text, reply_markup=kb, parse_mode='Markdown')
+    try:
+        debts = api_client.get_open_debts(context.user_data['jwt'])
+        text = t("iou.view_header_open", context) if debts else t("iou.view_no_open", context)
+        kb = keyboards.iou_list_keyboard(debts, context, is_settled=False) if debts else keyboards.iou_menu_keyboard(
+            context)
+        await update.callback_query.edit_message_text(text, reply_markup=kb, parse_mode='Markdown')
+    except PremiumFeatureException:
+        await update.callback_query.edit_message_text(
+            t("common.premium_required", context),
+            reply_markup=keyboards.iou_menu_keyboard(context)
+        )
 
 @authenticate_user
 async def iou_view_settled(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    debts = api_client.get_settled_debts_grouped(context.user_data['jwt'])
-
-    text = t("iou.view_header_settled", context) if debts else t("iou.view_no_settled", context)
-    kb = keyboards.iou_list_keyboard(debts, context, is_settled=True) if debts else keyboards.iou_menu_keyboard(context)
-
-    await update.callback_query.edit_message_text(text, reply_markup=kb, parse_mode='Markdown')
+    try:
+        debts = api_client.get_settled_debts_grouped(context.user_data['jwt'])
+        text = t("iou.view_header_settled", context) if debts else t("iou.view_no_settled", context)
+        kb = keyboards.iou_list_keyboard(debts, context, is_settled=True) if debts else keyboards.iou_menu_keyboard(context)
+        await update.callback_query.edit_message_text(text, reply_markup=kb, parse_mode='Markdown')
+    except PremiumFeatureException:
+        await update.callback_query.edit_message_text(
+            t("common.premium_required", context),
+            reply_markup=keyboards.iou_menu_keyboard(context)
+        )
 
 @authenticate_user
 async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -303,14 +307,17 @@ async def iou_received_purpose(update: Update, context: ContextTypes.DEFAULT_TYP
         "timestamp": data.get('timestamp')
     }
 
-    res = api_client.add_debt(payload, data['jwt'])
-    msg = t("iou.success", context) if 'id' in res else t("iou.fail", context)
+    try:
+        res = api_client.add_debt(payload, data['jwt'])
+        msg = t("iou.success", context) if 'id' in res else t("iou.fail", context)
 
-    summary = api_client.get_detailed_summary(data['jwt'])
-    await update.message.reply_text(msg + format_summary_message(summary, context), parse_mode='HTML',
-                                    reply_markup=keyboards.main_menu_keyboard(context))
-
-    return ConversationHandler.END
+        summary = api_client.get_detailed_summary(data['jwt'])
+        await update.message.reply_text(msg + format_summary_message(summary, context), parse_mode='HTML',
+                                        reply_markup=keyboards.main_menu_keyboard(context))
+        return ConversationHandler.END
+    except PremiumFeatureException:
+        await update.message.reply_text(t("common.premium_required", context), reply_markup=keyboards.main_menu_keyboard(context))
+        return ConversationHandler.END
 
 
 # --- Conversation: Repay Lump Sum ---
@@ -419,11 +426,6 @@ async def iou_edit_received_value(update: Update, context: ContextTypes.DEFAULT_
                                     reply_markup=keyboards.main_menu_keyboard(context))
     return ConversationHandler.END
 
-# --- Helper functions for formatting repeated in this file ---
-# (If these helper functions are large, they should be moved to helpers.py,
-# but for this fix I am keeping them if they were already here or using imports)
-# Note: In previous steps _format_person_ledger, _get_iou_settings etc were defined here.
-# I am ensuring they are present or imported.
 
 def _get_iou_settings(context: ContextTypes.DEFAULT_TYPE):
     profile = context.user_data.get('profile', {})
