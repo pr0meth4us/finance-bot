@@ -378,5 +378,21 @@
     "Gift": "🎁 Gift",
     "Investment Income": "📈 Investment Income",
     "Other Income": " miscellaneous Income"
+  },
+  "onboarding": {
+    "welcome": "Welcome to FinanceBot!\nLet's get your account set up.",
+    "already_onboarded": "✅ **You are already onboarded!**\n\n🔹 Use /menu to see your Dashboard.\n🔹 Use /help to see the guide.\n🔹 Use /reset if you want to reset your account (⚠️Warning).",
+    "reset_warning": "⚠️ **Warning: Existing Account**\n\nYou have already set up your account. Resetting will **clear your initial balances** and settings.\n(Transaction history will be preserved, but balance calculations might shift).\n\nAre you sure you want to proceed?",
+    "reset_cancelled": "✅ Reset cancelled. Your settings are safe.",
+    "ask_mode": "Do you want to track a single currency or dual currency (USD & KHR)?\n\n(Please reply with: `1` or `2`)",
+    "invalid_mode": "Invalid choice.\n    Please reply with `1` or `2`.",
+    "ask_name_en": "What is your name (in English)?\n\n(e.g., John Doe)",
+    "ask_name_km": "What is your name (in Khmer)?\n\n(e.g., ចន ដូ)",
+    "ask_primary_currency": "You selected Single Currency.\n    Which currency will you use?\n\n(Please reply with code, e.g., `USD`, `KHR`, `CNY`)",
+    "ask_usd_balance": "Great, {name}.\n    Let's set your starting balance.\n\nWhat is your current **USD** balance?\n\n(Reply with a number, e.g., `100.50`)",
+    "ask_khr_balance": "Got it.\n    Now, what is your current **KHR** balance?\n\n(Reply with a number, e.g., `50000`)",
+    "ask_single_balance": "Great, {name}.\n    Let's set your starting balance.\n\nWhat is your current **{currency}** balance?\n\n(Reply with a number, e.g., `150.50`)",
+    "invalid_amount": "That doesn't look like a valid number.\n    Please try again (e.g., `100.50`).",
+    "setup_complete": "🎉 Setup Complete!\n\nYou are all set.\nHere is the main menu."
   }
 }
