@@ -33,11 +33,21 @@ class UpstreamUnavailable(Exception):
     pass
 
 
-def _get_headers(user_id):
-    """Returns headers with the Bearer token for the given user."""
-    token = _USER_TOKENS.get(user_id)
+def _get_headers(user_id_or_token):
+    """
+    Returns headers with the Bearer token.
+    Accepts either a Telegram User ID (int/str) to look up in cache,
+    [cite_start]or a raw JWT string directly[cite: 8].
+    """
+    # 1. Check if the argument is likely a raw JWT (long string)
+    if isinstance(user_id_or_token, str) and len(user_id_or_token) > 50:
+        return {"Authorization": f"Bearer {user_id_or_token}"}
+
+    # 2. Otherwise, treat as User ID and look up in cache
+    token = _USER_TOKENS.get(user_id_or_token)
     if token:
         return {"Authorization": f"Bearer {token}"}
+
     return {}
 
 
@@ -128,6 +138,9 @@ def ensure_auth(func):
     """
 
     def wrapper(*args, **kwargs):
+        # Note: logic relies on finding user_id to pop token from cache.
+        # If args passed is raw JWT, popping from cache won't help, but
+        # the outer auth decorator in decorators.py handles re-login anyway.
         user_id = kwargs.get('user_id')
         if not user_id and args:
             user_id = args[-1]
@@ -139,7 +152,7 @@ def ensure_auth(func):
             return func(*args, **kwargs)
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
-                log.warning(f"401 received for user {user_id}. Clearing token.")
+                log.warning(f"401 received. Clearing token for identifier: {user_id}")
                 _USER_TOKENS.pop(user_id, None)
                 # Propagate error so bot knows to re-login
                 raise e
