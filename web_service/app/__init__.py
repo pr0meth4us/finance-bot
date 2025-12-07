@@ -306,8 +306,9 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    # --- CORS CONFIG (fixed) ---
-    CORS(app, resources={
+    # --- CORS CONFIG (Updated) ---
+    # supports_credentials=True allows Authorization header and cookies
+    CORS(app, supports_credentials=True, resources={
         r"/*": {
             "origins": [
                 "https://savvify-web.vercel.app",

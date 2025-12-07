@@ -1,12 +1,18 @@
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, current_app, make_response
 from datetime import datetime
 from bson import ObjectId
 from zoneinfo import ZoneInfo
+import requests
 from app import get_db
 from app.utils.auth import auth_required
-import logging
 
-log = logging.getLogger(__name__)
+# Helper to handle CORS preflight explicitly if needed for specific routes
+def _handle_options():
+    response = make_response()
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add("Access-Control-Allow-Headers", "*")
+    response.headers.add("Access-Control-Allow-Methods", "*")
+    return response
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 UTC_TZ = ZoneInfo("UTC")
@@ -64,12 +70,57 @@ def serialize_user(user):
     return user
 
 
-@auth_bp.route('/find_or_create', methods=['POST'])
+# ---------------------------------------------------------------------
+# BIFROST PROXY ROUTES (Fixes CORS/404 for OTP)
+# ---------------------------------------------------------------------
+
+@auth_bp.route('/request-email-otp', methods=['POST', 'OPTIONS'])
+def proxy_request_otp():
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'}), 200
+
+    bifrost_url = current_app.config['BIFROST_URL']
+    # Ensure we point to the correct internal API endpoint on Bifrost
+    target_url = f"{bifrost_url}/auth/api/request-email-otp"
+
+    try:
+        # Forward the JSON payload from Frontend to Bifrost
+        resp = requests.post(target_url, json=request.json, timeout=10)
+        return jsonify(resp.json()), resp.status_code
+    except requests.exceptions.RequestException as e:
+        current_app.logger.error(f"Bifrost Proxy Error: {e}")
+        return jsonify({"error": "Failed to contact Authentication Service"}), 502
+
+
+@auth_bp.route('/verify-email-otp', methods=['POST', 'OPTIONS'])
+def proxy_verify_otp():
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'}), 200
+
+    bifrost_url = current_app.config['BIFROST_URL']
+    target_url = f"{bifrost_url}/auth/api/verify-email-otp"
+
+    try:
+        resp = requests.post(target_url, json=request.json, timeout=10)
+        return jsonify(resp.json()), resp.status_code
+    except requests.exceptions.RequestException as e:
+        current_app.logger.error(f"Bifrost Proxy Error: {e}")
+        return jsonify({"error": "Failed to contact Authentication Service"}), 502
+
+
+# ---------------------------------------------------------------------
+# USER SYNC ROUTE
+# ---------------------------------------------------------------------
+
+@auth_bp.route('/find_or_create', methods=['POST', 'OPTIONS'])
 def find_or_create_user():
     """
     Finds a user by their telegram_id or creates them if they don't exist.
     Called by Telegram/Bifrost.
     """
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'}), 200
+
     try:
         db = get_db()
     except Exception as e:
@@ -106,8 +157,6 @@ def find_or_create_user():
     if not user:
         return jsonify({"error": "Failed to find or create user"}), 500
 
-    # If you want to block inactive users completely, keep this.
-    # If you want Telegram to still work while web is locked, you can relax it.
     if user.get('subscription_status') != 'active':
         error_msg = (
             "🚫 Subscription not active.\n"
@@ -119,20 +168,16 @@ def find_or_create_user():
 
 
 # ---------------------------------------------------------------------
-# AUTHENTICATED ROUTES (used by Savvify web)
+# AUTHENTICATED ROUTES
 # ---------------------------------------------------------------------
+
 @auth_bp.route('/me', methods=['GET', 'OPTIONS'])
 @auth_required(min_role="user")
 def get_current_user():
     """
     Returns the profile of the currently authenticated user.
-
-    - Browser will send OPTIONS (preflight) first.
-    - Because methods include 'OPTIONS', Flask will route it here,
-      and your auth_required decorator can return 200 for preflight.
     """
     if request.method == 'OPTIONS':
-        # Safety net; usually handled by decorator, but harmless.
         return jsonify({"status": "ok"}), 200
 
     db = get_db()
@@ -148,12 +193,15 @@ def get_current_user():
     return jsonify(serialize_user(user)), 200
 
 
-@auth_bp.route('/profile', methods=['PUT'])
+@auth_bp.route('/profile', methods=['PUT', 'OPTIONS'])
 @auth_required(min_role="user")
 def update_profile():
     """
     Updates the user's profile (currently only email).
     """
+    if request.method == 'OPTIONS':
+        return jsonify({"status": "ok"}), 200
+
     db = get_db()
     try:
         user_id = ObjectId(g.account_id)
