@@ -6,14 +6,6 @@ import requests
 from app import get_db
 from app.utils.auth import auth_required
 
-# Helper to handle CORS preflight explicitly if needed for specific routes
-def _handle_options():
-    response = make_response()
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    response.headers.add("Access-Control-Allow-Headers", "*")
-    response.headers.add("Access-Control-Allow-Methods", "*")
-    return response
-
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 UTC_TZ = ZoneInfo("UTC")
 
@@ -71,21 +63,33 @@ def serialize_user(user):
 
 
 # ---------------------------------------------------------------------
-# BIFROST PROXY ROUTES (Fixes CORS/404 for OTP)
+# BIFROST PROXY ROUTES
 # ---------------------------------------------------------------------
 
 @auth_bp.route('/request-email-otp', methods=['POST', 'OPTIONS'])
 def proxy_request_otp():
+    """
+    Proxies the OTP request to Bifrost.
+    Injects the BIFROST_CLIENT_ID so the frontend doesn't need to know it.
+    """
     if request.method == 'OPTIONS':
         return jsonify({'status': 'ok'}), 200
 
     bifrost_url = current_app.config['BIFROST_URL']
-    # Ensure we point to the correct internal API endpoint on Bifrost
+    client_id = current_app.config['BIFROST_CLIENT_ID']
     target_url = f"{bifrost_url}/auth/api/request-email-otp"
 
+    # Get payload from frontend (contains email)
+    payload = request.json or {}
+
+    # INJECT CLIENT ID
+    payload['client_id'] = client_id
+
     try:
-        # Forward the JSON payload from Frontend to Bifrost
-        resp = requests.post(target_url, json=request.json, timeout=10)
+        # Forward the modified payload to Bifrost
+        resp = requests.post(target_url, json=payload, timeout=10)
+
+        # Return Bifrost's response to the frontend
         return jsonify(resp.json()), resp.status_code
     except requests.exceptions.RequestException as e:
         current_app.logger.error(f"Bifrost Proxy Error: {e}")
@@ -94,12 +98,16 @@ def proxy_request_otp():
 
 @auth_bp.route('/verify-email-otp', methods=['POST', 'OPTIONS'])
 def proxy_verify_otp():
+    """
+    Proxies the OTP verification to Bifrost.
+    """
     if request.method == 'OPTIONS':
         return jsonify({'status': 'ok'}), 200
 
     bifrost_url = current_app.config['BIFROST_URL']
     target_url = f"{bifrost_url}/auth/api/verify-email-otp"
 
+    # Frontend sends verification_id and code, which is all Bifrost needs here
     try:
         resp = requests.post(target_url, json=request.json, timeout=10)
         return jsonify(resp.json()), resp.status_code
@@ -109,7 +117,7 @@ def proxy_verify_otp():
 
 
 # ---------------------------------------------------------------------
-# USER SYNC ROUTE
+# USER SYNC & PROFILE ROUTES
 # ---------------------------------------------------------------------
 
 @auth_bp.route('/find_or_create', methods=['POST', 'OPTIONS'])
@@ -166,10 +174,6 @@ def find_or_create_user():
 
     return jsonify(serialize_user(user)), 200
 
-
-# ---------------------------------------------------------------------
-# AUTHENTICATED ROUTES
-# ---------------------------------------------------------------------
 
 @auth_bp.route('/me', methods=['GET', 'OPTIONS'])
 @auth_required(min_role="user")
