@@ -77,7 +77,6 @@ STANDARD_FALLBACKS = [
     CommandHandler('help', help_command),      # /help shows guide
     CallbackQueryHandler(onboarding_start, pattern='^start$'),
     CallbackQueryHandler(menu, pattern='^menu$'), # Handle "Back to Main Menu" buttons
-    # FIXED: Added missing handler for cancel buttons in conversations
     CallbackQueryHandler(cancel, pattern='^cancel_conversation$')
 ]
 
