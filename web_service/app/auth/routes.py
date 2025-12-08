@@ -4,7 +4,8 @@ from bson import ObjectId
 from zoneinfo import ZoneInfo
 import requests
 from app import get_db
-from app.utils.auth import auth_required
+# Import validation logic to manually check tokens in proxy routes
+from app.utils.auth import auth_required, _validate_token_with_bifrost
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 UTC_TZ = ZoneInfo("UTC")
@@ -62,6 +63,37 @@ def serialize_user(user):
     return user
 
 
+def _try_get_account_id_from_header():
+    """
+    Helper to extract account_id from the Authorization header if present.
+    Does not block request if missing or invalid (returns None).
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return None
+
+    try:
+        scheme, token = auth_header.split(maxsplit=1)
+        if scheme.lower() != 'bearer':
+            return None
+
+        config = current_app.config
+        success, data, _ = _validate_token_with_bifrost(
+            token,
+            config["BIFROST_URL"],
+            config["BIFROST_CLIENT_ID"],
+            config["BIFROST_CLIENT_SECRET"]
+        )
+
+        if success and data.get("is_valid"):
+            return data.get("account_id")
+
+    except Exception as e:
+        current_app.logger.warning(f"Optional auth check failed in proxy: {e}")
+
+    return None
+
+
 # ---------------------------------------------------------------------
 # BIFROST PROXY ROUTES
 # ---------------------------------------------------------------------
@@ -70,7 +102,9 @@ def serialize_user(user):
 def proxy_request_otp():
     """
     Proxies the OTP request to Bifrost.
-    Injects the BIFROST_CLIENT_ID so the frontend doesn't need to know it.
+    Injects the BIFROST_CLIENT_ID.
+    CRITICAL FIX: If user is logged in (has Bearer token), inject account_id
+    so Bifrost knows this OTP is for linking to an existing account.
     """
     if request.method == 'OPTIONS':
         return jsonify({'status': 'ok'}), 200
@@ -84,6 +118,13 @@ def proxy_request_otp():
 
     # INJECT CLIENT ID
     payload['client_id'] = client_id
+
+    # INJECT ACCOUNT ID (Context)
+    # This ensures the generated verification_id is linked to the Telegram user
+    account_id = _try_get_account_id_from_header()
+    if account_id:
+        payload['account_id'] = account_id
+        current_app.logger.info(f"Proxying OTP request for logged-in user: {account_id}")
 
     try:
         # Forward the modified payload to Bifrost
@@ -107,9 +148,17 @@ def proxy_verify_otp():
     bifrost_url = current_app.config['BIFROST_URL']
     target_url = f"{bifrost_url}/auth/api/verify-email-otp"
 
-    # Frontend sends verification_id and code, which is all Bifrost needs here
+    # Frontend sends verification_id and code
+    payload = request.json or {}
+
+    # Optional: We can inject account_id here too for extra validation context,
+    # though usually verification_id from previous step carries the context.
+    account_id = _try_get_account_id_from_header()
+    if account_id:
+        payload['account_id'] = account_id
+
     try:
-        resp = requests.post(target_url, json=request.json, timeout=10)
+        resp = requests.post(target_url, json=payload, timeout=10)
         return jsonify(resp.json()), resp.status_code
     except requests.exceptions.RequestException as e:
         current_app.logger.error(f"Bifrost Proxy Error: {e}")
