@@ -41,7 +41,12 @@ def _validate_token_with_bifrost(token, bifrost_url, client_id, client_secret):
             return result
 
         elif response.status_code == 401:
-            err_resp = response.json() if response.is_json else {"error": response.text}
+            # FIX: Safely attempt to parse JSON without using .is_json property
+            try:
+                err_resp = response.json()
+            except ValueError:
+                err_resp = {"error": response.text}
+
             current_app.logger.warning(f"Bifrost Validation Failed (401): {err_resp}")
 
             if "is_valid" in err_resp:
