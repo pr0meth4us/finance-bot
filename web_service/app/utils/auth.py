@@ -42,7 +42,6 @@ def _validate_token_with_bifrost(token, bifrost_url, client_id, client_secret):
             return result
 
         elif response.status_code == 401:
-            # FIX: Safely attempt to parse JSON without using .is_json property
             try:
                 err_resp = response.json()
             except ValueError:
@@ -51,10 +50,8 @@ def _validate_token_with_bifrost(token, bifrost_url, client_id, client_secret):
             current_app.logger.warning(f"Bifrost Validation Failed (401): {err_resp}")
 
             if "is_valid" in err_resp:
-                # Auth succeeded, but Token is invalid
                 return (True, err_resp, 200)
             else:
-                # Basic Auth failed
                 return (False, {"error": "Service Authentication Failed"}, 500)
 
         elif response.status_code == 403:
@@ -118,3 +115,30 @@ def auth_required(min_role="user"):
         return decorated_function
 
     return decorator
+
+
+def service_auth_required(f):
+    """
+    SECURITY LOCK: Ensures the request comes from a trusted service (Bifrost)
+    by verifying Basic Auth credentials against our own ENV variables.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if request.method == 'OPTIONS':
+            return f(*args, **kwargs)
+
+        auth = request.authorization
+        if not auth or not auth.username or not auth.password:
+            return jsonify({"error": "Service authentication required"}), 401
+
+        # Check if the incoming credentials match our expected BIFROST_CLIENT_ID/SECRET
+        # This proves the caller knows our secrets.
+        expected_client_id = current_app.config["BIFROST_CLIENT_ID"]
+        expected_client_secret = current_app.config["BIFROST_CLIENT_SECRET"]
+
+        if auth.username != expected_client_id or auth.password != expected_client_secret:
+            current_app.logger.warning(f"Failed service auth attempt. Claimed ID: {auth.username}")
+            return jsonify({"error": "Invalid service credentials"}), 403
+
+        return f(*args, **kwargs)
+    return decorated_function
