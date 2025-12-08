@@ -33,7 +33,8 @@ def _validate_token_with_bifrost(token, bifrost_url, client_id, client_secret):
     try:
         # Identify ourselves to Bifrost
         auth = HTTPBasicAuth(client_id, client_secret)
-        response = requests.post(validate_url, auth=auth, json=payload, timeout=10)
+        # FIX: Increased timeout to 20s to handle Bifrost cold starts
+        response = requests.post(validate_url, auth=auth, json=payload, timeout=20)
 
         if response.status_code == 200:
             result = (True, response.json(), 200)
