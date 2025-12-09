@@ -65,7 +65,6 @@ def get_my_profile():
         return jsonify({'error': 'Invalid account_id format'}), 400
 
     user_role = g.role
-
     # g.email is populated by our updated auth_required decorator
     user_email = getattr(g, 'email', None)
 
@@ -83,10 +82,12 @@ def get_my_profile():
 
     # Merge the email from the Identity Provider into the response
     response_data = serialize_profile(user_profile)
+    # Ensure email is in the top level response so frontend auth guard sees it
     response_data['email'] = user_email
 
     return jsonify({
         "profile": response_data,
+        "email": user_email,
         "role": user_role
     }), 200
 
@@ -99,7 +100,7 @@ def set_credentials():
     Proxies the request to Bifrost's internal API.
     """
     try:
-        account_id = g.account_id  # String from auth decorator
+        account_id = g.account_id
     except Exception:
         return jsonify({'error': 'Invalid session'}), 400
 
@@ -107,12 +108,10 @@ def set_credentials():
     if not data or 'email' not in data or 'password' not in data:
         return jsonify({'error': 'Email and password are required'}), 400
 
-    # Server-to-Server call to Bifrost
     config = current_app.config
     bifrost_url = config["BIFROST_URL"].rstrip('/')
     url = f"{bifrost_url}/internal/set-credentials"
 
-    # Forward the proof_token provided by the frontend (for Telegram Mini App verification)
     payload = {
         "account_id": account_id,
         "email": data['email'],
