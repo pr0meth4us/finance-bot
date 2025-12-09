@@ -1,55 +1,53 @@
 from flask import Blueprint, request, jsonify, g, current_app
-from bson import ObjectId
 import requests
 from requests.auth import HTTPBasicAuth
-
 from app.utils.auth import auth_required
 
 payments_bp = Blueprint('payments', __name__, url_prefix='/payments')
 
 
-@payments_bp.route('/checkout', methods=['POST'])
+@payments_bp.route('/checkout', methods=['POST', 'OPTIONS'])
 @auth_required(min_role="user")
 def create_checkout_session():
-    """
-    Proxies a payment request to Bifrost.
-    Payload: { "provider": "gumroad" | "payway", "product_id": "savvify-premium" }
-    """
+    # CORS Preflight
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'ok'})
+        response.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'POST,OPTIONS')
+        return response, 200
+
     try:
-        account_id = g.account_id  # From auth decorator
+        account_id = g.account_id
     except Exception:
         return jsonify({'error': 'Invalid session'}), 400
 
     data = request.json
-    provider = data.get('provider', 'payway')  # Default to local
-    product_id = data.get('product_id', 'savvify-premium')
 
-    # Define Bifrost "Region" based on provider choice
-    region = 'international' if provider == 'gumroad' else 'local'
+    # 1. Dynamic Product ID: Defaults to 'nmfmm' if not sent
+    product_id = data.get('product_id', 'nmfmm')
 
-    # Prepare payload for Bifrost
+    # 2. Provider Logic
+    # We force 'gumroad' for the automated flow since ABA is manual now
+    provider = 'gumroad'
+    region = 'international'
+
     bifrost_payload = {
         "account_id": account_id,
-        "amount": "5.00",  # Hardcoded for V1, or dynamic based on product_id
+        "amount": "5.00",
         "currency": "USD",
         "region": region,
         "target_role": "premium_user",
-        "product_id": product_id,
-
-        # Pass user info for invoicing if available (optional)
+        "product_id": product_id,  # <--- Passes 'nmfmm' to Bifrost
         "email": getattr(g, 'email', None)
     }
 
-    # Call Bifrost (Server-to-Server)
     config = current_app.config
     bifrost_url = config["BIFROST_URL"].rstrip('/')
     target_url = f"{bifrost_url}/internal/payments/create-intent"
 
     try:
-        # Use Client Credentials to authenticate with Bifrost
         auth = HTTPBasicAuth(config["BIFROST_CLIENT_ID"], config["BIFROST_CLIENT_SECRET"])
-
-        # Increase timeout for external API calls
         response = requests.post(target_url, json=bifrost_payload, auth=auth, timeout=30)
 
         if response.status_code != 200:
