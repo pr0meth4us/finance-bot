@@ -373,6 +373,7 @@ def create_app():
     from .reminders.routes import reminders_bp
     from .auth.routes import auth_bp
     from .users.routes import users_bp
+    from .payments.routes import payments_bp  # <--- NEW IMPORT
 
     app.register_blueprint(settings_bp)
     app.register_blueprint(analytics_bp)
@@ -382,6 +383,7 @@ def create_app():
     app.register_blueprint(reminders_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
+    app.register_blueprint(payments_bp)  # <--- REGISTER HERE
 
     @app.route("/health")
     def health_check():
