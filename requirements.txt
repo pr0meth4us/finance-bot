@@ -19,3 +19,4 @@ asteval~=1.0.6
 pandas
 certifi
 flask-cors
+PyJWT
