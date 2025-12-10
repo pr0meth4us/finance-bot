@@ -98,10 +98,10 @@ async def _start_setup_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['onboarding_data'] = {}
 
     msg = (
-        "Welcome to FinanceBot!\n"
+        "Welcome to Savvify!\n"
         "Please select your language.\n"
         "➡️ For English, reply: en\n\n"
-        "សូមស្វាគមន៍មកកាន់ FinanceBot!\n"
+        "សូមស្វាគមន៍មកកាន់ Savvify!\n"
         "សូមជ្រើសរើសភាសា។\n"
         "➡️ សម្រាប់ភាសាខ្មែរ សូមឆ្លើយតប៖ km"
     )
