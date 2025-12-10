@@ -47,6 +47,9 @@ def main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton(t("keyboards.get_live_rate", context), callback_data='get_live_rate'),
             InlineKeyboardButton(t("keyboards.settings", context), callback_data='settings_menu')
         ],
+        [
+            InlineKeyboardButton(t("keyboards.web_dashboard", context), url="https://savvify-web.vercel.app/")
+        ]
     ]
     return InlineKeyboardMarkup(keyboard)
 

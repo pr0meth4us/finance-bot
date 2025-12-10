@@ -22,7 +22,7 @@ async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg = (
                 f"🔐 <b>Web Login</b>\n\n"
                 f"Your login code is: <code>{code}</code>\n\n"
-                f"1. Go to the login page on the dashboard.\n"
+                f"1. Go to https://savvify-web.vercel.app/\n"
                 f"2. Select 'Telegram Code' (or just enter it if prompted).\n"
                 f"3. Enter these 6 digits.\n\n"
                 f"<i>Valid for 10 minutes.</i>"

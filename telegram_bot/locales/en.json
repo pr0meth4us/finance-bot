@@ -118,10 +118,11 @@
     "delete_confirm": "✅ Yes, Delete",
     "delete_cancel": "❌ No, Cancel",
     "reset_confirm": "⚠️ Yes, Reset Account",
-    "reset_cancel": "❌ No, Keep Data"
+    "reset_cancel": "❌ No, Keep Data",
+    "web_dashboard": "🌐 Web Dashboard"
   },
   "help": {
-    "guide": "📚 <b>FinanceBot Quick Guide</b>\n\n<b>💸 Smart Logging</b>\n<i>Type these commands to log transactions instantly:</i>\n• <code>Coffee 2.50</code> → Expense (USD)\n• <code>Lunch 15000khr</code> → Expense (KHR)\n• <code>Salary 500</code> → Income\n• <code>Taxi 5 \"to airport\"</code> → With description\n\n<b>🤝 Debt & Loans (IOU)</b>\n<i>Track who owes you and who you owe:</i>\n• <b>Lent:</b> <code>Lent John 50</code> (He owes you)\n• <b>Borrowed:</b> <code>Borrowed Jane 20</code> (You owe her)\n• <b>Repaying:</b> <code>Paid Jane 20</code> (You paid her back)\n• <b>Receiving:</b> <code>Repaid by John 50</code> (He paid you back)\n\n<b>🛠 Tools & Settings</b>\n• <b>Reports:</b> View charts and spending habits.\n• <b>History:</b> Edit or delete past transactions.\n• <b>Settings:</b> Toggle Dual Currency, Set Fixed Rate, or Manage Categories.\n\n<i>💡 Tip: Use <b>/reset</b> if you need to change your initial balances.</i>"
+    "guide": "📚 <b>FinanceBot Quick Guide</b>\n\n<b>💸 Smart Logging</b>\n<i>Type these commands to log transactions instantly:</i>\n• <code>Coffee 2.50</code> → Expense (USD)\n• <code>Lunch 15000khr</code> → Expense (KHR)\n• <code>Salary 500</code> → Income\n• <code>Taxi 5 \"to airport\"</code> → With description\n\n<b>🤝 Debt & Loans (IOU)</b>\n<i>Track who owes you and who you owe:</i>\n• <b>Lent:</b> <code>Lent John 50</code> (He owes you)\n• <b>Borrowed:</b> <code>Borrowed Jane 20</code> (You owe her)\n• <b>Repaying:</b> <code>Paid Jane 20</code> (You paid her back)\n• <b>Receiving:</b> <code>Repaid by John 50</code> (He paid you back)\n\n<b>🛠 Tools & Settings</b>\n• <b>Reports:</b> View charts and spending habits.\n• <b>History:</b> Edit or delete past transactions.\n• <b>Settings:</b> Toggle Dual Currency, Set Fixed Rate, or Manage Categories.\n\n<i>💡 Tip: Use <b>/reset</b> if you need to change your initial balances.</i>\n\n<b>ℹ️ Info & Support</b>\n• <b>Web Dashboard:</b> <a href=\"https://savvify-web.vercel.app/\">Savvify Web</a>\n• <b>Bot Handle:</b> @savvify_bot\n• <b>Support:</b> @pr0meth4us"
   },
   "settings": {
     "menu_header": "<b>⚙️ Bot Settings</b>\n\nHere you can manage your preferences and initial data.\n\n<b>Currency Mode:</b> {mode}\n\n<b>Initial Balances:</b>\n{balance_text}\n\n<b>Exchange Rate:</b> {rate_text}\n",
