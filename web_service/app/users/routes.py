@@ -6,7 +6,7 @@ from pymongo import ReturnDocument
 import requests
 from requests.auth import HTTPBasicAuth
 
-from app.utils.db import settings_collection
+from app.utils.db import settings_collection, get_db
 from app.utils.auth import auth_required
 from app.utils.serializers import serialize_profile
 
@@ -136,3 +136,126 @@ def set_credentials():
     except Exception as e:
         current_app.logger.error(f"Failed to contact Bifrost: {e}")
         return jsonify({"error": "Internal service error"}), 500
+
+
+# --- DATA PRIVACY ENDPOINTS (GDPR Compliance) ---
+
+@users_bp.route('/data/export', methods=['POST'])
+@auth_required(min_role="user")
+def export_user_data():
+    """
+    Returns a JSON dump of all data associated with the user.
+    """
+    try:
+        account_id = ObjectId(g.account_id)
+        db = get_db()
+
+        # 1. Profile
+        profile = db.settings.find_one({"account_id": account_id}, {"_id": 0})
+
+        # 2. Transactions
+        transactions = list(db.transactions.find({"account_id": account_id}, {"_id": 0}))
+        for t in transactions:
+            if "timestamp" in t: t["timestamp"] = t["timestamp"].isoformat()
+
+        # 3. Debts
+        debts = list(db.debts.find({"account_id": account_id}, {"_id": 0}))
+        for d in debts:
+            if "created_at" in d: d["created_at"] = d["created_at"].isoformat()
+
+        return jsonify({
+            "profile": profile,
+            "transactions": transactions,
+            "debts": debts,
+            "generated_at": datetime.now(UTC_TZ).isoformat()
+        })
+
+    except Exception as e:
+        current_app.logger.error(f"Export failed: {e}")
+        return jsonify({"error": "Failed to export data"}), 500
+
+
+@users_bp.route('/data/delete', methods=['DELETE'])
+@auth_required(min_role="user")
+def delete_account():
+    """
+    Permanently deletes all user data and the Bifrost account.
+    """
+    try:
+        account_id_str = g.account_id
+        account_id_obj = ObjectId(account_id_str)
+        db = get_db()
+
+        # 1. Delete Local Data
+        db.transactions.delete_many({"account_id": account_id_obj})
+        db.debts.delete_many({"account_id": account_id_obj})
+        db.reminders.delete_many({"account_id": account_id_obj})
+        db.settings.delete_one({"account_id": account_id_obj})
+        db.users.delete_one({"_id": account_id_obj})  # Legacy map
+
+        # 2. Delete Identity (Bifrost)
+        config = current_app.config
+        bifrost_url = config["BIFROST_URL"].rstrip('/')
+        url = f"{bifrost_url}/internal/users/{account_id_str}"
+
+        auth = HTTPBasicAuth(config["BIFROST_CLIENT_ID"], config["BIFROST_CLIENT_SECRET"])
+        requests.delete(url, auth=auth, timeout=5)
+
+        return jsonify({"message": "Account permanently deleted."})
+
+    except Exception as e:
+        current_app.logger.error(f"Delete account failed: {e}")
+        return jsonify({"error": "Failed to delete account"}), 500
+
+
+# --- ADMIN MANAGEMENT ENDPOINTS ---
+
+@users_bp.route('/admin/list', methods=['GET'])
+@auth_required(min_role="admin")
+def list_all_users():
+    """
+    Lists all users for admin management.
+    """
+    try:
+        db = get_db()
+        # Join settings with legacy users collection if needed, or just list settings profiles
+        profiles = list(db.settings.find({}, {"account_id": 1, "name_en": 1, "name_km": 1, "created_at": 1}))
+
+        results = []
+        for p in profiles:
+            p["_id"] = str(p.get("account_id"))
+            del p["account_id"]
+            if "created_at" in p: p["created_at"] = p["created_at"].isoformat()
+            results.append(p)
+
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@users_bp.route('/admin/user/<target_id>', methods=['DELETE'])
+@auth_required(min_role="admin")
+def admin_delete_user(target_id):
+    """
+    Admin endpoint to delete a specific user.
+    """
+    try:
+        oid = ObjectId(target_id)
+        db = get_db()
+
+        # 1. Delete Local
+        db.transactions.delete_many({"account_id": oid})
+        db.debts.delete_many({"account_id": oid})
+        db.reminders.delete_many({"account_id": oid})
+        db.settings.delete_one({"account_id": oid})
+
+        # 2. Delete Identity (Bifrost)
+        config = current_app.config
+        bifrost_url = config["BIFROST_URL"].rstrip('/')
+        url = f"{bifrost_url}/internal/users/{target_id}"
+        auth = HTTPBasicAuth(config["BIFROST_CLIENT_ID"], config["BIFROST_CLIENT_SECRET"])
+        requests.delete(url, auth=auth, timeout=5)
+
+        return jsonify({"message": f"User {target_id} deleted."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500

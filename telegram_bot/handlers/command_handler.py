@@ -241,15 +241,15 @@ async def unified_message_router(update: Update, context: ContextTypes.DEFAULT_T
             result = aeval.eval(expression)
             await update.message.reply_text(t("command.calculating", context, result=result), parse_mode='Markdown')
         except Exception:
-            await update.message.reply_text(t("command.calculator_fail", context))
-        return ConversationHandler.END
+            # Not a calculation, just text
+            pass
 
-    if not text.startswith('!'):
-        return ConversationHandler.END
+    # --- LOGIC UPDATE: Remove optional '!' prefix ---
+    clean_text = text[1:] if text.startswith('!') else text
 
-    # Command Parsing
+    # Check for quotes
     try:
-        parts = shlex.split(text[1:].replace('“', '"').replace('”', '"').replace("‘", "'").replace("’", "'"))
+        parts = shlex.split(clean_text.replace('“', '"').replace('”', '"').replace("‘", "'").replace("’", "'"))
     except ValueError as e:
         await update.message.reply_text(t("command.parse_error", context, error=str(e)))
         return ConversationHandler.END
@@ -263,8 +263,8 @@ async def unified_message_router(update: Update, context: ContextTypes.DEFAULT_T
     if not context.user_data.get('profile'):
         log.info("Auth check delegated to decorated handlers.")
 
-    # Route
-    if text.lower().startswith("!repaid by") or text.lower().startswith("!paid by"):
+    # Route Repayments
+    if clean_text.lower().startswith("repaid by"):
         await handle_repayment(update, context, parts[2:], 'lent')
         return ConversationHandler.END
 
@@ -274,6 +274,7 @@ async def unified_message_router(update: Update, context: ContextTypes.DEFAULT_T
 
     result = None
 
+    # Route Generic Commands
     if command in ["expense", "income"]:
         result = await handle_transaction_command(update, context, command, args)
         if result:
@@ -284,12 +285,17 @@ async def unified_message_router(update: Update, context: ContextTypes.DEFAULT_T
         if result:
             api_client.add_debt(result[0], context.user_data['jwt'])
 
+    # Route Quick Commands (coffee, taxi, etc.)
     elif command in COMMAND_MAP:
         result = await handle_quick_command(update, context, command, args)
         if result:
             api_client.add_transaction(result[0], context.user_data['jwt'])
 
+    # --- LOGIC UPDATE: Unknown Command Flow (Natural Language Logging) ---
     else:
+        # If it wasn't a command, treat the whole line as the description/command
+        # We pass the original 'command' (first word) + 'args' (rest) to the unknown handler
+        # It attempts to parse a date and amount from the END of the string.
         context.user_data['unknown_cmd'] = {'command': command, 'args': args}
         return await unknown_command_entry_point(update, context)
 
@@ -301,24 +307,36 @@ async def unified_message_router(update: Update, context: ContextTypes.DEFAULT_T
     return ConversationHandler.END
 
 
-# --- Unknown Command Flow ---
+# --- Unknown Command Flow (Smart Text Input) ---
 
 @authenticate_user
 async def unknown_command_entry_point(update, context):
     try:
         data = context.user_data['unknown_cmd']
         cmd, args = data['command'], data['args']
-        date_str, remaining = parse_date(args)
+
+        # Combine back to list for parsing
+        full_args = [cmd] + args
+        date_str, remaining = parse_date(full_args)
 
         if not remaining:
+            # If no text remains, we can't do anything
             await update.message.reply_text(t("command.unknown_fail", context))
             return ConversationHandler.END
 
-        mode, primary = _get_currency_settings(context)
-        amount_val, currency = parse_amount_and_currency(remaining[-1], mode, primary)
-        desc_parts = remaining[:-1]
+        # Attempt to parse amount from the last word
+        try:
+            mode, primary = _get_currency_settings(context)
+            amount_val, currency = parse_amount_and_currency(remaining[-1], mode, primary)
+            # If successful, the last word was the amount. Remove it from description.
+            desc_parts = remaining[:-1]
+        except ValueError:
+            # If parsing amount failed, this isn't a transaction log.
+            # It's just random chat text. Ignore it or show help.
+            # To be less intrusive, we just return END.
+            return ConversationHandler.END
 
-        desc = cmd.replace('_', ' ').title() + (" " + " ".join(desc_parts) if desc_parts else "")
+        desc = " ".join(desc_parts).title() if desc_parts else "Unspecified"
 
         context.user_data['new_tx'] = {
             "type": "expense", "amount": amount_val, "currency": currency,
