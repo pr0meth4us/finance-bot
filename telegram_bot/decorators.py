@@ -65,6 +65,14 @@ def authenticate_user(func):
                     await _send_auth_error(update, context, msg)
                     return ConversationHandler.END
 
+                # --- NEW: Sync Session with Finance Backend (Flow A) ---
+                log.info(f"User {user_id}: Syncing session with Finance Backend...")
+                sync_res = api_client.sync_session(jwt)
+                if not sync_res:
+                    log.error(f"User {user_id}: Session sync failed.")
+                    # We continue, as get_my_profile might still work if user exists,
+                    # but typically this indicates a provisioning issue.
+
                 context.user_data["jwt"] = jwt
 
             # 2. Profile: Get or Refresh

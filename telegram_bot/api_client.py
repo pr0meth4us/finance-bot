@@ -76,7 +76,8 @@ def get_login_code(telegram_id):
             res.raise_for_status()
             return res.json().get('code')
         except requests.exceptions.ReadTimeout:
-            log.warning(f"Bifrost request timed out (Attempt {attempt+1}/{max_retries}). The service might be waking up.")
+            log.warning(
+                f"Bifrost request timed out (Attempt {attempt + 1}/{max_retries}). The service might be waking up.")
             if attempt < max_retries - 1:
                 time.sleep(2)  # Wait a bit before retrying
                 continue
@@ -128,6 +129,23 @@ def login_to_bifrost(user):
         return None
     except requests.exceptions.RequestException as e:
         log.error(f"Bifrost connection error: {e}")
+        return None
+
+
+def sync_session(jwt_token):
+    """
+    Flow A: Session Sync.
+    Sends the Bifrost JWT to the Finance Service to validate and ensure a local profile exists.
+    """
+    url = f"{BASE_URL}/auth/sync-session"
+    headers = {"Authorization": f"Bearer {jwt_token}"}
+
+    try:
+        res = requests.post(url, headers=headers, timeout=DEFAULT_TIMEOUT)
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        log.error(f"Failed to sync session with Finance Backend: {e}")
         return None
 
 

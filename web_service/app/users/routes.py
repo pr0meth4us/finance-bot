@@ -1,57 +1,17 @@
-from datetime import datetime
-from zoneinfo import ZoneInfo
+# web_service/app/users/routes.py
+
 from flask import Blueprint, jsonify, g, current_app, request
 from bson import ObjectId
-from pymongo import ReturnDocument
+from requests.auth import HTTPBasicAuth
 import requests
 import jwt
-from requests.auth import HTTPBasicAuth
 
 from app.utils.db import settings_collection, get_db
 from app.utils.auth import auth_required
 from app.utils.serializers import serialize_profile
+from app.models import User
 
 users_bp = Blueprint('users', __name__, url_prefix='/users')
-UTC_TZ = ZoneInfo("UTC")
-
-DEFAULT_EXPENSE_CATEGORIES = [
-    "Food", "Drink", "Transport", "Shopping", "Bills", "Utilities",
-    "Entertainment", "Personal Care", "Work", "Alcohol", "For Others",
-    "Health", "Investment", "Forgot", "Rent", "Subscriptions", "Insurance",
-    "Education", "Gifts", "Donations", "Family", "Travel", "Pets",
-    "Electronics", "Car Maintenance"
-]
-
-DEFAULT_INCOME_CATEGORIES = [
-    "Salary", "Bonus", "Freelance", "Commission", "Allowance", "Gift",
-    "Investment Income", "Other Income"
-]
-
-
-def _get_default_settings(account_id_obj):
-    """Generates the default user profile document."""
-    return {
-        "account_id": account_id_obj,
-        "settings": {
-            "language": "en",
-            "currency_mode": None,
-            "primary_currency": None,
-            "rate_preference": "live",
-            "fixed_rate": 4100,
-            "notification_chat_ids": {
-                "reminder": None,
-                "report": None
-            },
-            "initial_balances": {"USD": 0, "KHR": 0},
-            "categories": {
-                "expense": DEFAULT_EXPENSE_CATEGORIES,
-                "income": DEFAULT_INCOME_CATEGORIES
-            }
-        },
-        "onboarding_complete": False,
-        "created_at": datetime.now(UTC_TZ)
-    }
-
 
 @users_bp.route('/me', methods=['GET'])
 @auth_required(min_role="user")
@@ -69,20 +29,17 @@ def get_my_profile():
     # g.email is populated by our updated auth_required decorator
     user_email = getattr(g, 'email', None)
 
-    # Atomically find or create the profile
-    user_profile = settings_collection().find_one_and_update(
-        {'account_id': account_id},
-        {'$setOnInsert': _get_default_settings(account_id)},
-        upsert=True,
-        return_document=ReturnDocument.AFTER
-    )
+    # Use the Model to find or create
+    user = User.get_by_account_id(account_id)
+    if not user:
+        user = User.create(account_id, role=user_role)
 
-    if not user_profile:
+    if not user:
         current_app.logger.error(f"Failed to find or create profile for {account_id}")
         return jsonify({"error": "Failed to find or create user profile"}), 500
 
     # Merge the email from the Identity Provider into the response
-    response_data = serialize_profile(user_profile)
+    response_data = serialize_profile(user.doc)
     # Ensure email is in the top level response so frontend auth guard sees it
     response_data['email'] = user_email
 
@@ -124,18 +81,14 @@ def update_me():
         if not proof_token:
             return jsonify({"error": "Changing email requires verification. Please verify the new email first."}), 400
 
-        # Verify Proof Token locally or via Bifrost
-        # Since we use Bifrost JWT secrets, we can verify signature here if we share config,
-        # but Bifrost is the authority. We rely on the fact we have the proof_token.
-        # However, we must ensure the token matches the REQUESTED email.
         try:
             # We assume we share the JWT secret in env for decoding,
             # OR we trust the Bifrost Proxy flow.
-            # Best practice: Decode locally to check claims.
+            # However, we must ensure the token matches the REQUESTED email.
             payload = jwt.decode(
                 proof_token,
-                current_app.config.get('JWT_SECRET_KEY', 'dev_secret'),  # Ensure this matches Bifrost!
-                options={"verify_signature": False},  # Bifrost verifies, we check claims
+                current_app.config.get('JWT_SECRET_KEY', 'dev_secret'), # Ideally this key is shared or verified via Bifrost
+                options={"verify_signature": False},
                 algorithms=["HS256"]
             )
 
@@ -309,7 +262,7 @@ def list_all_users():
     """
     try:
         db = get_db()
-        # Join settings with legacy users collection if needed, or just list settings profiles
+        # List settings profiles
         profiles = list(db.settings.find({}, {"account_id": 1, "name_en": 1, "name_km": 1, "created_at": 1}))
 
         results = []
