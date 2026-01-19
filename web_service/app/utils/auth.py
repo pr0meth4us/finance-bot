@@ -1,5 +1,8 @@
 import requests
 import logging
+import hashlib
+import hmac
+import time
 from functools import wraps
 from flask import request, jsonify, g, current_app
 from requests.auth import HTTPBasicAuth
@@ -64,6 +67,55 @@ def _validate_token_with_bifrost(token, bifrost_url, client_id, client_secret):
     except requests.exceptions.RequestException as e:
         current_app.logger.error(f"Bifrost Connection Error: {e}")
         return (False, {"error": "Authentication service connection error"}, 503)
+
+
+def verify_telegram_login(data, bot_token):
+    """
+    Verifies the hash received from the Telegram Login Widget.
+    Algorithm:
+    1. Create a data-check-string by combining all received fields
+       (except hash) sorted alphabetically in key=value format.
+    2. Compute SHA256 of the bot token to get the secret key.
+    3. Compute HMAC-SHA256 of the data-check-string using the secret key.
+    4. Compare the result with the received hash.
+    """
+    if not bot_token:
+        return False
+
+    received_hash = data.get('hash')
+    if not received_hash:
+        return False
+
+    # 1. Prepare Data Check String
+    data_check_arr = []
+    for key, value in sorted(data.items()):
+        if key == 'hash':
+            continue
+        data_check_arr.append(f"{key}={value}")
+
+    data_check_string = '\n'.join(data_check_arr)
+
+    # 2. Secret Key
+    secret_key = hashlib.sha256(bot_token.encode('utf-8')).digest()
+
+    # 3. HMAC-SHA256
+    calculated_hash = hmac.new(
+        secret_key,
+        data_check_string.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+
+    # 4. Compare
+    if calculated_hash != received_hash:
+        return False
+
+    # Optional: Check auth_date for freshness (e.g., within 24 hours)
+    auth_date = int(data.get('auth_date', 0))
+    if time.time() - auth_date > 86400:
+        current_app.logger.warning("Telegram login data is stale (>24h).")
+        return False
+
+    return True
 
 
 def auth_required(min_role="user"):
