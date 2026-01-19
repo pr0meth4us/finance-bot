@@ -1,5 +1,3 @@
-# web_service/app/auth/routes.py
-
 from flask import Blueprint, request, jsonify, current_app
 from app.models import User
 import requests
@@ -37,8 +35,6 @@ def sync_session():
 
     try:
         # Call Bifrost Introspection/Validation Endpoint
-        # We perform a service-to-service call to ensure the token is valid
-        # and to get the latest role/account info.
         res = requests.post(
             f"{bifrost_url}/internal/validate-token",
             json={"token": token},
@@ -56,6 +52,11 @@ def sync_session():
         account_id = data.get("account_id")
         role = data.get("app_specific_role", "user")
 
+        # New fields from Bifrost 1.1.0+
+        username = data.get("username")
+        email = data.get("email")
+        display_name = data.get("display_name")
+
         if not account_id:
             return jsonify({"error": "Token valid but missing account_id"}), 400
 
@@ -63,17 +64,29 @@ def sync_session():
         user = User.get_by_account_id(account_id)
         if not user:
             # Create new local profile linked to Bifrost ID
-            user = User.create(account_id, role=role)
+            user = User.create(
+                account_id,
+                role=role,
+                username=username,
+                email=email,
+                display_name=display_name
+            )
         else:
-            # Optionally sync role updates if stored locally
-            user.update_role(role)
+            # Sync latest identity info from Bifrost
+            user.update_identity(
+                username=username,
+                email=email,
+                display_name=display_name,
+                role=role
+            )
 
         return jsonify({
             "status": "success",
             "message": "Session synced",
-            "local_id": str(user._id)
+            "local_id": str(user._id),
+            "username": username  # Return username to client
         }), 200
 
     except requests.exceptions.RequestException as e:
         current_app.logger.error(f"Bifrost validation failed: {e}")
-        return jsonify({"error": "Identity Provider unavailable"}), 503
+        return jsonify({"error": "Identity Provider Unavailable"}), 502
