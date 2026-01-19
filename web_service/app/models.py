@@ -1,5 +1,3 @@
-# web_service/app/models.py
-
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from bson import ObjectId
@@ -28,6 +26,10 @@ class User:
         self.account_id = doc.get('account_id')
         self.settings = doc.get('settings', {})
         self._id = doc.get('_id')
+        # Identity fields synced from Bifrost
+        self.username = doc.get('username')
+        self.email = doc.get('email')
+        self.display_name = doc.get('display_name')
 
     @staticmethod
     def get_by_account_id(account_id):
@@ -43,9 +45,9 @@ class User:
         return None
 
     @staticmethod
-    def create(account_id, role='user'):
+    def create(account_id, role='user', username=None, email=None, display_name=None):
         """
-        Creates a new local user profile linked to a Bifrost account_id.
+        Creates a new local profile linked to a Bifrost account_id.
         """
         if isinstance(account_id, str):
             account_id = ObjectId(account_id)
@@ -54,6 +56,9 @@ class User:
 
         new_profile = {
             "account_id": account_id,
+            "username": username,
+            "email": email,
+            "display_name": display_name,
             "settings": {
                 "language": "en",
                 "currency_mode": None,
@@ -72,8 +77,6 @@ class User:
             },
             "onboarding_complete": False,
             "created_at": datetime.now(UTC_TZ),
-            # Store the role locally if needed for quick lookups,
-            # though usually we trust the JWT from Bifrost.
             "role": role
         }
 
@@ -87,3 +90,19 @@ class User:
             {"_id": self._id},
             {"$set": {"role": new_role}}
         )
+
+    def update_identity(self, username=None, email=None, display_name=None, role=None):
+        """
+        Syncs identity information from Bifrost to the local profile.
+        """
+        updates = {}
+        if username: updates["username"] = username
+        if email: updates["email"] = email
+        if display_name: updates["display_name"] = display_name
+        if role: updates["role"] = role
+
+        if updates:
+            settings_collection().update_one(
+                {"_id": self._id},
+                {"$set": updates}
+            )

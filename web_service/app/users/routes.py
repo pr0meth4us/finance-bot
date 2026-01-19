@@ -1,10 +1,10 @@
-# web_service/app/users/routes.py
-
 from flask import Blueprint, jsonify, g, current_app, request
 from bson import ObjectId
 from requests.auth import HTTPBasicAuth
 import requests
 import jwt
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from app.utils.db import settings_collection, get_db
 from app.utils.auth import auth_required
@@ -12,13 +12,15 @@ from app.utils.serializers import serialize_profile
 from app.models import User
 
 users_bp = Blueprint('users', __name__, url_prefix='/users')
+UTC_TZ = ZoneInfo("UTC")
+
 
 @users_bp.route('/me', methods=['GET'])
 @auth_required(min_role="user")
 def get_my_profile():
     """
     Finds or creates the user's profile in the settings collection.
-    Returns the profile document, the user's role, AND email from auth check.
+    Returns the profile document, the user's role, username, and email.
     """
     try:
         account_id = ObjectId(g.account_id)
@@ -26,26 +28,30 @@ def get_my_profile():
         return jsonify({'error': 'Invalid account_id format'}), 400
 
     user_role = g.role
-    # g.email is populated by our updated auth_required decorator
-    user_email = getattr(g, 'email', None)
+    # g.email might be populated by auth check, but we prefer the DB record if fresh
+    token_email = getattr(g, 'email', None)
 
     # Use the Model to find or create
     user = User.get_by_account_id(account_id)
     if not user:
-        user = User.create(account_id, role=user_role)
+        user = User.create(account_id, role=user_role, email=token_email)
 
     if not user:
         current_app.logger.error(f"Failed to find or create profile for {account_id}")
         return jsonify({"error": "Failed to find or create user profile"}), 500
 
-    # Merge the email from the Identity Provider into the response
-    response_data = serialize_profile(user.doc)
-    # Ensure email is in the top level response so frontend auth guard sees it
-    response_data['email'] = user_email
+    # Serialize the settings/profile doc
+    response_profile = serialize_profile(user.doc)
 
+    # Determine authoritative email (DB > Token)
+    final_email = user.email or token_email
+
+    # Ensure critical identity fields are in the response
     return jsonify({
-        "profile": response_data,
-        "email": user_email,
+        "profile": response_profile,
+        "username": user.username,
+        "display_name": user.display_name,
+        "email": final_email,
         "role": user_role
     }), 200
 
@@ -54,8 +60,9 @@ def get_my_profile():
 @auth_required(min_role="user")
 def update_me():
     """
-    Updates the user profile (Display Name, Email).
+    Updates the user profile (Display Name, Email, Username).
     - Display Name: Directly updated.
+    - Username: Directly updated (checked for uniqueness by Bifrost).
     - Email: Requires a valid 'proof_token' from the OTP flow.
     """
     try:
@@ -69,48 +76,75 @@ def update_me():
     bifrost_updates = {}
 
     # 1. Handle Display Name
-    if 'name_en' in data:
-        updates['name_en'] = data['name_en'].strip()
-        bifrost_updates['display_name'] = data['name_en'].strip()
+    # Support both new 'display_name' and legacy 'name_en'
+    if 'display_name' in data or 'name_en' in data:
+        # Get the first non-None value, avoiding the "empty string is falsy" trap
+        raw_val = data.get('display_name')
+        if raw_val is None:
+            raw_val = data.get('name_en')
 
-    # 2. Handle Email (Secure Flow)
+        if isinstance(raw_val, str):
+            clean_name = raw_val.strip()
+            if clean_name:
+                updates['display_name'] = clean_name
+                updates['name_en'] = clean_name  # Keep legacy field in sync
+                bifrost_updates['display_name'] = clean_name
+
+    # 2. Handle Username
+    if 'username' in data:
+        raw_username = data.get('username')
+        if isinstance(raw_username, str):
+            clean_username = raw_username.strip().lower()
+            if clean_username:
+                updates['username'] = clean_username
+                bifrost_updates['username'] = clean_username
+
+    # 3. Handle Email (Secure Flow)
     if 'email' in data:
-        new_email = data['email'].strip().lower()
-        proof_token = data.get('proof_token')
+        raw_email = data.get('email')
+        if isinstance(raw_email, str):
+            new_email = raw_email.strip().lower()
 
-        if not proof_token:
-            return jsonify({"error": "Changing email requires verification. Please verify the new email first."}), 400
+            if new_email:
+                proof_token = data.get('proof_token')
 
-        try:
-            # We assume we share the JWT secret in env for decoding,
-            # OR we trust the Bifrost Proxy flow.
-            # However, we must ensure the token matches the REQUESTED email.
-            payload = jwt.decode(
-                proof_token,
-                current_app.config.get('JWT_SECRET_KEY', 'dev_secret'), # Ideally this key is shared or verified via Bifrost
-                options={"verify_signature": False},
-                algorithms=["HS256"]
-            )
+                if not proof_token:
+                    return jsonify({"error": "Changing email requires verification. Please verify the new email first."}), 400
 
-            if payload.get('email') != new_email:
-                return jsonify({"error": "Proof token does not match the requested email."}), 400
+                try:
+                    # Verify proof token matches the request
+                    payload = jwt.decode(
+                        proof_token,
+                        current_app.config.get('JWT_SECRET_KEY', 'dev_secret'),
+                        options={"verify_signature": False}, # Signature verified by Bifrost usually
+                        algorithms=["HS256"]
+                    )
 
-            if payload.get('scope') != 'credential_reset':
-                return jsonify({"error": "Invalid token scope."}), 400
+                    if payload.get('email') != new_email:
+                        return jsonify({"error": "Proof token does not match the requested email."}), 400
 
-            bifrost_updates['email'] = new_email
+                    if payload.get('scope') != 'credential_reset':
+                        return jsonify({"error": "Invalid token scope."}), 400
 
-        except Exception as e:
-            current_app.logger.error(f"Proof token check failed: {e}")
-            return jsonify({"error": "Invalid proof token"}), 400
+                    bifrost_updates['email'] = new_email
+                    updates['email'] = new_email
+
+                except Exception as e:
+                    current_app.logger.error(f"Proof token check failed: {e}")
+                    return jsonify({"error": "Invalid proof token"}), 400
 
     if not updates and not bifrost_updates:
-        return jsonify({"message": "No changes detected"}), 200
+        # This handles the case where fields were sent but empty/invalid,
+        # avoiding a crash and just doing nothing.
+        return jsonify({"message": "No valid changes detected"}), 200
 
-    # 3. Sync to Bifrost (If critical fields changed)
+    # 4. Sync to Bifrost (If identity fields changed)
     if bifrost_updates:
         config = current_app.config
-        bifrost_url = config["BIFROST_URL"].rstrip('/')
+        bifrost_url = config.get("BIFROST_URL", "").rstrip('/')
+        if not bifrost_url:
+            return jsonify({"error": "Bifrost URL not configured"}), 500
+
         url = f"{bifrost_url}/internal/users/{account_id_str}/update"
 
         try:
@@ -118,22 +152,28 @@ def update_me():
             resp = requests.post(url, json=bifrost_updates, auth=auth, timeout=10)
 
             if resp.status_code != 200:
-                # Rollback/Fail
-                err_msg = resp.json().get('error', 'Failed to update identity')
+                # Bifrost rejected the update (e.g., username taken)
+                try:
+                    err_msg = resp.json().get('error', 'Failed to update identity')
+                except:
+                    err_msg = 'Failed to update identity'
                 return jsonify({"error": err_msg}), resp.status_code
 
         except Exception as e:
             current_app.logger.error(f"Bifrost sync failed: {e}")
             return jsonify({"error": "Failed to sync profile changes"}), 502
 
-    # 4. Update Local DB
+    # 5. Update Local DB
     if updates:
         settings_collection().update_one(
             {'account_id': account_id},
             {'$set': updates}
         )
 
-    return jsonify({"message": "Profile updated successfully"}), 200
+    return jsonify({
+        "message": "Profile updated successfully",
+        "updates": list(updates.keys())
+    }), 200
 
 
 @users_bp.route('/credentials', methods=['POST'])
@@ -153,7 +193,7 @@ def set_credentials():
         return jsonify({'error': 'Email and password are required'}), 400
 
     config = current_app.config
-    bifrost_url = config["BIFROST_URL"].rstrip('/')
+    bifrost_url = config.get("BIFROST_URL", "").rstrip('/')
     url = f"{bifrost_url}/internal/set-credentials"
 
     payload = {
@@ -170,7 +210,6 @@ def set_credentials():
         if response.status_code == 200:
             return jsonify({"message": "Credentials updated successfully"})
 
-        # Pass through Bifrost errors (e.g., "Email already in use")
         try:
             err = response.json()
             return jsonify(err), response.status_code
@@ -235,11 +274,14 @@ def delete_account():
         db.debts.delete_many({"account_id": account_id_obj})
         db.reminders.delete_many({"account_id": account_id_obj})
         db.settings.delete_one({"account_id": account_id_obj})
-        db.users.delete_one({"_id": account_id_obj})  # Legacy map
+
+        # Legacy cleanup if exists
+        if "users" in db.list_collection_names():
+            db.users.delete_one({"_id": account_id_obj})
 
         # 2. Delete Identity (Bifrost)
         config = current_app.config
-        bifrost_url = config["BIFROST_URL"].rstrip('/')
+        bifrost_url = config.get("BIFROST_URL", "").rstrip('/')
         url = f"{bifrost_url}/internal/users/{account_id_str}"
 
         auth = HTTPBasicAuth(config["BIFROST_CLIENT_ID"], config["BIFROST_CLIENT_SECRET"])
@@ -262,14 +304,24 @@ def list_all_users():
     """
     try:
         db = get_db()
-        # List settings profiles
-        profiles = list(db.settings.find({}, {"account_id": 1, "name_en": 1, "name_km": 1, "created_at": 1}))
+        # List settings profiles, now including username and display_name
+        profiles = list(db.settings.find({}, {
+            "account_id": 1,
+            "username": 1,
+            "display_name": 1,
+            "name_en": 1,
+            "email": 1,
+            "created_at": 1
+        }))
 
         results = []
         for p in profiles:
             p["_id"] = str(p.get("account_id"))
             del p["account_id"]
             if "created_at" in p: p["created_at"] = p["created_at"].isoformat()
+            # Normalize display name for admin view
+            if not p.get("display_name") and p.get("name_en"):
+                p["display_name"] = p["name_en"]
             results.append(p)
 
         return jsonify(results)
@@ -295,7 +347,7 @@ def admin_delete_user(target_id):
 
         # 2. Delete Identity (Bifrost)
         config = current_app.config
-        bifrost_url = config["BIFROST_URL"].rstrip('/')
+        bifrost_url = config.get("BIFROST_URL", "").rstrip('/')
         url = f"{bifrost_url}/internal/users/{target_id}"
         auth = HTTPBasicAuth(config["BIFROST_CLIENT_ID"], config["BIFROST_CLIENT_SECRET"])
         requests.delete(url, auth=auth, timeout=5)
