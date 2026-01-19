@@ -406,6 +406,8 @@ def settings_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
                               callback_data='settings_manage_categories')],
         [InlineKeyboardButton(t("keyboards.settings_change_language", context),
                               callback_data='settings_change_language')],
+        # NEW: Link Email for Web Login
+        [InlineKeyboardButton(t("keyboards.settings_link_email", context), callback_data='settings_link_email')],
     ]
 
     if mode == 'dual':
@@ -472,6 +474,15 @@ def switch_to_dual_confirm_keyboard(context: ContextTypes.DEFAULT_TYPE):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(t("keyboards.switch_dual_confirm", context), callback_data='confirm_switch_dual')],
         [InlineKeyboardButton(t("keyboards.switch_dual_cancel", context), callback_data="settings_menu")]
+    ])
+
+
+# --- Subscription / Onboarding ---
+
+def subscription_tier_keyboard(context: ContextTypes.DEFAULT_TYPE):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(t("keyboards.plan_free", context), callback_data='plan_free')],
+        [InlineKeyboardButton(t("keyboards.plan_premium", context), callback_data='plan_premium')],
     ])
 
 

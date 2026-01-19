@@ -744,3 +744,29 @@ def remove_category(user_id, cat_type, cat_name):
         if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 403:
             raise PremiumFeatureException("Premium required")
         return None
+
+
+@ensure_auth
+def link_credentials(email, password, user_id):
+    """
+    Links email/password credentials to the current user (Telegram) account.
+    """
+    try:
+        payload = {
+            'email': email,
+            'password': password
+        }
+        res = requests.post(
+            f"{BASE_URL}/auth/link-account",
+            json=payload,
+            headers=_get_headers(user_id),
+            timeout=DEFAULT_TIMEOUT
+        )
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        log.error(f"API Error linking account: {e}")
+        try:
+            return e.response.json()
+        except Exception:
+            return {'error': 'Connection failed.'}

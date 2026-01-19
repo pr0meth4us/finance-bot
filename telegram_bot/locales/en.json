@@ -79,6 +79,7 @@
     "settings_update_rate": "📈 Update Fixed Rate",
     "settings_switch_to_dual": "🔄 Switch to Dual-Currency Mode",
     "settings_change_language": "🌍 Change Language",
+    "settings_link_email": "🔗 Link Email",
     "usd_account": "💵 USD Account",
     "khr_account": "៛ KHR Account",
     "update_balance": "Update {currency} Balance",
@@ -119,10 +120,12 @@
     "delete_cancel": "❌ No, Cancel",
     "reset_confirm": "⚠️ Yes, Reset Account",
     "reset_cancel": "❌ No, Keep Data",
-    "web_dashboard": "🌐 Web Dashboard"
+    "web_dashboard": "🌐 Web Dashboard",
+    "plan_free": "🆓 Free (Basic)",
+    "plan_premium": "💎 Premium (Custom Cat + AI)"
   },
   "help": {
-"guide": "📚 <b>Savvify Quick Guide</b>\n\n<b>💸 Smart Logging</b>\n<i>Type these commands to log transactions instantly:</i>\n• <code>Coffee 2.50</code> → Expense (USD)\n• <code>Lunch 15000khr</code> → Expense (KHR)\n• <code>Salary 500</code> → Income\n• <code>Taxi 5 \"to airport\"</code> → With description\n\n<b>🤝 Debt & Loans (IOU)</b>\n<i>Track who owes you and who you owe:</i>\n• <b>Lent:</b> <code>Lent John 50</code> (He owes you)\n• <b>Borrowed:</b> <code>Borrowed Jane 20</code> (You owe her)\n• <b>Repaying:</b> <code>Paid Jane 20</code> (You paid her back)\n• <b>Receiving:</b> <code>Repaid by John 50</code> (He paid you back)\n\n<b>🛠 Tools & Settings</b>\n• <b>Reports:</b> View charts and spending habits.\n• <b>History:</b> Edit or delete past transactions.\n• <b>Settings:</b> Toggle Dual Currency, Set Fixed Rate, or Manage Categories.\n\n<i>💡 Tip: Use <b>/reset</b> if you need to change your initial balances.</i>\n\n<b>ℹ️ Info & Support</b>\n• <b>Web Dashboard:</b> <a href=\"https://savvify-web.vercel.app/\">Savvify Web</a>\n• <b>Full User Guide:</b> <a href=\"https://savvify-web.vercel.app/guide\">Read Online</a>\n• <b>Bot Handle:</b> @savvify_bot\n• <b>Support:</b> @pr0meth4us"  },
+    "guide": "📚 <b>Savvify Quick Guide</b>\n\n<b>💸 Smart Logging</b>\n<i>Type these commands to log transactions instantly:</i>\n• <code>Coffee 2.50</code> → Expense (USD)\n• <code>Lunch 15000khr</code> → Expense (KHR)\n• <code>Salary 500</code> → Income\n• <code>Taxi 5 \"to airport\"</code> → With description\n\n<b>🤝 Debt & Loans (IOU)</b>\n<i>Track who owes you and who you owe:</i>\n• <b>Lent:</b> <code>Lent John 50</code> (He owes you)\n• <b>Borrowed:</b> <code>Borrowed Jane 20</code> (You owe her)\n• <b>Repaying:</b> <code>Paid Jane 20</code> (You paid her back)\n• <b>Receiving:</b> <code>Repaid by John 50</code> (He paid you back)\n\n<b>🛠 Tools & Settings</b>\n• <b>Reports:</b> View charts and spending habits.\n• <b>History:</b> Edit or delete past transactions.\n• <b>Settings:</b> Toggle Dual Currency, Set Fixed Rate, or Manage Categories.\n\n<i>💡 Tip: Use <b>/reset</b> if you need to change your initial balances.</i>\n\n<b>ℹ️ Info & Support</b>\n• <b>Web Dashboard:</b> <a href=\"https://savvify-web.vercel.app/\">Savvify Web</a>\n• <b>Full User Guide:</b> <a href=\"https://savvify-web.vercel.app/guide\">Read Online</a>\n• <b>Bot Handle:</b> @savvify_bot\n• <b>Support:</b> @pr0meth4us"  },
   "settings": {
     "menu_header": "<b>⚙️ Bot Settings</b>\n\nHere you can manage your preferences and initial data.\n\n<b>Currency Mode:</b> {mode}\n\n<b>Initial Balances:</b>\n{balance_text}\n\n<b>Exchange Rate:</b> {rate_text}\n",
     "ask_balance_account": "Which initial balance do you want to set/update?",
@@ -143,7 +146,11 @@
     "ask_new_language": "Please select your new preferred language:",
     "ask_missing_name_km": "You are switching to Khmer, but your Khmer name is not set.\n\nPlease reply with your name in Khmer (e.g., ចន ដូ):",
     "ask_missing_name_en": "You are switching to English, but your English name is not set.\n\nPlease reply with your name in English (e.g., John Doe):",
-    "language_switch_success": "✅ Language successfully updated!"
+    "language_switch_success": "✅ Language successfully updated!",
+    "link_email_header": "🔗 <b>Link Email Account</b>\n\nLinking an email allows you to log in to the Web Dashboard without using the Telegram Code.\n\nPlease enter your desired **Email Address**:",
+    "link_email_ask_password": "Got it.\nNow, please enter a **strong password**:",
+    "link_email_success": "✅ <b>Account Linked!</b>\n\nYou can now log in to the Web Dashboard using this email and password.",
+    "link_email_fail": "❌ Failed to link account: {error}"
   },
   "tx": {
     "ask_amount": "{emoji} Enter the amount:",
@@ -313,20 +320,20 @@
     "total_expense": "⬇️ Total Expense: ${expense:,.2f}\n",
     "net_savings": "<b>Net Savings: ${net:,.2f}</b> {emoji}\n\n",
     "expense_insights": "<b>Expense Insights:</b>\n",
-    "top_expense": "    - <b>Top Expense:</b> ${amount:,.2f} ({description}) on {date}\n",
-    "busiest_day": "    - <b>Busiest Day:</b> {date} (${amount:,.2f})\n",
-    "quietest_day": "    - <b>Quietest Day:</b> {date} (${amount:,.2f})\n",
+    "top_expense": "  - <b>Top Expense:</b> ${amount:,.2f} ({description}) on {date}\n",
+    "busiest_day": "  - <b>Busiest Day:</b> {date} (${amount:,.2f})\n",
+    "quietest_day": "  - <b>Quietest Day:</b> {date} (${amount:,.2f})\n",
     "major_expenses": "\n<b>Major Expenses:</b>\n",
-    "no_major_expenses": "    - No major expenses recorded.\n",
+    "no_major_expenses": "  - No major expenses recorded.\n",
     "other_expenses": "\n<b>Other Expenses (grouped in chart):</b>\n",
     "income_sources": "\n<b>Income Sources:</b>\n",
-    "no_income": "    - No income recorded.\n",
+    "no_income": "  - No income recorded.\n",
     "loan_activity": "\n<b>Loan & Debt Activity (in USD):</b>\n",
-    "lent_to_others": "    - Lent to others: ${amount:,.2f}",
-    "borrowed_from_others": "    - Borrowed from others: ${amount:,.2f}",
-    "repayments_received": "    - Repayments received: ${amount:,.2f}",
-    "repayments_made": "    - Repayments made: ${amount:,.2f}",
-    "no_loan_activity": "    - No loan or debt activity."
+    "lent_to_others": "  - Lent to others: ${amount:,.2f}",
+    "borrowed_from_others": "  - Borrowed from others: ${amount:,.2f}",
+    "repayments_received": "  - Repayments received: ${amount:,.2f}",
+    "repayments_made": "  - Repayments made: ${amount:,.2f}",
+    "no_loan_activity": "  - No loan or debt activity."
   },
   "search": {
     "menu_header": "What type of search do you want to perform?",
@@ -393,6 +400,7 @@
     "ask_khr_balance": "Got it.\n    Now, what is your current **KHR** balance?\n\n(Reply with a number, e.g., `50000`)",
     "ask_single_balance": "Great, {name}.\n    Let's set your starting balance.\n\nWhat is your current **{currency}** balance?\n\n(Reply with a number, e.g., `150.50`)",
     "invalid_amount": "That doesn't look like a valid number.\n    Please try again (e.g., `100.50`).",
-    "setup_complete": "🎉 Setup Complete!\n\nYou are all set.\nHere is the main menu."
+    "setup_complete": "🎉 Setup Complete!\n\nYou are all set.\nHere is the main menu.",
+    "ask_subscription": "📋 **Subscription Tier**\n\nSavvify offers Premium features like custom categories, AI analysis, and advanced reports.\n\nSelect your plan:"
   }
 }

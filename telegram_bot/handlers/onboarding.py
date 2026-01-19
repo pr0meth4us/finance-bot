@@ -13,6 +13,7 @@ import logging
 import api_client
 from utils.i18n import t
 from decorators import authenticate_user
+import keyboards
 
 log = logging.getLogger(__name__)
 
@@ -25,8 +26,9 @@ log = logging.getLogger(__name__)
     ASK_USD_BALANCE,
     ASK_KHR_BALANCE,
     ASK_SINGLE_BALANCE,
+    ASK_SUBSCRIPTION,
     CONFIRM_RESET
-) = range(100, 109)
+) = range(100, 110)
 
 
 @authenticate_user
@@ -247,13 +249,13 @@ async def received_khr_balance(update: Update, context: ContextTypes.DEFAULT_TYP
         api_client.update_initial_balance(jwt, 'KHR', amount)
         context.user_data['profile']['settings']['initial_balances']['KHR'] = amount
 
-        api_client.complete_onboarding(jwt)
-        context.user_data['profile']['onboarding_complete'] = True
-        if 'profile_data' in context.user_data:
-            context.user_data['profile_data']['profile']['onboarding_complete'] = True
-
-        await update.message.reply_text(t("onboarding.setup_complete", context))
-        return ConversationHandler.END
+        # Proceed to Subscription Step
+        await update.message.reply_text(
+            t("onboarding.ask_subscription", context),
+            parse_mode='Markdown',
+            reply_markup=keyboards.subscription_tier_keyboard(context)
+        )
+        return ASK_SUBSCRIPTION
     except ValueError:
         await update.message.reply_text(t("onboarding.invalid_amount", context))
         return ASK_KHR_BALANCE
@@ -268,16 +270,50 @@ async def received_single_balance(update: Update, context: ContextTypes.DEFAULT_
         api_client.update_initial_balance(jwt, currency, amount)
         context.user_data['profile']['settings']['initial_balances'][currency] = amount
 
-        api_client.complete_onboarding(jwt)
-        context.user_data['profile']['onboarding_complete'] = True
-        if 'profile_data' in context.user_data:
-            context.user_data['profile_data']['profile']['onboarding_complete'] = True
-
-        await update.message.reply_text(t("onboarding.setup_complete", context))
-        return ConversationHandler.END
+        # Proceed to Subscription Step
+        await update.message.reply_text(
+            t("onboarding.ask_subscription", context),
+            parse_mode='Markdown',
+            reply_markup=keyboards.subscription_tier_keyboard(context)
+        )
+        return ASK_SUBSCRIPTION
     except ValueError:
         await update.message.reply_text(t("onboarding.invalid_amount", context))
         return ASK_SINGLE_BALANCE
+
+
+async def received_subscription_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    choice = query.data
+
+    # This is a mock step for now since actual payment logic isn't provided.
+    # If they choose premium, we just tell them to contact admin, then finish.
+    jwt = context.user_data['jwt']
+
+    if choice == 'plan_premium':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=t("common.premium_required", context) + "\n\nFor now, you are on the Free plan."
+        )
+    else:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="✅ Selected Free Plan."
+        )
+
+    # Finalize
+    api_client.complete_onboarding(jwt)
+    context.user_data['profile']['onboarding_complete'] = True
+    if 'profile_data' in context.user_data:
+        context.user_data['profile_data']['profile']['onboarding_complete'] = True
+
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=t("onboarding.setup_complete", context),
+        reply_markup=keyboards.main_menu_keyboard(context)
+    )
+    return ConversationHandler.END
 
 
 async def cancel_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -304,6 +340,8 @@ onboarding_conversation_handler = ConversationHandler(
         ASK_USD_BALANCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_usd_balance)],
         ASK_KHR_BALANCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_khr_balance)],
         ASK_SINGLE_BALANCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_single_balance)],
+        # NEW: Subscription Step
+        ASK_SUBSCRIPTION: [CallbackQueryHandler(received_subscription_choice, pattern='^plan_')]
     },
     fallbacks=[CommandHandler('cancel', cancel_onboarding)],
     per_message=False

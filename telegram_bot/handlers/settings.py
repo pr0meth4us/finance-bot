@@ -29,8 +29,11 @@ from utils.i18n import t
     SWITCH_TO_DUAL_CONFIRM,
     SWITCH_TO_DUAL_GET_KM_NAME,
     ASK_NEW_LANGUAGE,
-    GET_MISSING_NAME
-) = range(13)
+    GET_MISSING_NAME,
+    LINK_EMAIL_START,
+    LINK_EMAIL_GET_EMAIL,
+    LINK_EMAIL_GET_PASSWORD
+) = range(16)
 
 
 @authenticate_user
@@ -326,6 +329,50 @@ async def _finalize_language_switch(update_obj, context, new_lang):
     return ConversationHandler.END
 
 
+# --- NEW: Link Email Flow ---
+
+async def link_email_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text(
+        t("settings.link_email_header", context),
+        parse_mode='HTML'
+    )
+    return LINK_EMAIL_GET_EMAIL
+
+
+async def received_link_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    email = update.message.text.strip()
+    context.user_data['link_email'] = email
+    await update.message.reply_text(t("settings.link_email_ask_password", context), parse_mode='Markdown')
+    return LINK_EMAIL_GET_PASSWORD
+
+
+async def received_link_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    password = update.message.text.strip()
+    email = context.user_data.get('link_email')
+    jwt = context.user_data['jwt']
+
+    # Delete password message for security
+    try:
+        await update.message.delete()
+    except:
+        pass
+
+    loading_msg = await update.message.reply_text("🔄 Linking account...")
+
+    res = api_client.link_credentials(email, password, update.effective_user.id)
+    await loading_msg.delete()
+
+    if res and "error" not in res:
+        msg = t("settings.link_email_success", context)
+    else:
+        error = res.get("error", "Unknown error") if res else "Connection failed"
+        msg = t("settings.link_email_fail", context, error=error)
+
+    await update.message.reply_text(msg, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard(context))
+    return ConversationHandler.END
+
+
 settings_conversation_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(settings_menu, pattern='^settings_menu$')],
     states={
@@ -335,6 +382,7 @@ settings_conversation_handler = ConversationHandler(
             CallbackQueryHandler(categories_menu, pattern='^settings_manage_categories$'),
             CallbackQueryHandler(switch_to_dual_confirm, pattern='^settings_switch_to_dual$'),
             CallbackQueryHandler(change_language_start, pattern='^settings_change_language$'),
+            CallbackQueryHandler(link_email_start, pattern='^settings_link_email$'),
             # FIXED: Use menu instead of start
             CallbackQueryHandler(menu, pattern='^menu$'),
         ],
@@ -356,6 +404,8 @@ settings_conversation_handler = ConversationHandler(
         SWITCH_TO_DUAL_GET_KM_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_km_name_for_switch)],
         ASK_NEW_LANGUAGE: [CallbackQueryHandler(received_new_language, pattern='^change_lang:')],
         GET_MISSING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_missing_name_for_switch)],
+        LINK_EMAIL_GET_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_link_email)],
+        LINK_EMAIL_GET_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_link_password)],
     },
     fallbacks=[
         # FIXED: Use menu

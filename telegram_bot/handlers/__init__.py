@@ -10,8 +10,21 @@ from telegram.ext import (
 
 # Import 'menu' for the dashboard, 'quick_check'/'cancel' for utilities, and 'help_command'
 from .common import menu, quick_check, cancel, help_command
-from .settings import settings_conversation_handler
-from .onboarding import onboarding_conversation_handler, onboarding_start
+from .settings import (
+    settings_conversation_handler,
+    SETTINGS_MENU, SETBALANCE_ACCOUNT, SETBALANCE_AMOUNT, NEW_RATE,
+    CATEGORIES_MENU, CATEGORY_ADD_START, CATEGORY_ADD_GET_NAME,
+    CATEGORY_REMOVE_START, CATEGORY_REMOVE_GET_NAME,
+    SWITCH_TO_DUAL_CONFIRM, SWITCH_TO_DUAL_GET_KM_NAME,
+    ASK_NEW_LANGUAGE, GET_MISSING_NAME,
+    LINK_EMAIL_GET_EMAIL, LINK_EMAIL_GET_PASSWORD
+)
+from .onboarding import (
+    onboarding_conversation_handler, onboarding_start,
+    ASK_LANGUAGE, ASK_CURRENCY_MODE, ASK_NAME_EN, ASK_NAME_KM,
+    ASK_SINGLE_CURRENCY, ASK_USD_BALANCE, ASK_KHR_BALANCE,
+    ASK_SINGLE_BALANCE, CONFIRM_RESET, ASK_SUBSCRIPTION
+)
 
 from .analytics import (
     report_menu, process_report_choice, received_report_start_date,

@@ -1,10 +1,17 @@
 # Changelog
 All notable changes to the `finance-bot` project will be documented in this file.
 
+## [1.2.1] - 2026-01-19
+
+### Added
+- **Telegram Bot Onboarding**: Added a "Subscription Tier" selection step at the end of the onboarding flow.
+- **Telegram Bot Settings**: Added "Link Email" feature to allow Telegram-only users to set email/password credentials for Web login.
+- **Telegram Bot API**: Added `link_credentials` method to `api_client.py`.
+
 ## [1.2.0] - 2026-01-19
 
 ### Added
-- **Finance Service Models**: Updated `User` model in `web_service/app/models.py` to support `email`, `password`, and `subscription_tier`. Added methods for linking accounts (`link_email`, `link_telegram`).
+- **Finance Service Models**: Updated `User` model in `web_service/app/models.py` to support `email`, `password`, and `subscription_tier`.
 - **Finance Service Auth**:
   - Added `POST /auth/register` and `POST /auth/login` for Web Email/Password flow.
   - Added `POST /auth/verify-otp` to allow Telegram users to login to Web using the 6-digit Bot code.
@@ -36,8 +43,7 @@ All notable changes to the `finance-bot` project will be documented in this file
   - **Debt Management**: Tracking for "Lent" and "Borrowed" amounts with repayment logging.
   - **Reporting**: Weekly/Monthly analytics, spending habits, and CSV exports.
   - **Reminders**: Custom scheduled notifications via Telegram.
-
-- **Architecture**:
-  - **Telegram Bot**: Python-based interface using `python-telegram-bot`.
-  - **Web Service**: Flask backend handling logic, database operations, and API endpoints.
-  - **Database**: MongoDB for persistent storage of transactions, debts, and user settings.
+  - **Architecture**:
+    - **Telegram Bot**: Python-based interface using `python-telegram-bot`.
+    - **Web Service**: Flask backend handling logic, database operations, and API endpoints.
+    - **Database**: MongoDB for persistent storage of transactions, debts, and user settings.
