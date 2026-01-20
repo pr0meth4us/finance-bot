@@ -1,10 +1,11 @@
-# telegram_bot/bot.py
-
 import os
 import logging
 from telegram import Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from dotenv import load_dotenv
+
+# Import the Facade
+import api_client
 
 from handlers import (
     menu, help_command,
@@ -58,6 +59,37 @@ async def post_init(app: Application):
         logger.error(f"post_init error: {e}", exc_info=True)
 
 
+# --- NEW: Deep Link Handler ---
+async def deep_link_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handles /start link_<token> to connect Web accounts to Telegram.
+    This must run BEFORE the Onboarding handler to catch the command.
+    """
+    args = context.args
+    if not args or not args[0].startswith('link_'):
+        # If no link args, pass through to other handlers (handled by Onboarding)
+        return
+
+    token = args[0].replace('link_', '')
+    user_id = update.effective_user.id
+
+    await update.message.reply_text("🔗 Processing your account link request...")
+
+    # Attempt to link
+    success, msg = api_client.link_telegram_via_token(user_id, token)
+
+    if success:
+        await update.message.reply_text(f"✅ Success! {msg}\n\nYou can now use the bot to manage your finances.")
+        # Force a session sync to update local user state
+        # We need a JWT to sync. If user isn't logged in, we try login first.
+        # Ideally, login_to_bifrost handles this.
+        jwt = api_client.login_to_bifrost(update.effective_user)
+        if jwt:
+            api_client.sync_session(jwt)
+    else:
+        await update.message.reply_text(f"❌ Link Failed: {msg}\n\nThe link may have expired or is invalid.")
+
+
 def main():
     load_translations()
 
@@ -73,11 +105,12 @@ def main():
 
     # --- Handlers ---
 
+    # 1. Deep Link Handler (Must be registered early to catch /start link_...)
+    app.add_handler(CommandHandler("start", deep_link_handler, filters=None, has_args=True))
+
     # Global Menu & Help
     app.add_handler(CommandHandler("menu", menu))
-    # FIXED: Added handler for the 'Back to Main Menu' button click
     app.add_handler(CallbackQueryHandler(menu, pattern="^menu$"))
-
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("cancel", cancel))
 
@@ -98,7 +131,7 @@ def main():
     app.add_handler(iou_edit_conversation_handler)
     app.add_handler(settings_conversation_handler)
 
-    # Onboarding (Handles /start and /reset)
+    # Onboarding (Handles standard /start and /reset)
     app.add_handler(onboarding_conversation_handler)
 
     # Fallback / Universal Input

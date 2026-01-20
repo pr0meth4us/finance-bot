@@ -1,9 +1,12 @@
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, g
 from app.models import User
-from app.utils.auth import create_jwt, auth_required, decode_jwt, verify_telegram_login
+from app.utils.auth import create_jwt, auth_required, decode_jwt
 from app import get_db
+from app.utils.db import settings_collection
 import requests
+from requests.auth import HTTPBasicAuth
 import os
+from bson import ObjectId
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -63,8 +66,6 @@ def login():
             }
         }), 200
 
-    return jsonify({"error": "Invalid credentials"}), 401
-
 # --- TELEGRAM -> WEB LOGIN (Case 1) ---
 
 @auth_bp.route('/verify-otp', methods=['POST'])
@@ -122,72 +123,150 @@ def verify_otp():
         }
     }), 200
 
-# --- ACCOUNT LINKING ---
+# --- ACCOUNT LINKING (Proxy to Bifrost) ---
 
 @auth_bp.route('/link-account', methods=['POST'])
-@auth_required
-def link_account(user_id):
+@auth_required(min_role="user")
+def link_account():
     """
-    Links credentials to the current account.
-    - 'email' + 'password': Connect Email to a Telegram-only account.
-    - 'telegram_data': Connect Telegram Widget data to a Web-only account.
+    Proxies the account linking request to Bifrost.
+    Bifrost handles the actual merging/linking of Email or Telegram credentials.
+    """
+    try:
+        account_id = g.account_id
+    except AttributeError:
+        return jsonify({'error': 'Invalid session'}), 401
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    # 1. Prepare Payload for Bifrost
+    payload = {
+        "account_id": account_id,
+        **data
+    }
+
+    bifrost_url = current_app.config.get("BIFROST_URL", "").rstrip('/')
+    target_url = f"{bifrost_url}/internal/link-account"
+
+    client_id = current_app.config.get("BIFROST_CLIENT_ID")
+    client_secret = current_app.config.get("BIFROST_CLIENT_SECRET")
+
+    # 2. Call Bifrost
+    try:
+        resp = requests.post(
+            target_url,
+            json=payload,
+            auth=HTTPBasicAuth(client_id, client_secret),
+            timeout=10
+        )
+
+        # 3. Handle Response
+        if resp.status_code == 200:
+            if 'email' in data:
+                try:
+                    settings_collection().update_one(
+                        {'account_id': ObjectId(account_id)},
+                        {'$set': {'email': data['email']}}
+                    )
+                except Exception as e:
+                    current_app.logger.warning(f"Failed to update local email cache: {e}")
+
+            return jsonify(resp.json()), 200
+
+        try:
+            return jsonify(resp.json()), resp.status_code
+        except:
+            return jsonify({"error": "Upstream service error"}), resp.status_code
+
+    except requests.exceptions.RequestException as e:
+        current_app.logger.error(f"Bifrost link-account failed: {e}")
+        return jsonify({"error": "Link service unavailable"}), 503
+
+
+@auth_bp.route('/link/initiate-telegram', methods=['POST'])
+@auth_required(min_role="user")
+def initiate_telegram_link():
+    """
+    Called by Web Frontend.
+    1. Asks Bifrost for a 'link_token' for the current user.
+    2. Returns a Telegram Deep Link URL.
+    """
+    try:
+        # 1. Get Token from Bifrost
+        bifrost_url = current_app.config.get("BIFROST_URL", "").rstrip('/')
+        client_id = current_app.config.get("BIFROST_CLIENT_ID")
+        client_secret = current_app.config.get("BIFROST_CLIENT_SECRET")
+
+        resp = requests.post(
+            f"{bifrost_url}/internal/generate-link-token",
+            json={"account_id": g.account_id},
+            auth=HTTPBasicAuth(client_id, client_secret),
+            timeout=5
+        )
+        resp.raise_for_status()
+        token = resp.json().get('token')
+
+        # 2. Construct Deep Link
+        bot_username = os.getenv("TELEGRAM_BOT_USERNAME", "savvify_bot")
+        deep_link = f"https://t.me/{bot_username}?start=link_{token}"
+
+        return jsonify({
+            "link_url": deep_link,
+            "token": token
+        })
+
+    except Exception as e:
+        current_app.logger.error(f"Failed to init telegram link: {e}")
+        return jsonify({"error": "Service unavailable"}), 503
+
+
+@auth_bp.route('/link/complete-telegram', methods=['POST'])
+def complete_telegram_link():
+    """
+    Called by Telegram Bot when user sends /start link_<token>.
     """
     data = request.get_json()
+    token = data.get('token')
+    telegram_id = data.get('telegram_id')
 
-    # 1. Link Email (Case 1: Tele User adding Email Login)
-    if 'email' in data and 'password' in data:
-        success, msg = User.link_email(user_id, data['email'], data['password'])
-        if success:
-            return jsonify({"message": "Email linked successfully"}), 200
-        return jsonify({"error": msg}), 400
+    if not token or not telegram_id:
+        return jsonify({"error": "Missing data"}), 400
 
-    # 2. Link Telegram (Case 2: Web User linking Tele via Widget)
-    if 'telegram_data' in data:
-        tg_data = data['telegram_data']
+    # 1. Call Bifrost to Consume Token
+    bifrost_url = current_app.config.get("BIFROST_URL", "").rstrip('/')
+    client_id = current_app.config.get("BIFROST_CLIENT_ID")
+    client_secret = current_app.config.get("BIFROST_CLIENT_SECRET")
 
-        # A. Security Check
-        bot_token = current_app.config.get('TELEGRAM_TOKEN')
-        if not bot_token:
-            current_app.logger.error("TELEGRAM_TOKEN missing in config, cannot verify hash.")
-            return jsonify({"error": "Server misconfiguration"}), 500
+    try:
+        resp = requests.post(
+            f"{bifrost_url}/internal/link-account",
+            json={"link_token": token, "telegram_id": telegram_id},
+            auth=HTTPBasicAuth(client_id, client_secret),
+            timeout=5
+        )
 
-        if not verify_telegram_login(tg_data, bot_token):
-            current_app.logger.warning(f"Telegram hash verification failed for user {user_id}")
-            return jsonify({"error": "Invalid Telegram verification data"}), 401
+        if resp.status_code == 200:
+            return jsonify({"success": True}), 200
+        else:
+            return jsonify(resp.json()), resp.status_code
 
-        # B. Link
-        telegram_id = tg_data.get('id')
-        info = {
-            'first_name': tg_data.get('first_name'),
-            'username': tg_data.get('username')
-        }
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-        success, msg = User.link_telegram(user_id, telegram_id, info)
-        if success:
-            return jsonify({"message": "Telegram linked successfully"}), 200
-        return jsonify({"error": msg}), 400
-
-    return jsonify({"error": "Invalid data format"}), 400
-
-# --- BOT SYNC (Existing Flow) ---
+# --- BOT SYNC ---
 
 @auth_bp.route('/sync-session', methods=['POST'])
 def sync_session():
-    """
-    Called by Telegram Bot. Receives a Bifrost JWT, validates it,
-    and ensures a User/Profile exists in Finance DB.
-    """
     auth_header = request.headers.get('Authorization')
     if not auth_header:
         return jsonify({"error": "Missing token"}), 401
 
     token = auth_header.split(" ")[1]
 
-    # 1. Decode Bifrost Token to get Telegram ID
     try:
         decoded = decode_jwt(token)
-        # Note: decode_jwt usually verifies signature if secret is correct
-        # Ensure we are using the correct secret that Bifrost signed with.
     except:
         return jsonify({"error": "Invalid token"}), 401
 
@@ -195,7 +274,6 @@ def sync_session():
     if not tg_id:
         return jsonify({"error": "Token missing identity"}), 400
 
-    # 2. Find or Create User
     user = User.find_by_telegram_id(tg_id)
     if not user:
         first_name = decoded.get('first_name', 'User')

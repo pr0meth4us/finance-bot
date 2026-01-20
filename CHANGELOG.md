@@ -1,6 +1,16 @@
 # Changelog
 All notable changes to the `finance-bot` project will be documented in this file.
 
+## [1.2.2] - 2026-01-20
+
+### Added
+- **Web-to-Telegram Linking**: Added endpoints `/auth/link/initiate-telegram` and `/auth/link/complete-telegram` to support Deep Link binding.
+- **Account Management**: Refactored `/auth/link-account` to proxy requests to Bifrost's internal IDP API.
+- **Telegram Bot**: Updated Bot's `api_client` and `start` command to handle `link_<token>` payloads.
+
+### Changed
+- **Auth Flow**: The linking process now offloads identity merging logic completely to Bifrost.
+
 ## [1.2.1] - 2026-01-19
 
 ### Added
