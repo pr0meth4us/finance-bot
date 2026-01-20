@@ -259,29 +259,54 @@ def complete_telegram_link():
 
 @auth_bp.route('/sync-session', methods=['POST'])
 def sync_session():
+    """
+    Validates a Bifrost Token by calling Bifrost's /auth/me endpoint.
+    If valid, creates/syncs a local User session.
+    """
     auth_header = request.headers.get('Authorization')
     if not auth_header:
         return jsonify({"error": "Missing token"}), 401
 
-    token = auth_header.split(" ")[1]
+    # We expect format "Bearer <token>"
+    parts = auth_header.split(" ")
+    if len(parts) != 2:
+        return jsonify({"error": "Invalid header format"}), 401
 
+    token = parts[1]
+
+    # 1. Introspect Token with Bifrost
     try:
-        decoded = decode_jwt(token)
-    except Exception:
-        return jsonify({"error": "Invalid token"}), 401
+        verify_url = f"{BIFROST_URL}/auth/me"
 
-    if not decoded:
-        return jsonify({"error": "Invalid token"}), 401
+        # We pass the token EXACTLY as we received it (forwarding the Bearer token)
+        resp = requests.get(
+            verify_url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5
+        )
 
-    tg_id = decoded.get('telegram_id') or decoded.get('sub')
+        if resp.status_code != 200:
+            current_app.logger.warning(f"Bifrost rejected token: {resp.text}")
+            return jsonify({"error": "Invalid session token"}), 401
+
+        bifrost_user = resp.json()
+
+    except requests.exceptions.RequestException as e:
+        current_app.logger.error(f"Failed to contact Bifrost for auth: {e}")
+        return jsonify({"error": "Authentication unavailable"}), 503
+
+    # 2. Extract Data
+    tg_id = bifrost_user.get('telegram_id')
     if not tg_id:
-        return jsonify({"error": "Token missing identity"}), 400
+        return jsonify({"error": "Bifrost user has no Telegram ID linked"}), 400
 
+    # 3. Sync with Local Database
     user = User.find_by_telegram_id(tg_id)
     if not user:
-        first_name = decoded.get('first_name', 'User')
-        username = decoded.get('username')
-        user = User.create_from_telegram(tg_id, first_name, username)
+        # Create a local shadow user if they don't exist
+        # Note: We don't have username/firstname here unless we add it to Bifrost's /me response.
+        # For now, we use defaults or partial data.
+        user = User.create_from_telegram(tg_id, "User")
 
     return jsonify({
         "status": "synchronized",

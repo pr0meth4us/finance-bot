@@ -2,6 +2,12 @@
 # Changelog
 All notable changes to the `finance-bot` project will be documented in this file.
 
+## [1.3.2] - 2026-01-20
+
+### Fixed
+- **Auth Architecture**: Fixed the "Shared Secret" vulnerability. The Finance Service no longer attempts to decode Bifrost tokens locally.
+- **Web Service**: Updated `/sync-session` to validate tokens by calling `Bifrost` directly, removing the need for `JWT_SECRET_KEY` synchronization between services.
+
 ## [1.3.1] - 2026-01-20
 
 ### Fixed
