@@ -7,7 +7,8 @@ from functools import wraps
 from flask import request, jsonify, g, current_app
 from requests.auth import HTTPBasicAuth
 from cachetools import TTLCache
-
+import jwt
+from datetime import datetime, timedelta
 # Cache validation results for 5 minutes (300 seconds)
 _token_cache = TTLCache(maxsize=1024, ttl=300)
 
@@ -194,3 +195,41 @@ def service_auth_required(f):
 
         return f(*args, **kwargs)
     return decorated_function
+
+def create_jwt(payload):
+    """
+    Generates a JWT token signed with the app's SECRET_KEY.
+    """
+    try:
+        # Ensure payload is a dict
+        if not isinstance(payload, dict):
+            raise ValueError("Payload must be a dictionary.")
+
+        # Add expiration if not present
+        if 'exp' not in payload:
+            # Default to 7 days
+            payload['exp'] = datetime.utcnow() + timedelta(days=7)
+
+        # Encode
+        # PyJWT 2.0+ returns a string
+        token = jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm='HS256')
+        return token
+    except Exception as e:
+        current_app.logger.error(f"Error creating JWT: {e}")
+        return None
+
+def decode_jwt(token):
+    """
+    Decodes and validates a JWT token.
+    Returns the payload dict if valid, None otherwise.
+    """
+    try:
+        payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'])
+        return payload
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
+    except Exception as e:
+        current_app.logger.error(f"Error decoding JWT: {e}")
+        return None
