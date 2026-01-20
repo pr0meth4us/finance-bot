@@ -1,5 +1,11 @@
+==================== FILE: CHANGELOG.md ====================
 # Changelog
 All notable changes to the `finance-bot` project will be documented in this file.
+
+## [1.3.1] - 2026-01-20
+
+### Fixed
+- **Web Service**: Resolved critical `ImportError` by restoring missing `create_jwt`, `decode_jwt`, and `auth_required` functions in `web_service/app/utils/auth.py`.
 
 ## [1.3.0] - 2026-01-20
 
