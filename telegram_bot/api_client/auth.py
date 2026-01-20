@@ -93,7 +93,7 @@ def sync_session(jwt_token):
     Flow A: Session Sync.
     Sends the Bifrost JWT to the Finance Service to validate and ensure a local profile exists.
     """
-    url = f"{BASE_URL}/auth/sync-session"
+    url = f"{BASE_URL}/sync-session"
     headers = {"Authorization": f"Bearer {jwt_token}"}
 
     try:
