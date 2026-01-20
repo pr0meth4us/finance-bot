@@ -21,6 +21,26 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Displays the main menu (Dashboard).
     """
+    user = update.effective_user
+
+    # --- AUTO-SYNC LOGIC ---
+    # Check Bifrost for updates (Lazy Sync)
+    current_tier = context.user_data.get('subscription_status', 'free')
+
+    # Only check if we think they are free (save bandwidth if already premium)
+    if current_tier != 'premium':
+        remote_role = api_client.sync_subscription_status(user.id)
+
+        if remote_role == 'premium_user':
+            context.user_data['subscription_status'] = 'premium'
+            # Notify the user of the good news
+            await update.effective_message.reply_text(
+                "🌟 <b>Status Updated!</b>\n"
+                "Bifrost confirmed your Premium subscription.\n"
+                "All features are now unlocked.",
+                parse_mode='HTML'
+            )
+
     profile = context.user_data.get('profile', {})
     jwt = context.user_data.get('jwt')
 

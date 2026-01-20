@@ -154,3 +154,33 @@ def link_telegram_via_token(telegram_id, token):
     except requests.exceptions.RequestException as e:
         log.error(f"API Error linking telegram via token: {e}")
         return False, "Connection failed."
+
+# ... inside telegram_bot/api_client/auth.py
+
+def sync_subscription_status(telegram_id):
+    """
+    Asks Bifrost for the latest subscription status via Internal API.
+    Returns: 'premium_user' | 'user' | 'guest' | None
+    """
+    if not BIFROST_URL or not BIFROST_CLIENT_ID or not BIFROST_CLIENT_SECRET:
+        log.error("Missing Bifrost config for subscription sync")
+        return None
+
+    url = f"{BIFROST_URL}/internal/get-role"
+    payload = {"telegram_id": str(telegram_id)}
+
+    # Authenticate as the FinanceBot Service
+    auth = HTTPBasicAuth(BIFROST_CLIENT_ID, BIFROST_CLIENT_SECRET)
+
+    try:
+        res = requests.post(url, json=payload, auth=auth, timeout=DEFAULT_TIMEOUT)
+
+        if res.status_code == 200:
+            return res.json().get('role', 'user')
+
+        log.warning(f"Bifrost Sync Failed ({res.status_code}): {res.text}")
+        return None
+
+    except requests.exceptions.RequestException as e:
+        log.error(f"Failed to sync subscription with Bifrost: {e}")
+        return None
