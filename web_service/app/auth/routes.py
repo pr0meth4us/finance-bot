@@ -267,7 +267,10 @@ def sync_session():
 
     try:
         decoded = decode_jwt(token)
-    except:
+    except Exception:
+        return jsonify({"error": "Invalid token"}), 401
+
+    if not decoded:
         return jsonify({"error": "Invalid token"}), 401
 
     tg_id = decoded.get('telegram_id') or decoded.get('sub')
