@@ -1,6 +1,15 @@
 # Changelog
 All notable changes to the `finance-bot` project will be documented in this file.
 
+## [1.3.0] - 2026-01-20
+
+### Added
+- **Payment Delegation**: Added `/upgrade` command which generates a secure deep link to the central **Bifrost Bot**.
+- **Dynamic Pricing**: The upgrade link now dynamically passes the price and client ID to the payment gateway.
+
+### Changed
+- **Payment Flow**: Removed legacy direct-payment logic; the bot now acts as a gateway to the central Bifrost ecosystem.
+
 ## [1.2.2] - 2026-01-20
 
 ### Added

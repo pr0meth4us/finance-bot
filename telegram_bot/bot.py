@@ -1,3 +1,5 @@
+# telegram_bot/bot.py
+
 import os
 import logging
 from telegram import Update
@@ -25,7 +27,8 @@ from handlers import (
     iou_view_settled, iou_person_detail_settled, iou_manage_list,
     iou_manage_menu, iou_cancel_prompt, iou_cancel_confirm,
     iou_edit_conversation_handler,
-    get_current_rate
+    get_current_rate,
+    upgrade_start
 )
 from handlers.auth import login_command
 from handlers.analytics import download_report_csv
@@ -59,7 +62,7 @@ async def post_init(app: Application):
         logger.error(f"post_init error: {e}", exc_info=True)
 
 
-# --- NEW: Deep Link Handler ---
+# --- Deep Link Handler ---
 async def deep_link_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Handles /start link_<token> to connect Web accounts to Telegram.
@@ -81,8 +84,6 @@ async def deep_link_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if success:
         await update.message.reply_text(f"✅ Success! {msg}\n\nYou can now use the bot to manage your finances.")
         # Force a session sync to update local user state
-        # We need a JWT to sync. If user isn't logged in, we try login first.
-        # Ideally, login_to_bifrost handles this.
         jwt = api_client.login_to_bifrost(update.effective_user)
         if jwt:
             api_client.sync_session(jwt)
@@ -117,6 +118,10 @@ def main():
     # Auth Handlers
     app.add_handler(CommandHandler("login", login_command))
     app.add_handler(CommandHandler("web", login_command))
+
+    # --- NEW: Upgrade Handler ---
+    app.add_handler(CommandHandler("upgrade", upgrade_start))
+    app.add_handler(CallbackQueryHandler(upgrade_start, pattern="^upgrade_premium$"))
 
     # Conversations
     app.add_handler(tx_conversation_handler)

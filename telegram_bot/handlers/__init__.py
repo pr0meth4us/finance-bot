@@ -10,6 +10,9 @@ from telegram.ext import (
 
 # Import 'menu' for the dashboard, 'quick_check'/'cancel' for utilities, and 'help_command'
 from .common import menu, quick_check, cancel, help_command
+# --- NEW: Import Payment Handler ---
+from .payment import upgrade_start
+
 from .settings import (
     settings_conversation_handler,
     SETTINGS_MENU, SETBALANCE_ACCOUNT, SETBALANCE_AMOUNT, NEW_RATE,
