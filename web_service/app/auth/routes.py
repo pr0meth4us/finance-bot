@@ -276,7 +276,7 @@ def sync_session():
 
     # 1. Introspect Token with Bifrost
     try:
-        verify_url = f"{BIFROST_URL}/auth/api/me"
+        verify_url = f"{BIFROST_URL}/internal/me"
 
         # We pass the token EXACTLY as we received it (forwarding the Bearer token)
         resp = requests.get(
