@@ -1,8 +1,8 @@
 from .core import PremiumFeatureException, UpstreamUnavailable
 from .auth import (
-    get_login_code, login_to_bifrost, sync_session,
+    get_login_code, login_to_bifrost,
     link_credentials, link_telegram_via_token,
-    sync_subscription_status  # <--- ADD THIS
+    sync_subscription_status
 )
 from .transactions import (
     add_transaction, get_recent_transactions, get_transaction_details,

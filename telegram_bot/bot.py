@@ -84,6 +84,7 @@ async def deep_link_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if success:
         await update.message.reply_text(f"✅ Success! {msg}\n\nYou can now use the bot to manage your finances.")
         api_client.login_to_bifrost(update.effective_user)
+        api_client.login_to_bifrost(update.effective_user)
     else:
         await update.message.reply_text(f"❌ Link Failed: {msg}\n\nThe link may have expired or is invalid.")
 
