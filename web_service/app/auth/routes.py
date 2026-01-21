@@ -254,24 +254,98 @@ def complete_telegram_link():
 # --- CACHE INVALIDATION WEBHOOK ---
 
 @auth_bp.route('/internal/webhook/auth-event', methods=['POST'])
-@service_auth_required
 def auth_event_webhook():
     """
-    Receives signals from Bifrost to invalidate cached tokens.
-    Payload expected: { "event": "invalidation", "token": "<jwt_string>" }
+    Receives and processes Auth Events from Bifrost (IdP).
+    Secured via HMAC-SHA256 Signature verification.
     """
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "No data"}), 400
+    # ---------------------------------------------------------
+    # 1. SECURITY: Verify HMAC Signature
+    # ---------------------------------------------------------
+    signature = request.headers.get('X-Bifrost-Signature')
+    client_id = request.headers.get('X-Bifrost-Client-Id')
 
-    event_type = data.get('event')
-    token = data.get('token')
+    if not signature:
+        current_app.logger.warning("⚠️ Webhook missing signature header")
+        return jsonify({"error": "Missing signature"}), 401
 
-    if event_type == 'invalidation' and token:
-        if invalidate_token_cache(token):
-            current_app.logger.info(f"Webhook: Invalidated token {token[:10]}...")
-            return jsonify({"message": "Token invalidated"}), 200
+    # Load Shared Secret (Must match Bifrost's DB record for this app)
+    webhook_secret = current_app.config.get("BIFROST_WEBHOOK_SECRET")
+
+    if not webhook_secret:
+        current_app.logger.critical("❌ Configuration Error: Missing BIFROST_WEBHOOK_SECRET")
+        return jsonify({"error": "Server configuration error"}), 500
+
+    # Verify Signature (using raw bytes)
+    payload_bytes = request.get_data()
+    try:
+        expected_signature = hmac.new(
+            key=webhook_secret.encode('utf-8'),
+            msg=payload_bytes,
+            digestmod=hashlib.sha256
+        ).hexdigest()
+    except Exception as e:
+        current_app.logger.error(f"HMAC calculation failed: {e}")
+        return jsonify({"error": "Internal verification error"}), 500
+
+    if not hmac.compare_digest(expected_signature, signature):
+        current_app.logger.warning(f"⛔ Invalid Signature from Claimed Client: {client_id}")
+        return jsonify({"error": "Invalid signature"}), 403
+
+    # ---------------------------------------------------------
+    # 2. LOGIC: Process Event Types
+    # ---------------------------------------------------------
+    try:
+        data = request.get_json()
+        event_type = data.get('event')
+        account_id = data.get('account_id')
+        token = data.get('token') # Optional: specific token to kill
+
+        current_app.logger.info(f"🔔 Webhook Received: [{event_type}] for Account {account_id}")
+
+        # --- A. Critical Security Events (Bans, Logouts) ---
+        if event_type == 'invalidation':
+            if token:
+                if invalidate_token_cache(token):
+                    current_app.logger.info(f"   🛡️ Token {token[:10]}... added to blocklist.")
+                else:
+                    current_app.logger.info("   ⚠️ Token not found in cache (might be already expired).")
+            else:
+                current_app.logger.warning("   ❓ Invalidation event received without token.")
+
+        # --- B. Password Changes (Force Logout) ---
+        elif event_type == 'security_password_change':
+            current_app.logger.info(f"   🔐 User {account_id} changed password. Flushing sessions.")
+            # If the user is active, their next request will fail validation
+            # and force them to re-login with new credentials.
+            if token:
+                invalidate_token_cache(token)
+
+        # --- C. Role Changes (Premium Upgrades) ---
+        elif event_type == 'account_role_change':
+            current_app.logger.info(f"   💎 User {account_id} role updated. Refreshing permissions.")
+            # We invalidate the cache so the NEXT request from this user
+            # triggers a fresh validation call to Bifrost.
+            # Bifrost will respond with the NEW role (e.g. "premium_user"),
+            # unlocking features immediately.
+            if token:
+                invalidate_token_cache(token)
+            else:
+                current_app.logger.info("   ℹ️ Role changed offline. User gets new role on next login.")
+
+        # --- D. Profile Updates (Email/Name) ---
+        elif event_type == 'account_update':
+            current_app.logger.info(f"   📝 User {account_id} updated profile. Syncing data...")
+            # Similar to role change, we clear cache to force a re-fetch of
+            # display_name/email from Bifrost on the next request.
+            if token:
+                invalidate_token_cache(token)
+
         else:
-            return jsonify({"message": "Token not in cache or already expired"}), 200
+            current_app.logger.warning(f"   ❓ Unknown event type: {event_type}")
 
-    return jsonify({"message": "Event ignored"}), 200
+        return jsonify({"status": "processed", "event": event_type}), 200
+
+    except Exception as e:
+        current_app.logger.error(f"❌ Webhook Processing Error: {e}")
+        return jsonify({"error": "Processing failed"}), 400

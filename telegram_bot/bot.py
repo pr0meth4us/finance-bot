@@ -62,7 +62,7 @@ async def post_init(app: Application):
         logger.error(f"post_init error: {e}", exc_info=True)
 
 
-# --- Deep Link Handler ---
+# --- Deep Link Handler (Clickable URLs) ---
 async def deep_link_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Handles /start link_<token> to connect Web accounts to Telegram.
@@ -74,8 +74,30 @@ async def deep_link_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     token = args[0].replace('link_', '')
-    user_id = update.effective_user.id
+    await _process_linking(update, token)
 
+
+# --- Manual Link Handler (Typed Command) ---
+async def manual_link_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handles /link <token> for users who cannot use deep links.
+    """
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: /link <token>\nExample: `/link link_abc123`", parse_mode='Markdown')
+        return
+
+    token = args[0]
+    # Be flexible: allow user to paste full 'link_xyz' or just 'xyz'
+    if token.startswith('link_'):
+        token = token.replace('link_', '')
+
+    await _process_linking(update, token)
+
+
+async def _process_linking(update: Update, token: str):
+    """Shared logic for processing the link token."""
+    user_id = update.effective_user.id
     await update.message.reply_text("🔗 Processing your account link request...")
 
     # Attempt to link
@@ -83,7 +105,7 @@ async def deep_link_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if success:
         await update.message.reply_text(f"✅ Success! {msg}\n\nYou can now use the bot to manage your finances.")
-        api_client.login_to_bifrost(update.effective_user)
+        # Refresh session
         api_client.login_to_bifrost(update.effective_user)
     else:
         await update.message.reply_text(f"❌ Link Failed: {msg}\n\nThe link may have expired or is invalid.")
@@ -104,8 +126,11 @@ def main():
 
     # --- Handlers ---
 
-    # 1. Deep Link Handler (Must be registered early to catch /start link_...)
+    # 1. Deep Link Handler (Must be registered early)
     app.add_handler(CommandHandler("start", deep_link_handler, filters=None, has_args=True))
+
+    # 2. Manual Link Handler (New)
+    app.add_handler(CommandHandler("link", manual_link_handler))
 
     # Global Menu & Help
     app.add_handler(CommandHandler("menu", menu))

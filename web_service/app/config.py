@@ -9,6 +9,7 @@ class Config:
     EXCHANGERATE_API_KEY = os.getenv("EXCHANGERATE_API_KEY", "").strip()
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    BIFROST_WEBHOOK_SECRET = os.environ.get('BIFROST_WEBHOOK_SECRET')
 
     # Bifrost Auth
     # Support both naming conventions, preferring BIFROST_URL

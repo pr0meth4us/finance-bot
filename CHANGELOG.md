@@ -1,6 +1,17 @@
 # Changelog
 All notable changes to the `finance-bot` project will be documented in this file.
 
+## [1.4.0] - 2026-01-22
+
+### Added
+- **Manual Account Linking**: Added `/link <token>` command. This serves as a reliable alternative to deep links for users on devices where standard URL redirection fails.
+- **Bifrost Compatibility**: Updated `/upgrade` payload format to support Bifrost 1.4.0 features (Duration and Explicit Roles).
+
+### Changed
+- **Performance**: Removed the redundant `sync_subscription_status` check in the `/menu` handler.
+  - The bot now relies on **Push-Based Cache Invalidation** (introduced in 1.3.3) and lazy provisioning.
+  - The dashboard now loads significantly faster as it no longer waits for an upstream HTTP check on every request.
+
 ## [1.3.3] - 2026-01-21
 
 ### Changed
@@ -81,7 +92,7 @@ All notable changes to the `finance-bot` project will be documented in this file
   - **Debt Management**: Tracking for "Lent" and "Borrowed" amounts with repayment logging.
   - **Reporting**: Weekly/Monthly analytics, spending habits, and CSV exports.
   - **Reminders**: Custom scheduled notifications via Telegram.
-  - **Architecture**:
-    - **Telegram Bot**: Python-based interface using `python-telegram-bot`.
-    - **Web Service**: Flask backend handling logic, database operations, and API endpoints.
-    - **Database**: MongoDB for persistent storage of transactions, debts, and user settings.
+- **Architecture**:
+  - **Telegram Bot**: Python-based interface using `python-telegram-bot`.
+  - **Web Service**: Flask backend handling logic, database operations, and API endpoints.
+  - **Database**: MongoDB for persistent storage of transactions, debts, and user settings.
