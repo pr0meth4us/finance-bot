@@ -7,6 +7,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 import os
 from bson import ObjectId
+import hmac
 
 auth_bp = Blueprint('auth', __name__)
 
