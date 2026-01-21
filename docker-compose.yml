@@ -1,4 +1,3 @@
-# docker-compose.yml  (no version key)
 services:
   web:
     build:
