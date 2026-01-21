@@ -1,13 +1,13 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-import os
+import time
+import api_client  # Import the facade
 from decorators import authenticate_user
 
-BIFROST_BOT_USERNAME = os.getenv("BIFROST_BOT_USERNAME")
-MY_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")
 
 @authenticate_user
 async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shows the package selection menu."""
     # 1. Check if already premium
     role = context.user_data.get('role', 'user')
 
@@ -20,25 +20,77 @@ async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 2. If not premium, show payment options
-    price = "5.00"
-    duration = "1m"
-    target_role = "premium_user"
-    user_ref = update.effective_user.id
-
-    # Bifrost 1.4.0+ Format: pay_CLIENTID__PRICE__DURATION__ROLE__REF
-    payload = f"pay_{MY_CLIENT_ID}__{price}__{duration}__{target_role}__{user_ref}"
-
-    url = f"https://t.me/{BIFROST_BOT_USERNAME}?start={payload}"
-    manual_command = f"/start {payload}"
-
+    # 2. Show Packages
     keyboard = [
-        [InlineKeyboardButton(f"💎 Pay with Bifrost (${price}/mo)", url=url)]
+        [InlineKeyboardButton("📅 1 Month ($5.00)", callback_data="upgrade:1m")],
+        [InlineKeyboardButton("🗓 1 Year ($45.00) - Save 25%", callback_data="upgrade:1y")]
     ]
 
     await update.message.reply_text(
-        f"<b>💎 Upgrade to Premium</b>\n\n"
-        f"Unlock advanced features for <b>${price}/mo</b>.\n\n"
+        "<b>💎 Upgrade to Premium</b>\n\n"
+        "Unlock advanced features like:\n"
+        "• 📊 Advanced Analytics\n"
+        "• 🏷 Custom Categories\n"
+        "• 🤝 Unlimited Debt Tracking\n\n"
+        "<b>Select a plan:</b>",
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+@authenticate_user
+async def upgrade_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the package selection and generates the link."""
+    query = update.callback_query
+    await query.answer()
+
+    # Parse choice (1m or 1y)
+    duration_code = query.data.split(":")[1]
+
+    # Define Packages
+    packages = {
+        "1m": {"price": 5.00, "duration": "1m", "label": "1 Month"},
+        "1y": {"price": 45.00, "duration": "1y", "label": "1 Year"}
+    }
+
+    plan = packages.get(duration_code)
+    if not plan:
+        await query.edit_message_text("❌ Invalid plan selected.")
+        return
+
+    # Generate Ref
+    user_id = update.effective_user.id
+    ref_id = f"finance_SUB_{user_id}_{int(time.time())}"
+
+    # UI Feedback
+    await query.edit_message_text(f"🔄 Generating secure payment link for <b>{plan['label']}</b>...", parse_mode='HTML')
+
+    # Call Bifrost API
+    intent = api_client.create_payment_intent(
+        user_id=user_id,
+        amount=plan['price'],
+        duration=plan['duration'],
+        target_role="premium_user",
+        client_ref_id=ref_id
+    )
+
+    if not intent or not intent.get('success'):
+        await query.edit_message_text(
+            "❌ Error: Could not contact payment gateway. Please try again later.",
+            parse_mode='HTML'
+        )
+        return
+
+    secure_link = intent['secure_link']  # e.g. https://t.me/BifrostBot?start=tx-123...
+    manual_command = intent['manual_command']  # e.g. /pay tx-123...
+
+    keyboard = [
+        [InlineKeyboardButton(f"💎 Pay ${plan['price']:.2f}", url=secure_link)]
+    ]
+
+    await query.edit_message_text(
+        f"<b>💎 Confirm Upgrade: {plan['label']}</b>\n\n"
+        f"Price: <b>${plan['price']:.2f}</b>\n\n"
         "1. Click the button below to pay via Bifrost.\n"
         "2. Send your receipt to the Bifrost Bot.\n"
         "3. Your features will unlock automatically!\n\n"

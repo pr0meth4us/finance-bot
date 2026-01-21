@@ -1,6 +1,17 @@
 # Changelog
 All notable changes to the `finance-bot` project will be documented in this file. 
 
+## [1.5.0] - 2026-01-22
+
+### Security
+- **Secure Payment Flow**: Updated `/upgrade` command to use the "Intent-Based" payment system.
+  - The bot now calls Bifrost's `POST /secure-intent` to register transactions server-side.
+  - Removed client-side link generation to prevent parameter tampering (price manipulation).
+
+### Added
+- **Pricing Packages**: Added selection menu for **1 Month ($5.00)** and **1 Year ($45.00)** plans.
+- **API Client**: Added `api_client.payment` module to handle secure intent creation.
+
 ## [1.4.0] - 2026-01-22
 
 ### Added

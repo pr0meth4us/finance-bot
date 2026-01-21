@@ -28,7 +28,7 @@ from handlers import (
     iou_manage_menu, iou_cancel_prompt, iou_cancel_confirm,
     iou_edit_conversation_handler,
     get_current_rate,
-    upgrade_start
+    upgrade_start, upgrade_confirm
 )
 from handlers.auth import login_command
 from handlers.analytics import download_report_csv
@@ -189,6 +189,11 @@ def main():
     # CSV Exports
     app.add_handler(CallbackQueryHandler(download_report_csv, pattern="^report_csv:"))
     app.add_handler(CallbackQueryHandler(download_debt_analysis_csv, pattern="^debt_analysis_csv$"))
+    app.add_handler(CommandHandler("upgrade", upgrade_start))
+    app.add_handler(CallbackQueryHandler(upgrade_start, pattern="^upgrade_premium$"))  # Legacy entry point
+
+    # NEW: Handle Package Selection (upgrade:1m, upgrade:1y)
+    app.add_handler(CallbackQueryHandler(upgrade_confirm, pattern="^upgrade:(1m|1y)$"))
 
     logger.info("🚀 Bot is polling...")
 
