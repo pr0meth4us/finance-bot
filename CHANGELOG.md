@@ -1,5 +1,13 @@
 # Changelog
-All notable changes to the `finance-bot` project will be documented in this file.
+
+## [1.5.2] - 2026-01-22
+
+### Added
+- **Subscription Notifications**: The Web Service now listens for `subscription_success` and `subscription_expired` webhook events from Bifrost.
+- **Telegram Push**: Implemented `send_telegram_alert` in the Web Service to push immediate notifications to the Telegram user when their subscription status changes, without waiting for the next bot interaction.
+
+### Changed
+- **Webhook Handler**: Refactored `auth_event_webhook` in `web_service/app/auth/routes.py` to look up the user's Telegram ID via `account_id` and trigger notifications accordingly.
 
 ## [1.5.1] - 2026-01-22
 

@@ -1,5 +1,3 @@
-# web_service/app/auth/routes.py
-
 from flask import Blueprint, request, jsonify, current_app, g
 from app.models import User
 from app.utils.auth import create_jwt, auth_required, decode_jwt, service_auth_required, invalidate_token_cache
@@ -19,7 +17,29 @@ BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")
 BIFROST_CLIENT_SECRET = os.getenv("BIFROST_CLIENT_SECRET")
 
 
-# --- WEB AUTHENTICATION (Case 2) ---
+# --- HELPER: Send Telegram Notification ---
+def send_telegram_alert(telegram_id, message):
+    """
+    Sends a message to a specific Telegram user via the Bot API.
+    Used for async notifications (e.g., subscription updates).
+    """
+    bot_token = current_app.config.get("TELEGRAM_TOKEN")
+    if not bot_token or not telegram_id:
+        return
+
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = {
+            "chat_id": telegram_id,
+            "text": message,
+            "parse_mode": "Markdown"
+        }
+        requests.post(url, json=payload, timeout=5)
+    except Exception as e:
+        current_app.logger.error(f"Failed to send Telegram alert: {e}")
+
+
+# --- WEB AUTHENTICATION ---
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
@@ -72,17 +92,15 @@ def login():
             }
         }), 200
 
-    return jsonify({"error": "Invalid credentials"}), 401
 
-
-# --- TELEGRAM -> WEB LOGIN FLOW (Case 1) ---
+# --- TELEGRAM -> WEB LOGIN FLOW ---
 
 @auth_bp.route('/verify-otp', methods=['POST'])
 def verify_otp_and_login():
     """
     Receives a 6-digit code from the Frontend.
     Calls Bifrost to verify it.
-    If valid, finds/creates the User profile via Telegram ID (returned by Bifrost).
+    If valid, finds/creates the User profile via Telegram ID.
     Returns a JWT for the Web App.
     """
     data = request.get_json()
@@ -141,7 +159,6 @@ def verify_otp_and_login():
 def link_account():
     """
     Proxies the account linking request to Bifrost.
-    Bifrost handles the actual merging/linking of Email or Telegram credentials.
     """
     try:
         account_id = g.account_id
@@ -197,13 +214,7 @@ def link_account():
 @auth_bp.route('/link/initiate-telegram', methods=['POST'])
 @auth_required(min_role="user")
 def initiate_telegram_link():
-    """
-    Called by Web Frontend.
-    1. Asks Bifrost for a 'link_token' for the current user.
-    2. Returns a Telegram Deep Link URL.
-    """
     try:
-        # 1. Get Token from Bifrost
         bifrost_url = current_app.config.get("BIFROST_URL", "").rstrip('/')
         client_id = current_app.config.get("BIFROST_CLIENT_ID")
         client_secret = current_app.config.get("BIFROST_CLIENT_SECRET")
@@ -217,7 +228,6 @@ def initiate_telegram_link():
         resp.raise_for_status()
         token = resp.json().get('token')
 
-        # 2. Construct Deep Link
         bot_username = os.getenv("TELEGRAM_BOT_USERNAME", "savvify_bot")
         deep_link = f"https://t.me/{bot_username}?start=link_{token}"
 
@@ -233,9 +243,6 @@ def initiate_telegram_link():
 
 @auth_bp.route('/link/complete-telegram', methods=['POST'])
 def complete_telegram_link():
-    """
-    Called by Telegram Bot when user sends /start link_<token>.
-    """
     data = request.get_json()
     token = data.get('token')
     telegram_id = data.get('telegram_id')
@@ -243,7 +250,6 @@ def complete_telegram_link():
     if not token or not telegram_id:
         return jsonify({"error": "Missing token or telegram_id"}), 400
 
-    # Call Bifrost to Consume Token
     bifrost_url = current_app.config.get("BIFROST_URL", "").rstrip('/')
     client_id = current_app.config.get("BIFROST_CLIENT_ID")
     client_secret = current_app.config.get("BIFROST_CLIENT_SECRET")
@@ -265,35 +271,27 @@ def complete_telegram_link():
         return jsonify({"error": str(e)}), 500
 
 
-# --- CACHE INVALIDATION WEBHOOK ---
+# --- CACHE INVALIDATION & NOTIFICATION WEBHOOK ---
 
 @auth_bp.route('/internal/webhook/auth-event', methods=['POST'])
 def auth_event_webhook():
     """
     Receives and processes Auth Events from Bifrost (IdP).
-    Secured via HMAC-SHA256 Signature verification.
+    Handles Security (Logout) and Notifications (Subscription Status).
     """
-    # ---------------------------------------------------------
-    # 1. SECURITY: Verify HMAC Signature
-    # ---------------------------------------------------------
+    # 1. Verify HMAC Signature
     signature = request.headers.get('X-Bifrost-Signature')
     client_id = request.headers.get('X-Bifrost-Client-Id')
 
     if not signature:
-        current_app.logger.warning("⚠️ Webhook missing signature header")
         return jsonify({"error": "Missing signature"}), 401
 
-    # Load Shared Secret (Must match Bifrost's DB record for this app)
     webhook_secret = current_app.config.get("BIFROST_WEBHOOK_SECRET")
     if not webhook_secret:
         current_app.logger.critical("❌ Configuration Error: Missing BIFROST_WEBHOOK_SECRET")
         return jsonify({"error": "Server configuration error"}), 500
 
-    # Verify Signature (using raw bytes)
     payload_bytes = request.get_data()
-    if not payload_bytes:
-        return jsonify({"error": "Empty payload"}), 400
-
     try:
         expected_signature = hmac.new(
             key=webhook_secret.encode('utf-8'),
@@ -301,66 +299,77 @@ def auth_event_webhook():
             digestmod=hashlib.sha256
         ).hexdigest()
     except Exception as e:
-        current_app.logger.error(f"HMAC calculation failed: {e}")
         return jsonify({"error": "Internal verification error"}), 500
 
     if not hmac.compare_digest(expected_signature, signature):
-        current_app.logger.warning(f"⛔ Invalid Signature from Claimed Client: {client_id}")
         return jsonify({"error": "Invalid signature"}), 403
 
-    # ---------------------------------------------------------
-    # 2. LOGIC: Process Event Types
-    # ---------------------------------------------------------
+    # 2. Process Event
     try:
         data = request.get_json()
         event_type = data.get('event')
         account_id = data.get('account_id')
-        token = data.get('token')  # Optional: specific token to kill
+        token = data.get('token')
 
         current_app.logger.info(f"🔔 Webhook Received: [{event_type}] for Account {account_id}")
 
-        # --- A. Critical Security Events (Bans, Logouts) ---
-        if event_type == 'invalidation':
-            if token:
-                # SAFE LOGGING: Prevent crash if token is too short or None
-                safe_token = token[:10] + "..." if token and len(token) > 10 else token
+        # --- Fetch User for Notifications ---
+        user = None
+        telegram_id = None
+        try:
+            user = get_db().users.find_one({"_id": ObjectId(account_id)})
+            if user:
+                telegram_id = user.get('telegram_id')
+        except Exception as e:
+            current_app.logger.warning(f"Could not resolve user {account_id} for notification: {e}")
 
+        # --- A. Subscription Events (NEW) ---
+        if event_type == 'subscription_success':
+            current_app.logger.info(f" 🎉 Subscription Success for {account_id}")
+            if telegram_id:
+                send_telegram_alert(
+                    telegram_id,
+                    "🌟 **Upgrade Successful!**\n\nThank you for supporting Savvify. Your Premium features are now active!"
+                )
+            if token: invalidate_token_cache(token)
+
+        elif event_type == 'subscription_expired':
+            current_app.logger.info(f" 📉 Subscription Expired for {account_id}")
+            if telegram_id:
+                send_telegram_alert(
+                    telegram_id,
+                    "⚠️ **Premium Expired**\n\nYour subscription has ended. You have been downgraded to the Free tier."
+                )
+            if token: invalidate_token_cache(token)
+
+        # --- B. Critical Security Events ---
+        elif event_type == 'invalidation':
+            if token:
                 if invalidate_token_cache(token):
-                    current_app.logger.info(f" 🛡️ Token {safe_token} added to blocklist.")
-                else:
-                    current_app.logger.info(" ⚠️ Token not found in cache (might be already expired).")
+                    current_app.logger.info(" 🛡️ Token added to blocklist.")
             else:
-                current_app.logger.warning(" ❓ Invalidation event received without token.")
+                current_app.logger.warning(" ❓ Invalidation event missing token.")
 
-        # --- B. Password Changes (Force Logout) ---
+        # --- C. Password Changes ---
         elif event_type == 'security_password_change':
-            current_app.logger.info(f" 🔐 User {account_id} changed password. Flushing sessions.")
-            # If the user has a specific active token, invalidate it.
-            # Ideally, we would invalidate ALL tokens for this user, but for now
-            # we invalidate the one provided by the webhook if present.
-            # The client (app) should handle the 401 and redirect to login.
-            if token:
-                invalidate_token_cache(token)
+            current_app.logger.info(" 🔐 Password changed. Flushing sessions.")
+            if token: invalidate_token_cache(token)
+            # Optional: Notify user
+            if telegram_id:
+                send_telegram_alert(telegram_id, "🔐 **Security Alert**: Your password was just changed.")
 
-        # --- C. Role Changes (Premium Upgrades) ---
+        # --- D. Role Changes ---
         elif event_type == 'account_role_change':
-            current_app.logger.info(f" 💎 User {account_id} role updated. Refreshing permissions.")
-            # We invalidate the cache so the NEXT request from this user
-            # triggers a fresh validation call to Bifrost.
-            # Bifrost will respond with the NEW role (e.g. "premium_user"),
-            # unlocking features immediately.
-            if token:
-                invalidate_token_cache(token)
-            else:
-                current_app.logger.info(" ℹ️ Role changed offline. User gets new role on next login.")
+            current_app.logger.info(" 💎 Role updated. Refreshing permissions.")
+            if token: invalidate_token_cache(token)
+            # If you are NOT using the specific subscription events above yet,
+            # you can un-comment this to notify on generic role change:
+            # if telegram_id:
+            #    send_telegram_alert(telegram_id, "ℹ️ Your account permissions have been updated.")
 
-        # --- D. Profile Updates (Email/Name) ---
         elif event_type == 'account_update':
-            current_app.logger.info(f" 📝 User {account_id} updated profile. Syncing data...")
-            # Similar to role change, we clear cache to force a re-fetch of
-            # display_name/email from Bifrost on the next request.
-            if token:
-                invalidate_token_cache(token)
+            current_app.logger.info(" 📝 Profile updated.")
+            if token: invalidate_token_cache(token)
 
         else:
             current_app.logger.warning(f" ❓ Unknown event type: {event_type}")
