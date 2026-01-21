@@ -65,20 +65,15 @@ def authenticate_user(func):
                     await _send_auth_error(update, context, msg)
                     return ConversationHandler.END
 
-                # --- NEW: Sync Session with Finance Backend (Flow A) ---
-                log.info(f"User {user_id}: Syncing session with Finance Backend...")
-                sync_res = api_client.sync_session(jwt)
-                if not sync_res:
-                    log.error(f"User {user_id}: Session sync failed.")
-                    # We continue, as get_my_profile might still work if user exists,
-                    # but typically this indicates a provisioning issue.
-
-                context.user_data["jwt"] = jwt
+            # Lazy Provisioning is now handled by the backend upon the first API call.
+            # We skip explicit sync-session here.
+            context.user_data["jwt"] = jwt
 
             # 2. Profile: Get or Refresh
             profile_data = context.user_data.get("profile_data")
             if not profile_data:
                 # Pass JWT explicitly
+                # This call triggers lazy provisioning on the backend if user is missing
                 profile_data = api_client.get_my_profile(jwt)
 
                 # Handle Auth Errors (401 from Web Service)

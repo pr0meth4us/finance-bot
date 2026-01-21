@@ -88,22 +88,6 @@ def login_to_bifrost(user):
         return None
 
 
-def sync_session(jwt_token):
-    """
-    Flow A: Session Sync.
-    Sends the Bifrost JWT to the Finance Service to validate and ensure a local profile exists.
-    """
-    url = f"{BASE_URL}/sync-session"
-    headers = {"Authorization": f"Bearer {jwt_token}"}
-
-    try:
-        res = requests.post(url, headers=headers, timeout=DEFAULT_TIMEOUT)
-        res.raise_for_status()
-        return res.json()
-    except requests.exceptions.RequestException as e:
-        log.error(f"Failed to sync session with Finance Backend: {e}")
-        return None
-
 @ensure_auth
 def link_credentials(email, password, user_id):
     """
@@ -154,8 +138,6 @@ def link_telegram_via_token(telegram_id, token):
     except requests.exceptions.RequestException as e:
         log.error(f"API Error linking telegram via token: {e}")
         return False, "Connection failed."
-
-# ... inside telegram_bot/api_client/auth.py
 
 def sync_subscription_status(telegram_id):
     """

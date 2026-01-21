@@ -1,6 +1,13 @@
-==================== FILE: CHANGELOG.md ====================
 # Changelog
 All notable changes to the `finance-bot` project will be documented in this file.
+
+## [1.3.3] - 2026-01-21
+
+### Changed
+- **Auth Architecture**: Implemented **Push-Based Cache Invalidation**.
+  - The Finance Service now caches token validation results for 24 hours to maximize performance.
+  - Added a new `/internal/webhook/auth-event` endpoint to receive invalidation signals from Bifrost (e.g., on ban or password change).
+- **Provisioning**: Switched to **Lazy Provisioning**. The `/sync-session` endpoint has been removed. User profiles are now automatically created in the Finance DB upon the first valid request.
 
 ## [1.3.2] - 2026-01-20
 

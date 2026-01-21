@@ -9,8 +9,10 @@ from requests.auth import HTTPBasicAuth
 from cachetools import TTLCache
 import jwt
 from datetime import datetime, timedelta
-# Cache validation results for 5 minutes (300 seconds)
-_token_cache = TTLCache(maxsize=1024, ttl=300)
+
+# Cache validation results for 24 hours (86400 seconds) to maximize performance
+# Push-based invalidation (webhook) handles revocations.
+_token_cache = TTLCache(maxsize=4096, ttl=86400)
 
 ROLE_HIERARCHY = {
     "user": 1,
@@ -18,11 +20,22 @@ ROLE_HIERARCHY = {
     "admin": 99
 }
 
-
 def _get_role_level(role_name):
     """Returns the numerical level for a given role name."""
     return ROLE_HIERARCHY.get(role_name, 0)
 
+def invalidate_token_cache(token):
+    """
+    Removes a token from the local cache.
+    Called by the auth-event webhook when Bifrost signals invalidation.
+    """
+    if token in _token_cache:
+        try:
+            del _token_cache[token]
+            return True
+        except KeyError:
+            pass
+    return False
 
 def _validate_token_with_bifrost(token, bifrost_url, client_id, client_secret):
     """
@@ -37,30 +50,22 @@ def _validate_token_with_bifrost(token, bifrost_url, client_id, client_secret):
     try:
         # Identify ourselves to Bifrost
         auth = HTTPBasicAuth(client_id, client_secret)
-        # FIX: Increased timeout to 20s to handle Bifrost cold starts
+        # Increased timeout to 20s to handle Bifrost cold starts
         response = requests.post(validate_url, auth=auth, json=payload, timeout=20)
 
         if response.status_code == 200:
             result = (True, response.json(), 200)
             _token_cache[token] = result
             return result
-
         elif response.status_code == 401:
-            try:
-                err_resp = response.json()
-            except ValueError:
-                err_resp = {"error": response.text}
-
+            err_resp = response.json()
             current_app.logger.warning(f"Bifrost Validation Failed (401): {err_resp}")
-
             if "is_valid" in err_resp:
                 return (True, err_resp, 200)
             else:
                 return (False, {"error": "Service Authentication Failed"}, 500)
-
         elif response.status_code == 403:
             return (False, response.json(), 403)
-
         else:
             current_app.logger.error(f"Bifrost unexpected status {response.status_code}: {response.text}")
             return (False, {"error": "Authentication service unavailable"}, 503)
@@ -69,16 +74,9 @@ def _validate_token_with_bifrost(token, bifrost_url, client_id, client_secret):
         current_app.logger.error(f"Bifrost Connection Error: {e}")
         return (False, {"error": "Authentication service connection error"}, 503)
 
-
 def verify_telegram_login(data, bot_token):
     """
     Verifies the hash received from the Telegram Login Widget.
-    Algorithm:
-    1. Create a data-check-string by combining all received fields
-       (except hash) sorted alphabetically in key=value format.
-    2. Compute SHA256 of the bot token to get the secret key.
-    3. Compute HMAC-SHA256 of the data-check-string using the secret key.
-    4. Compare the result with the received hash.
     """
     if not bot_token:
         return False
@@ -93,7 +91,6 @@ def verify_telegram_login(data, bot_token):
         if key == 'hash':
             continue
         data_check_arr.append(f"{key}={value}")
-
     data_check_string = '\n'.join(data_check_arr)
 
     # 2. Secret Key
@@ -101,9 +98,7 @@ def verify_telegram_login(data, bot_token):
 
     # 3. HMAC-SHA256
     calculated_hash = hmac.new(
-        secret_key,
-        data_check_string.encode('utf-8'),
-        hashlib.sha256
+        secret_key, data_check_string.encode('utf-8'), hashlib.sha256
     ).hexdigest()
 
     # 4. Compare
@@ -117,7 +112,6 @@ def verify_telegram_login(data, bot_token):
         return False
 
     return True
-
 
 def auth_required(min_role="user"):
     def decorator(f):
@@ -138,7 +132,6 @@ def auth_required(min_role="user"):
                 return jsonify({"error": "Invalid Authorization header format"}), 401
 
             config = current_app.config
-
             success, data, status_code = _validate_token_with_bifrost(
                 token,
                 config["BIFROST_URL"],
@@ -159,16 +152,29 @@ def auth_required(min_role="user"):
             if _get_role_level(user_role) < _get_role_level(min_role):
                 return jsonify({"error": "Forbidden: Insufficient role"}), 403
 
-            g.account_id = data.get("account_id")
+            # --- LAZY PROVISIONING ---
+            # Automatically create local profile if it doesn't exist yet
+            account_id = data.get("account_id")
+            if account_id:
+                from app.models import User # Import here to avoid circular dependencies
+                user = User.get_by_account_id(account_id)
+                if not user:
+                    current_app.logger.info(f"Lazy Provisioning: Creating local profile for {account_id}")
+                    User.create(
+                        account_id=account_id,
+                        role=user_role,
+                        email=data.get("email"),
+                        username=data.get("username"),
+                        display_name=data.get("display_name")
+                    )
+
+            g.account_id = account_id
             g.role = user_role
             g.email = data.get("email") # Capture email from Bifrost response
 
             return f(*args, **kwargs)
-
         return decorated_function
-
     return decorator
-
 
 def service_auth_required(f):
     """

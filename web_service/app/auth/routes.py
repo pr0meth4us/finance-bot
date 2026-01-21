@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, current_app, g
 from app.models import User
-from app.utils.auth import create_jwt, auth_required, decode_jwt
+from app.utils.auth import create_jwt, auth_required, decode_jwt, service_auth_required, invalidate_token_cache
 from app import get_db
 from app.utils.db import settings_collection
 import requests
@@ -65,6 +65,8 @@ def login():
                 "onboarding_complete": onboarding
             }
         }), 200
+
+    return jsonify({"error": "Invalid credentials"}), 401
 
 # --- TELEGRAM -> WEB LOGIN (Case 1) ---
 
@@ -149,7 +151,6 @@ def link_account():
 
     bifrost_url = current_app.config.get("BIFROST_URL", "").rstrip('/')
     target_url = f"{bifrost_url}/internal/link-account"
-
     client_id = current_app.config.get("BIFROST_CLIENT_ID")
     client_secret = current_app.config.get("BIFROST_CLIENT_SECRET")
 
@@ -172,7 +173,6 @@ def link_account():
                     )
                 except Exception as e:
                     current_app.logger.warning(f"Failed to update local email cache: {e}")
-
             return jsonify(resp.json()), 200
 
         try:
@@ -183,7 +183,6 @@ def link_account():
     except requests.exceptions.RequestException as e:
         current_app.logger.error(f"Bifrost link-account failed: {e}")
         return jsonify({"error": "Link service unavailable"}), 503
-
 
 @auth_bp.route('/link/initiate-telegram', methods=['POST'])
 @auth_required(min_role="user")
@@ -221,7 +220,6 @@ def initiate_telegram_link():
         current_app.logger.error(f"Failed to init telegram link: {e}")
         return jsonify({"error": "Service unavailable"}), 503
 
-
 @auth_bp.route('/link/complete-telegram', methods=['POST'])
 def complete_telegram_link():
     """
@@ -232,9 +230,9 @@ def complete_telegram_link():
     telegram_id = data.get('telegram_id')
 
     if not token or not telegram_id:
-        return jsonify({"error": "Missing data"}), 400
+        return jsonify({"error": "Missing token or telegram_id"}), 400
 
-    # 1. Call Bifrost to Consume Token
+    # Call Bifrost to Consume Token
     bifrost_url = current_app.config.get("BIFROST_URL", "").rstrip('/')
     client_id = current_app.config.get("BIFROST_CLIENT_ID")
     client_secret = current_app.config.get("BIFROST_CLIENT_SECRET")
@@ -246,70 +244,34 @@ def complete_telegram_link():
             auth=HTTPBasicAuth(client_id, client_secret),
             timeout=5
         )
-
         if resp.status_code == 200:
             return jsonify({"success": True}), 200
         else:
             return jsonify(resp.json()), resp.status_code
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# --- BOT SYNC ---
+# --- CACHE INVALIDATION WEBHOOK ---
 
-@auth_bp.route('/sync-session', methods=['POST'])
-def sync_session():
+@auth_bp.route('/internal/webhook/auth-event', methods=['POST'])
+@service_auth_required
+def auth_event_webhook():
     """
-    Validates a Bifrost Token by calling Bifrost's /auth/me endpoint.
-    If valid, creates/syncs a local User session.
+    Receives signals from Bifrost to invalidate cached tokens.
+    Payload expected: { "event": "invalidation", "token": "<jwt_string>" }
     """
-    auth_header = request.headers.get('Authorization')
-    if not auth_header:
-        return jsonify({"error": "Missing token"}), 401
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data"}), 400
 
-    # We expect format "Bearer <token>"
-    parts = auth_header.split(" ")
-    if len(parts) != 2:
-        return jsonify({"error": "Invalid header format"}), 401
+    event_type = data.get('event')
+    token = data.get('token')
 
-    token = parts[1]
+    if event_type == 'invalidation' and token:
+        if invalidate_token_cache(token):
+            current_app.logger.info(f"Webhook: Invalidated token {token[:10]}...")
+            return jsonify({"message": "Token invalidated"}), 200
+        else:
+            return jsonify({"message": "Token not in cache or already expired"}), 200
 
-    # 1. Introspect Token with Bifrost
-    try:
-        verify_url = f"{BIFROST_URL}/internal/me"
-
-        # We pass the token EXACTLY as we received it (forwarding the Bearer token)
-        resp = requests.get(
-            verify_url,
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=5
-        )
-
-        if resp.status_code != 200:
-            current_app.logger.warning(f"Bifrost rejected token: {resp.text}")
-            return jsonify({"error": "Invalid session token"}), 401
-
-        bifrost_user = resp.json()
-
-    except requests.exceptions.RequestException as e:
-        current_app.logger.error(f"Failed to contact Bifrost for auth: {e}")
-        return jsonify({"error": "Authentication unavailable"}), 503
-
-    # 2. Extract Data
-    tg_id = bifrost_user.get('telegram_id')
-    if not tg_id:
-        return jsonify({"error": "Bifrost user has no Telegram ID linked"}), 400
-
-    # 3. Sync with Local Database
-    user = User.find_by_telegram_id(tg_id)
-    if not user:
-        # Create a local shadow user if they don't exist
-        # Note: We don't have username/firstname here unless we add it to Bifrost's /me response.
-        # For now, we use defaults or partial data.
-        user = User.create_from_telegram(tg_id, "User")
-
-    return jsonify({
-        "status": "synchronized",
-        "user_id": str(user['_id']),
-        "is_premium": User.is_premium(user['_id'])
-    }), 200
+    return jsonify({"message": "Event ignored"}), 200
