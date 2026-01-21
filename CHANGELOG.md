@@ -1,5 +1,11 @@
 # Changelog
-All notable changes to the `finance-bot` project will be documented in this file. 
+All notable changes to the `finance-bot` project will be documented in this file.
+
+## [1.5.1] - 2026-01-22
+
+### Fixed
+- **Config Validation**: Added specific check for `BIFROST_CLIENT_ID` being set to the placeholder value "lookup_skipped", which was causing `App lookup_skipped not found` errors in the auth service.
+- **Webhook Robustness**: Improved error handling in `web_service/app/auth/routes.py` to prevent `ConnectionResetError` (server crash) if malformed data or empty tokens are received in the `auth-event` webhook.
 
 ## [1.5.0] - 2026-01-22
 
@@ -20,21 +26,23 @@ All notable changes to the `finance-bot` project will be documented in this file
 
 ### Changed
 - **Performance**: Removed the redundant `sync_subscription_status` check in the `/menu` handler.
-  - The bot now relies on **Push-Based Cache Invalidation** (introduced in 1.3.3) and lazy provisioning.
-  - The dashboard now loads significantly faster as it no longer waits for an upstream HTTP check on every request.
+- The bot now relies on **Push-Based Cache Invalidation** (introduced in 1.3.3) and lazy provisioning.
+- The dashboard now loads significantly faster as it no longer waits for an upstream HTTP check on every request.
 
 ## [1.3.3] - 2026-01-21
 
 ### Changed
 - **Auth Architecture**: Implemented **Push-Based Cache Invalidation**.
-  - The Finance Service now caches token validation results for 24 hours to maximize performance.
-  - Added a new `/internal/webhook/auth-event` endpoint to receive invalidation signals from Bifrost (e.g., on ban or password change).
-- **Provisioning**: Switched to **Lazy Provisioning**. The `/sync-session` endpoint has been removed. User profiles are now automatically created in the Finance DB upon the first valid request.
+- The Finance Service now caches token validation results for 24 hours to maximize performance.
+- Added a new `/internal/webhook/auth-event` endpoint to receive invalidation signals from Bifrost (e.g., on ban or password change).
+- **Provisioning**: Switched to **Lazy Provisioning**. The `/sync-session` endpoint has been removed.
+User profiles are now automatically created in the Finance DB upon the first valid request.
 
 ## [1.3.2] - 2026-01-20
 
 ### Fixed
-- **Auth Architecture**: Fixed the "Shared Secret" vulnerability. The Finance Service no longer attempts to decode Bifrost tokens locally.
+- **Auth Architecture**: Fixed the "Shared Secret" vulnerability.
+The Finance Service no longer attempts to decode Bifrost tokens locally.
 - **Web Service**: Updated `/sync-session` to validate tokens by calling `Bifrost` directly, removing the need for `JWT_SECRET_KEY` synchronization between services.
 
 ## [1.3.1] - 2026-01-20
