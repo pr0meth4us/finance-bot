@@ -252,7 +252,7 @@ async def received_khr_balance(update: Update, context: ContextTypes.DEFAULT_TYP
         # Proceed to Subscription Step
         await update.message.reply_text(
             t("onboarding.ask_subscription", context),
-            parse_mode='Markdown',
+            parse_mode='HTML',
             reply_markup=keyboards.subscription_tier_keyboard(context)
         )
         return ASK_SUBSCRIPTION
