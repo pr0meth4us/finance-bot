@@ -26,10 +26,10 @@ class User:
         self.account_id = doc.get('account_id')
         self.settings = doc.get('settings', {})
         self._id = doc.get('_id')
-        # Identity fields synced from Bifrost
         self.username = doc.get('username')
         self.email = doc.get('email')
         self.display_name = doc.get('display_name')
+        self.telegram_id = doc.get('telegram_id')
 
     @staticmethod
     def get_by_account_id(account_id):
@@ -45,7 +45,7 @@ class User:
         return None
 
     @staticmethod
-    def create(account_id, role='user', username=None, email=None, display_name=None):
+    def create(account_id, role='user', username=None, email=None, display_name=None, telegram_id=None):
         """
         Creates a new local profile linked to a Bifrost account_id.
         """
@@ -57,6 +57,7 @@ class User:
         new_profile = {
             "account_id": account_id,
             "username": username,
+            "telegram_id": telegram_id,
             "email": email,
             "display_name": display_name,
             "settings": {
