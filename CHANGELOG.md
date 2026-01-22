@@ -1,5 +1,9 @@
 # Changelog
 
+- [Refactor] Removed per-request identity syncing from `auth_required` utility.
+- [Added] Webhook support for `account_update` events to sync `telegram_id`, `email`, and `username` from Bifrost.
+- [Fixed] Logic now stores `telegram_id` only once during user creation (Lazy Provisioning).
+
 ## [1.5.3] - 2026-01-22
 
 ### Refactor

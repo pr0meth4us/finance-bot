@@ -351,6 +351,21 @@ def auth_event_webhook():
                 )
 
             if token: invalidate_token_cache(token)
+        elif event_type == 'account_update':
+            # NEW: Sync updated fields directly from payload
+            updates = {}
+            if data.get('telegram_id'): updates['telegram_id'] = data.get('telegram_id')
+            if data.get('email'): updates['email'] = data.get('email')
+            if data.get('username'): updates['username'] = data.get('username')
+
+            if updates:
+                get_db().settings.update_one(
+                    {"account_id": ObjectId(account_id)},
+                    {"$set": updates}
+                )
+                current_app.logger.info(f" 📝 Profile synced via Webhook: {updates.keys()}")
+
+            if token: invalidate_token_cache(token)
 
         elif event_type == 'subscription_expired':
             # 1. Downgrade DB Role

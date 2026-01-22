@@ -142,22 +142,21 @@ def auth_required(min_role="user"):
             if not success:
                 return jsonify(data), status_code
 
-            # Check Validity
             if not data.get("is_valid"):
-                current_app.logger.warning(f"Token rejected: {data.get('error')}")
                 return jsonify({"error": "Invalid or expired token"}), 401
 
-            # Check Role
             user_role = data.get("app_specific_role", "user")
             if _get_role_level(user_role) < _get_role_level(min_role):
                 return jsonify({"error": "Forbidden: Insufficient role"}), 403
 
-            # --- LAZY PROVISIONING ---
-            # Automatically create local profile if it doesn't exist yet
+            # --- LAZY PROVISIONING (Store ONCE at creation) ---
             account_id = data.get("account_id")
+            bifrost_tg_id = data.get("telegram_id")
+
             if account_id:
-                from app.models import User # Import here to avoid circular dependencies
+                from app.models import User
                 user = User.get_by_account_id(account_id)
+
                 if not user:
                     current_app.logger.info(f"Lazy Provisioning: Creating local profile for {account_id}")
                     User.create(
@@ -165,17 +164,17 @@ def auth_required(min_role="user"):
                         role=user_role,
                         email=data.get("email"),
                         username=data.get("username"),
-                        display_name=data.get("display_name")
+                        display_name=data.get("display_name"),
+                        telegram_id=bifrost_tg_id  # <--- Stored here initially
                     )
 
-            g.account_id = account_id
-            g.role = user_role
-            g.email = data.get("email") # Capture email from Bifrost response
+                g.account_id = account_id
+                g.role = user_role
+                g.email = data.get("email")
 
             return f(*args, **kwargs)
         return decorated_function
     return decorator
-
 def service_auth_required(f):
     """
     SECURITY LOCK: Ensures the request comes from a trusted service (Bifrost)
