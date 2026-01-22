@@ -290,19 +290,58 @@ def auth_event_webhook():
 
     try:
         data = request.get_json()
-        event = data.get('event')
+        event_type = data.get('event')
         account_id = data.get('account_id')
         token = data.get('token')
 
-        current_app.logger.info(f"🔔 Webhook: [{event}] Acc: {account_id}")
+        current_app.logger.info(f"🔔 Webhook: [{event_type}] Acc: {account_id}")
 
-        if event == 'subscription_success':
-            get_db().settings.update_one({"account_id": ObjectId(account_id)}, {"$set": {"role": "premium_user"}})
+        # --- Fetch User for Notifications ---
+        user = User.get_by_account_id(account_id)
+        telegram_id = user.telegram_id if user else None
 
-        elif event == 'subscription_expired':
-            get_db().settings.update_one({"account_id": ObjectId(account_id)}, {"$set": {"role": "user"}})
+        # --- A. Subscription Events ---
+        if event_type == 'subscription_success':
+            # 1. Update DB Role
+            get_db().settings.update_one(
+                {"account_id": ObjectId(account_id)},
+                {"$set": {"role": "premium_user"}}
+            )
+            current_app.logger.info(f" 🎉 Premium Activated for {account_id}")
 
-        elif event == 'account_update':
+            # 2. Notify User
+            if telegram_id:
+                send_telegram_alert(
+                    telegram_id,
+                    "🌟 **Premium Activated!**\n\nThank you for supporting Savvify. Your Premium features are now active!"
+                )
+            else:
+                current_app.logger.warning(f"⚠️ Could not notify user {account_id}: No Telegram ID found.")
+
+            # 3. Invalidate Cache
+            if token: invalidate_token_cache(token)
+
+        elif event_type == 'subscription_expired':
+            # 1. Downgrade DB Role
+            get_db().settings.update_one(
+                {"account_id": ObjectId(account_id)},
+                {"$set": {"role": "user"}}
+            )
+            current_app.logger.info(f" 📉 Premium Expired for {account_id}")
+
+            # 2. Notify User
+            if telegram_id:
+                send_telegram_alert(
+                    telegram_id,
+                    "⚠️ **Premium Expired**\n\nYour subscription has ended. You have been downgraded to the Free tier."
+                )
+
+            # 3. Invalidate Cache
+            if token: invalidate_token_cache(token)
+
+        # --- B. Profile Update Sync ---
+        elif event_type == 'account_update':
+            # NEW: Sync updated fields directly from payload
             updates = {}
             if data.get('telegram_id'): updates['telegram_id'] = data.get('telegram_id')
             if data.get('email'): updates['email'] = data.get('email')
@@ -317,11 +356,13 @@ def auth_event_webhook():
 
             if token: invalidate_token_cache(token)
 
-        elif event in ['invalidation', 'security_password_change']:
+        # --- C. Security Events ---
+        elif event_type in ['invalidation', 'security_password_change']:
             if token: invalidate_token_cache(token)
+            if event_type == 'security_password_change' and telegram_id:
+                send_telegram_alert(telegram_id, "🔐 **Security Alert**: Your password was just changed.")
 
-        return jsonify({"status": "processed"}), 200
-
+        return jsonify({"status": "processed", "event": event_type}), 200
     except Exception as e:
         current_app.logger.error(f"Webhook error: {e}")
         return jsonify({"error": "Failed"}), 500
