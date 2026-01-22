@@ -1,5 +1,15 @@
 # Changelog
+Finance App Changelog
 
+Refactor: Removed per-request identity syncing from the auth_required utility to optimize performance.
+
+
+Added: Implemented webhook support for account_update events in web_service/app/auth/routes.py to sync telegram_id, email, and username from Bifrost .
+
+
+
+
+Fixed: Updated web_service/app/models.py to store telegram_id into the settings collection during initial user creation (Lazy Provisioning)
 - [Refactor] Removed per-request identity syncing from `auth_required` utility.
 - [Added] Webhook support for `account_update` events to sync `telegram_id`, `email`, and `username` from Bifrost.
 - [Fixed] Logic now stores `telegram_id` only once during user creation (Lazy Provisioning).

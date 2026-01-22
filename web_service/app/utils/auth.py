@@ -165,7 +165,7 @@ def auth_required(min_role="user"):
                         email=data.get("email"),
                         username=data.get("username"),
                         display_name=data.get("display_name"),
-                        telegram_id=bifrost_tg_id  # <--- Stored here initially
+                        telegram_id=bifrost_tg_id
                     )
 
                 g.account_id = account_id

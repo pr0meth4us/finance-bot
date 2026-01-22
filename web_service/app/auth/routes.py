@@ -276,83 +276,33 @@ def complete_telegram_link():
 
 @auth_bp.route('/internal/webhook/auth-event', methods=['POST'])
 def auth_event_webhook():
-    """
-    Receives and processes Auth Events from Bifrost (IdP).
-    Handles Security (Logout), Role Updates, and Notifications.
-    """
-    # 1. Verify HMAC Signature
     signature = request.headers.get('X-Bifrost-Signature')
-    if not signature:
-        return jsonify({"error": "Missing signature"}), 401
-
     webhook_secret = current_app.config.get("BIFROST_WEBHOOK_SECRET")
-    if not webhook_secret:
-        current_app.logger.critical("❌ Configuration Error: Missing BIFROST_WEBHOOK_SECRET")
-        return jsonify({"error": "Server configuration error"}), 500
+
+    if not signature or not webhook_secret:
+        return jsonify({"error": "Config error"}), 400
 
     payload_bytes = request.get_data()
-    try:
-        expected_signature = hmac.new(
-            key=webhook_secret.encode('utf-8'),
-            msg=payload_bytes,
-            digestmod=hashlib.sha256
-        ).hexdigest()
-    except Exception as e:
-        return jsonify({"error": "Internal verification error"}), 500
+    expected = hmac.new(webhook_secret.encode('utf-8'), payload_bytes, hashlib.sha256).hexdigest()
 
-    if not hmac.compare_digest(expected_signature, signature):
+    if not hmac.compare_digest(expected, signature):
         return jsonify({"error": "Invalid signature"}), 403
 
-    # 2. Process Event
     try:
         data = request.get_json()
-        event_type = data.get('event')
+        event = data.get('event')
         account_id = data.get('account_id')
         token = data.get('token')
 
-        tx_id = data.get('transaction_id')
-        ref_id = data.get('client_ref_id')
+        current_app.logger.info(f"🔔 Webhook: [{event}] Acc: {account_id}")
 
-        current_app.logger.info(f"🔔 Webhook: [{event_type}] Acc: {account_id} | Tx: {tx_id} | Ref: {ref_id}")
+        if event == 'subscription_success':
+            get_db().settings.update_one({"account_id": ObjectId(account_id)}, {"$set": {"role": "premium_user"}})
 
-        # --- Fetch User for Notifications (Robust Lookup) ---
-        telegram_id = None
-        try:
-            # Try finding via User Auth ID
-            user_auth = get_db().users.find_one({"_id": ObjectId(account_id)})
-            if user_auth and user_auth.get('telegram_id'):
-                telegram_id = user_auth.get('telegram_id')
-            else:
-                # Fallback: Check Settings (legacy or linked data)
-                user_settings = get_db().settings.find_one({"account_id": ObjectId(account_id)})
-                if user_settings:
-                    # Sometimes stored in settings during migration
-                    telegram_id = user_settings.get('telegram_id')
+        elif event == 'subscription_expired':
+            get_db().settings.update_one({"account_id": ObjectId(account_id)}, {"$set": {"role": "user"}})
 
-            if not telegram_id:
-                current_app.logger.warning(f"⚠️ User {account_id} found, but no Telegram ID linked. Cannot notify.")
-        except Exception as e:
-            current_app.logger.warning(f"⚠️ Could not resolve user {account_id} for notification: {e}")
-
-        # --- A. Subscription Events ---
-        if event_type == 'subscription_success':
-            # 1. Update DB Role
-            get_db().settings.update_one(
-                {"account_id": ObjectId(account_id)},
-                {"$set": {"role": "premium_user"}}
-            )
-            current_app.logger.info(f" 🎉 Premium Activated for {account_id}")
-
-            # 2. Notify User
-            if telegram_id:
-                send_telegram_alert(
-                    telegram_id,
-                    "🌟 **Premium Activated!**\n\nThank you for supporting Savvify. Your Premium features are now active!"
-                )
-
-            if token: invalidate_token_cache(token)
-        elif event_type == 'account_update':
-            # NEW: Sync updated fields directly from payload
+        elif event == 'account_update':
             updates = {}
             if data.get('telegram_id'): updates['telegram_id'] = data.get('telegram_id')
             if data.get('email'): updates['email'] = data.get('email')
@@ -363,39 +313,15 @@ def auth_event_webhook():
                     {"account_id": ObjectId(account_id)},
                     {"$set": updates}
                 )
-                current_app.logger.info(f" 📝 Profile synced via Webhook: {updates.keys()}")
+                current_app.logger.info(f" 📝 Profile synced via Webhook: {list(updates.keys())}")
 
             if token: invalidate_token_cache(token)
 
-        elif event_type == 'subscription_expired':
-            # 1. Downgrade DB Role
-            get_db().settings.update_one(
-                {"account_id": ObjectId(account_id)},
-                {"$set": {"role": "user"}}
-            )
-            current_app.logger.info(f" 📉 Premium Expired for {account_id}")
-
-            # 2. Notify User
-            if telegram_id:
-                send_telegram_alert(
-                    telegram_id,
-                    "⚠️ **Premium Expired**\n\nYour subscription has ended. You have been downgraded to the Free tier."
-                )
-
+        elif event in ['invalidation', 'security_password_change']:
             if token: invalidate_token_cache(token)
 
-        # --- Other Events (Security/Profile) ---
-        elif event_type in ['invalidation', 'security_password_change', 'account_role_change', 'account_update']:
-            if token: invalidate_token_cache(token)
-            if event_type == 'security_password_change' and telegram_id:
-                send_telegram_alert(telegram_id, "🔐 **Security Alert**: Your password was just changed.")
-            current_app.logger.info(f" ℹ️ Processed {event_type}")
-
-        else:
-            current_app.logger.warning(f" ❓ Unknown event type: {event_type}")
-
-        return jsonify({"status": "processed", "event": event_type}), 200
+        return jsonify({"status": "processed"}), 200
 
     except Exception as e:
-        current_app.logger.error(f"❌ Webhook Processing Error: {e}")
-        return jsonify({"error": "Processing failed"}), 400
+        current_app.logger.error(f"Webhook error: {e}")
+        return jsonify({"error": "Failed"}), 500
