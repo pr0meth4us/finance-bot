@@ -3,6 +3,13 @@
 - [Refactor] Removed per-request identity syncing from `auth_required` utility.
 - [Added] Webhook support for `account_update` events to sync `telegram_id`, `email`, and `username` from Bifrost.
 - [Fixed] Logic now stores `telegram_id` only once during user creation (Lazy Provisioning).
+  [Audit] Verified consistency between English and Khmer locale files.
+
+[Fixed] Added missing onboarding.ask_subscription, keyboards.plan_free, and keyboards.plan_premium to km.json.
+
+[Fixed] Added missing settings.link_email keys and descriptions to km.json.
+
+[Improved] Converted YYYY-MM-DD and other code-like strings in locales to use HTML <code> tags instead of backticks to ensure safety when using parse_mode='HTML'.
 
 ## [1.5.3] - 2026-01-22
 
