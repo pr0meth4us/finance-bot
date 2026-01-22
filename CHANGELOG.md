@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.5.3] - 2026-01-22
+
+### Refactor
+- **Bifrost Alignment**:
+  - Standardized all premium logic to use `role: "premium_user"` matching Bifrost's `secure-intent` target role.
+  - Updated `auth_event_webhook` to parse `subscription_success` and `subscription_expired` payloads exactly as defined in Bifrost docs.
+  - Implemented `X-Bifrost-Signature` verification using HMAC-SHA256.
+
+### Added
+- **Migration**: Added `migrate_legacy_users.sh` to convert existing `tier: premium` records to `role: premium_user`.
+
 ## [1.5.2] - 2026-01-22
 
 ### Added

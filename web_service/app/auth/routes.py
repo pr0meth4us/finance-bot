@@ -92,6 +92,8 @@ def login():
             }
         }), 200
 
+    return jsonify({"error": "Invalid credentials"}), 401
+
 
 # --- TELEGRAM -> WEB LOGIN FLOW ---
 
@@ -99,8 +101,7 @@ def login():
 def verify_otp_and_login():
     """
     Receives a 6-digit code from the Frontend.
-    Calls Bifrost to verify it.
-    If valid, finds/creates the User profile via Telegram ID.
+    Calls Bifrost to verify it. If valid, finds/creates the User profile via Telegram ID.
     Returns a JWT for the Web App.
     """
     data = request.get_json()
@@ -119,6 +120,7 @@ def verify_otp_and_login():
         )
         res.raise_for_status()
         bifrost_data = res.json()
+
         if not bifrost_data.get('valid'):
             return jsonify({"error": "Invalid or expired code"}), 401
 
@@ -235,7 +237,6 @@ def initiate_telegram_link():
             "link_url": deep_link,
             "token": token
         })
-
     except Exception as e:
         current_app.logger.error(f"Failed to init telegram link: {e}")
         return jsonify({"error": "Service unavailable"}), 503
@@ -266,7 +267,6 @@ def complete_telegram_link():
             return jsonify({"success": True}), 200
         else:
             return jsonify(resp.json()), resp.status_code
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -277,12 +277,10 @@ def complete_telegram_link():
 def auth_event_webhook():
     """
     Receives and processes Auth Events from Bifrost (IdP).
-    Handles Security (Logout) and Notifications (Subscription Status).
+    Handles Security (Logout), Role Updates, and Notifications.
     """
     # 1. Verify HMAC Signature
     signature = request.headers.get('X-Bifrost-Signature')
-    client_id = request.headers.get('X-Bifrost-Client-Id')
-
     if not signature:
         return jsonify({"error": "Missing signature"}), 401
 
@@ -311,35 +309,61 @@ def auth_event_webhook():
         account_id = data.get('account_id')
         token = data.get('token')
 
-        current_app.logger.info(f"🔔 Webhook Received: [{event_type}] for Account {account_id}")
+        # Logging Context (Refactor)
+        tx_id = data.get('transaction_id')
+        ref_id = data.get('client_ref_id')
+
+        current_app.logger.info(f"🔔 Webhook: [{event_type}] Acc: {account_id} | Tx: {tx_id} | Ref: {ref_id}")
 
         # --- Fetch User for Notifications ---
         user = None
         telegram_id = None
         try:
-            user = get_db().users.find_one({"_id": ObjectId(account_id)})
+            user = get_db().settings.find_one({"account_id": ObjectId(account_id)})
             if user:
-                telegram_id = user.get('telegram_id')
+                # Assuming telegram_id is stored in user collection, fetch it if needed
+                # For this setup, we usually check the users collection for the telegram mapping
+                user_auth = get_db().users.find_one({"_id": ObjectId(account_id)})
+                if user_auth:
+                    telegram_id = user_auth.get('telegram_id')
         except Exception as e:
             current_app.logger.warning(f"Could not resolve user {account_id} for notification: {e}")
 
-        # --- A. Subscription Events (NEW) ---
+        # --- A. Subscription Events (Refactored) ---
         if event_type == 'subscription_success':
-            current_app.logger.info(f" 🎉 Subscription Success for {account_id}")
+            # 1. Update DB Role
+            get_db().settings.update_one(
+                {"account_id": ObjectId(account_id)},
+                {"$set": {"role": "premium_user"}}
+            )
+            current_app.logger.info(f" 🎉 Premium Activated for {account_id}")
+
+            # 2. Notify User
             if telegram_id:
                 send_telegram_alert(
                     telegram_id,
-                    "🌟 **Upgrade Successful!**\n\nThank you for supporting Savvify. Your Premium features are now active!"
+                    "🌟 **Premium Activated!**\n\nThank you for supporting Savvify. Your Premium features are now active!"
                 )
+
+            # 3. Invalidate Cache
             if token: invalidate_token_cache(token)
 
         elif event_type == 'subscription_expired':
-            current_app.logger.info(f" 📉 Subscription Expired for {account_id}")
+            # 1. Downgrade DB Role
+            get_db().settings.update_one(
+                {"account_id": ObjectId(account_id)},
+                {"$set": {"role": "user"}}
+            )
+            current_app.logger.info(f" 📉 Premium Expired for {account_id}")
+
+            # 2. Notify User
             if telegram_id:
                 send_telegram_alert(
                     telegram_id,
                     "⚠️ **Premium Expired**\n\nYour subscription has ended. You have been downgraded to the Free tier."
                 )
+
+            # 3. Invalidate Cache
             if token: invalidate_token_cache(token)
 
         # --- B. Critical Security Events ---
@@ -354,18 +378,13 @@ def auth_event_webhook():
         elif event_type == 'security_password_change':
             current_app.logger.info(" 🔐 Password changed. Flushing sessions.")
             if token: invalidate_token_cache(token)
-            # Optional: Notify user
             if telegram_id:
                 send_telegram_alert(telegram_id, "🔐 **Security Alert**: Your password was just changed.")
 
-        # --- D. Role Changes ---
+        # --- D. Role Changes (Generic) ---
         elif event_type == 'account_role_change':
             current_app.logger.info(" 💎 Role updated. Refreshing permissions.")
             if token: invalidate_token_cache(token)
-            # If you are NOT using the specific subscription events above yet,
-            # you can un-comment this to notify on generic role change:
-            # if telegram_id:
-            #    send_telegram_alert(telegram_id, "ℹ️ Your account permissions have been updated.")
 
         elif event_type == 'account_update':
             current_app.logger.info(" 📝 Profile updated.")
