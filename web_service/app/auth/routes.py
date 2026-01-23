@@ -17,7 +17,6 @@ BIFROST_URL = os.getenv("BIFROST_URL", "http://bifrost:5000")
 BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")
 BIFROST_CLIENT_SECRET = os.getenv("BIFROST_CLIENT_SECRET")
 
-
 # --- HELPER: Send Telegram Notification ---
 def send_telegram_alert(telegram_id, message):
     """
@@ -109,8 +108,7 @@ def login():
 @auth_bp.route('/verify-otp', methods=['POST'])
 def verify_otp_and_login():
     """
-    Receives a 6-digit code from the Frontend.
-    Calls Bifrost to verify it.
+    Receives a 6-digit code from the Frontend. Calls Bifrost to verify it.
     If valid, finds/creates the User profile via Telegram ID.
     """
     data = request.get_json()
@@ -129,6 +127,7 @@ def verify_otp_and_login():
         )
         res.raise_for_status()
         bifrost_data = res.json()
+
         if not bifrost_data.get('valid'):
             return jsonify({"error": "Invalid or expired code"}), 401
 
@@ -202,7 +201,6 @@ def link_account():
                     )
                 except Exception as e:
                     current_app.logger.warning(f"Failed to update local email cache: {e}")
-
             return jsonify(resp.json()), 200
 
         try:
@@ -230,8 +228,8 @@ def initiate_telegram_link():
             timeout=5
         )
         resp.raise_for_status()
-        token = resp.json().get('token')
 
+        token = resp.json().get('token')
         bot_username = os.getenv("TELEGRAM_BOT_USERNAME", "savvify_bot")
         deep_link = f"https://t.me/{bot_username}?start=link_{token}"
 
@@ -239,8 +237,46 @@ def initiate_telegram_link():
             "link_url": deep_link,
             "token": token
         })
+
     except Exception as e:
         current_app.logger.error(f"Failed to init telegram link: {e}")
+        return jsonify({"error": "Service unavailable"}), 503
+
+
+@auth_bp.route('/link-command', methods=['POST'])
+@auth_required(min_role="user")
+def generate_link_command():
+    """
+    Generates a secure '/link <token>' command string for manual entry in Telegram.
+    Reuses Bifrost's link-token generation logic.
+    """
+    try:
+        bifrost_url = current_app.config.get("BIFROST_URL", "").rstrip('/')
+        client_id = current_app.config.get("BIFROST_CLIENT_ID")
+        client_secret = current_app.config.get("BIFROST_CLIENT_SECRET")
+
+        # Reuse the generate-link-token endpoint from Bifrost
+        resp = requests.post(
+            f"{bifrost_url}/internal/generate-link-token",
+            json={"account_id": g.account_id},
+            auth=HTTPBasicAuth(client_id, client_secret),
+            timeout=5
+        )
+        resp.raise_for_status()
+
+        token = resp.json().get('token')
+        if not token:
+            return jsonify({"error": "Failed to generate token"}), 500
+
+        # Return the manual command string
+        return jsonify({
+            "command": f"/link {token}",
+            "token": token,
+            "expires_in": "10 minutes"
+        })
+
+    except Exception as e:
+        current_app.logger.error(f"Failed to generate link command: {e}")
         return jsonify({"error": "Service unavailable"}), 503
 
 
@@ -307,9 +343,9 @@ def auth_event_webhook():
             # Extract Bifrost 2.3.3 Data
             extra = data.get('extra_data', {})
             expires_at = extra.get('expires_at')
-            duration = extra.get('duration') # e.g. '1m', '1y'
+            duration = extra.get('duration')
 
-            # 1. Update DB Role & Expiry
+            # 1. Update DB
             update_data = {"role": "premium_user"}
             if expires_at:
                 update_data["expires_at"] = expires_at
@@ -341,7 +377,6 @@ def auth_event_webhook():
                         pass # Fallback if format differs
 
                 msg += "\n\nYour Premium features are now active!"
-
                 send_telegram_alert(telegram_id, msg)
             else:
                 current_app.logger.warning(f"⚠️ Could not notify user {account_id}: No Telegram ID found.")
@@ -373,12 +408,9 @@ def auth_event_webhook():
         elif event_type == 'account_update':
             # NEW: Sync updated fields directly from payload
             updates = {}
-            if data.get('telegram_id'):
-                updates['telegram_id'] = data.get('telegram_id')
-            if data.get('email'):
-                updates['email'] = data.get('email')
-            if data.get('username'):
-                updates['username'] = data.get('username')
+            if data.get('telegram_id'): updates['telegram_id'] = data.get('telegram_id')
+            if data.get('email'): updates['email'] = data.get('email')
+            if data.get('username'): updates['username'] = data.get('username')
 
             if updates:
                 get_db().settings.update_one(

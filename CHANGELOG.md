@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.6.1] - 2026-01-23
+
+### Added
+- **Auth**: Added `/auth/link-command` endpoint to securely generate Telegram linking strings server-side.
+
 ## [1.6.0] - 2026-01-23
 
 ### Added
@@ -49,8 +54,8 @@
 
 ### Security
 - **Secure Payment Flow**: Updated `/upgrade` command to use the "Intent-Based" payment system.
-  - The bot now calls Bifrost's `POST /secure-intent` to register transactions server-side.
-  - Removed client-side link generation to prevent parameter tampering (price manipulation).
+- The bot now calls Bifrost's `POST /secure-intent` to register transactions server-side.
+- Removed client-side link generation to prevent parameter tampering (price manipulation).
 
 ### Added
 - **Pricing Packages**: Added selection menu for **1 Month ($5.00)** and **1 Year ($45.00)** plans.
@@ -59,7 +64,8 @@
 ## [1.4.0] - 2026-01-22
 
 ### Added
-- **Manual Account Linking**: Added `/link <token>` command. This serves as a reliable alternative to deep links for users on devices where standard URL redirection fails.
+- **Manual Account Linking**: Added `/link <token>` command.
+  This serves as a reliable alternative to deep links for users on devices where standard URL redirection fails.
 - **Bifrost Compatibility**: Updated `/upgrade` payload format to support Bifrost 1.4.0 features (Duration and Explicit Roles).
 
 ### Changed
