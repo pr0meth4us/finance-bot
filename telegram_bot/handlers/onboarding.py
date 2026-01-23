@@ -127,7 +127,8 @@ async def received_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['onboarding_data']['language'] = choice
     context.user_data['profile']['settings']['language'] = choice
 
-    await update.message.reply_text(t("onboarding.ask_mode", context))
+    # FIX: parse_mode='HTML' added to render <code> tags correctly
+    await update.message.reply_text(t("onboarding.ask_mode", context), parse_mode='HTML')
     return ASK_CURRENCY_MODE
 
 
@@ -148,7 +149,8 @@ async def received_currency_mode(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text(t("onboarding.invalid_mode", context))
         return ASK_CURRENCY_MODE
 
-    await update.message.reply_text(t(prompt_key, context))
+    # FIX: parse_mode='HTML' added
+    await update.message.reply_text(t(prompt_key, context), parse_mode='HTML')
     return next_state
 
 
@@ -157,12 +159,14 @@ async def received_name_en(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data['name_en'] = update.message.text.strip()
 
     if data['mode'] == 'single':
-        await update.message.reply_text(t("onboarding.ask_primary_currency", context))
+        await update.message.reply_text(t("onboarding.ask_primary_currency", context), parse_mode='HTML')
         return ASK_SINGLE_CURRENCY
     else:
         if 'name_km' not in data:
-            await update.message.reply_text(t("onboarding.ask_name_km", context))
-            return ASK_NAME_KM
+            # FIX: Use existing name_en as default for name_km to streamline flow
+            data['name_km'] = data['name_en']
+            return await _save_mode_and_names(update, context)
+
         return await _save_mode_and_names(update, context)
 
 
@@ -171,12 +175,14 @@ async def received_name_km(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data['name_km'] = update.message.text.strip()
 
     if data['mode'] == 'single':
-        await update.message.reply_text(t("onboarding.ask_primary_currency", context))
+        await update.message.reply_text(t("onboarding.ask_primary_currency", context), parse_mode='HTML')
         return ASK_SINGLE_CURRENCY
     else:
         if 'name_en' not in data:
-            await update.message.reply_text(t("onboarding.ask_name_en", context))
-            return ASK_NAME_EN
+            # FIX: Use existing name_km as default for name_en to streamline flow
+            data['name_en'] = data['name_km']
+            return await _save_mode_and_names(update, context)
+
         return await _save_mode_and_names(update, context)
 
 
@@ -198,7 +204,8 @@ async def _save_mode_and_names(update: Update, context: ContextTypes.DEFAULT_TYP
     profile['settings']['currency_mode'] = data['mode']
 
     display_name = data.get('name_km') if data['language'] == 'km' else data.get('name_en')
-    await update.message.reply_text(t("onboarding.ask_usd_balance", context, name=display_name))
+    # FIX: parse_mode='HTML'
+    await update.message.reply_text(t("onboarding.ask_usd_balance", context, name=display_name), parse_mode='HTML')
     return ASK_USD_BALANCE
 
 
@@ -224,7 +231,8 @@ async def received_single_currency(update: Update, context: ContextTypes.DEFAULT
     profile['settings']['primary_currency'] = currency
 
     display_name = data.get('name_en') or data.get('name_km')
-    await update.message.reply_text(t("onboarding.ask_single_balance", context, name=display_name, currency=currency))
+    # FIX: parse_mode='HTML'
+    await update.message.reply_text(t("onboarding.ask_single_balance", context, name=display_name, currency=currency), parse_mode='HTML')
     return ASK_SINGLE_BALANCE
 
 
@@ -234,7 +242,8 @@ async def received_usd_balance(update: Update, context: ContextTypes.DEFAULT_TYP
         api_client.update_initial_balance(context.user_data['jwt'], 'USD', amount)
         context.user_data['profile']['settings']['initial_balances']['USD'] = amount
 
-        await update.message.reply_text(t("onboarding.ask_khr_balance", context))
+        # FIX: parse_mode='HTML'
+        await update.message.reply_text(t("onboarding.ask_khr_balance", context), parse_mode='HTML')
         return ASK_KHR_BALANCE
     except ValueError:
         await update.message.reply_text(t("onboarding.invalid_amount", context))
@@ -271,9 +280,10 @@ async def received_single_balance(update: Update, context: ContextTypes.DEFAULT_
         context.user_data['profile']['settings']['initial_balances'][currency] = amount
 
         # Proceed to Subscription Step
+        # FIX: Changed 'Markdown' to 'HTML' to support <code> tags in translation
         await update.message.reply_text(
             t("onboarding.ask_subscription", context),
-            parse_mode='Markdown',
+            parse_mode='HTML',
             reply_markup=keyboards.subscription_tier_keyboard(context)
         )
         return ASK_SUBSCRIPTION
@@ -286,15 +296,14 @@ async def received_subscription_choice(update: Update, context: ContextTypes.DEF
     query = update.callback_query
     await query.answer()
     choice = query.data
-
-    # This is a mock step for now since actual payment logic isn't provided.
-    # If they choose premium, we just tell them to contact admin, then finish.
     jwt = context.user_data['jwt']
 
+    # FIX: Handle Premium selection gracefully instead of showing an error.
     if choice == 'plan_premium':
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=t("common.premium_required", context) + "\n\nFor now, you are on the Free plan."
+            text="💎 <b>Premium Selected!</b>\n\nPlease use /upgrade after setup to activate your subscription.\n\nYour account is ready!",
+            parse_mode='HTML'
         )
     else:
         await context.bot.send_message(
@@ -340,7 +349,7 @@ onboarding_conversation_handler = ConversationHandler(
         ASK_USD_BALANCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_usd_balance)],
         ASK_KHR_BALANCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_khr_balance)],
         ASK_SINGLE_BALANCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_single_balance)],
-        # NEW: Subscription Step
+        # Subscription Step
         ASK_SUBSCRIPTION: [CallbackQueryHandler(received_subscription_choice, pattern='^plan_')]
     },
     fallbacks=[CommandHandler('cancel', cancel_onboarding)],

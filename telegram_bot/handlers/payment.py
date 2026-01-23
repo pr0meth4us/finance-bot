@@ -8,6 +8,16 @@ from decorators import authenticate_user
 @authenticate_user
 async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows the package selection menu."""
+
+    # FIX: Force a fresh profile fetch to ensure 'role' is up-to-date.
+    # The cached role in context.user_data might be stale (e.g. 'user') even if they just upgraded via Bifrost.
+    jwt = context.user_data.get('jwt')
+    if jwt:
+        profile_data = api_client.get_my_profile(jwt)
+        if profile_data and "role" in profile_data:
+            context.user_data["role"] = profile_data["role"]
+            context.user_data["profile"]["role"] = profile_data["role"]
+
     # 1. Check if already premium
     role = context.user_data.get('role', 'user')
 
