@@ -16,6 +16,7 @@ auth_bp = Blueprint('auth', __name__)
 BIFROST_URL = os.getenv("BIFROST_URL", "http://bifrost:5000")
 BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")
 BIFROST_CLIENT_SECRET = os.getenv("BIFROST_CLIENT_SECRET")
+BIFROST_TIMEOUT = 60
 
 # --- HELPER: Send Telegram Notification ---
 def send_telegram_alert(telegram_id, message):
@@ -108,7 +109,8 @@ def login():
 @auth_bp.route('/verify-otp', methods=['POST'])
 def verify_otp_and_login():
     """
-    Receives a 6-digit code from the Frontend. Calls Bifrost to verify it.
+    Receives a 6-digit code from the Frontend.
+    Calls Bifrost to verify it.
     If valid, finds/creates the User profile via Telegram ID.
     """
     data = request.get_json()
@@ -123,7 +125,7 @@ def verify_otp_and_login():
             f"{BIFROST_URL}/internal/verify-otp",
             json={"code": code},
             auth=(BIFROST_CLIENT_ID, BIFROST_CLIENT_SECRET),
-            timeout=5
+            timeout=BIFROST_TIMEOUT
         )
         res.raise_for_status()
         bifrost_data = res.json()
@@ -189,7 +191,7 @@ def link_account():
             target_url,
             json=payload,
             auth=HTTPBasicAuth(client_id, client_secret),
-            timeout=10
+            timeout=BIFROST_TIMEOUT
         )
 
         if resp.status_code == 200:
@@ -225,7 +227,7 @@ def initiate_telegram_link():
             f"{bifrost_url}/internal/generate-link-token",
             json={"account_id": g.account_id},
             auth=HTTPBasicAuth(client_id, client_secret),
-            timeout=5
+            timeout=BIFROST_TIMEOUT
         )
         resp.raise_for_status()
 
@@ -260,7 +262,7 @@ def generate_link_command():
             f"{bifrost_url}/internal/generate-link-token",
             json={"account_id": g.account_id},
             auth=HTTPBasicAuth(client_id, client_secret),
-            timeout=60
+            timeout=BIFROST_TIMEOUT
         )
         resp.raise_for_status()
 
@@ -298,7 +300,7 @@ def complete_telegram_link():
             f"{bifrost_url}/internal/link-account",
             json={"link_token": token, "telegram_id": telegram_id},
             auth=HTTPBasicAuth(client_id, client_secret),
-            timeout=5
+            timeout=BIFROST_TIMEOUT
         )
 
         if resp.status_code == 200:
@@ -359,7 +361,6 @@ def auth_event_webhook():
             # 2. Notify User with details
             if telegram_id:
                 msg = "🌟 **Premium Activated!**\n\nThank you for supporting Savvify."
-
                 # Format Duration
                 if duration:
                     d_map = {"1m": "1 Month", "1y": "1 Year"}

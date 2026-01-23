@@ -1,3 +1,5 @@
+# telegram_bot/api_client/core.py
+
 import os
 import requests
 import logging
@@ -14,6 +16,8 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 # Increased timeout to handle PaaS "cold starts" (sleeping instances)
 DEFAULT_TIMEOUT = 60
+# Dedicated timeout for Bifrost calls to ensure consistency
+BIFROST_TIMEOUT = 60
 
 # In-memory token storage: { user_id: "jwt_token" }
 _USER_TOKENS = {}

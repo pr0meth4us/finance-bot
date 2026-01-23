@@ -1,3 +1,5 @@
+# telegram_bot/api_client/auth.py
+
 import requests
 import time
 import logging
@@ -5,7 +7,7 @@ from requests.auth import HTTPBasicAuth
 from utils.bifrost import prepare_bifrost_payload
 from .core import (
     BIFROST_URL, BIFROST_CLIENT_ID, BIFROST_CLIENT_SECRET,
-    TELEGRAM_TOKEN, DEFAULT_TIMEOUT, BASE_URL,
+    TELEGRAM_TOKEN, DEFAULT_TIMEOUT, BIFROST_TIMEOUT, BASE_URL,
     _USER_TOKENS, _get_headers, ensure_auth
 )
 
@@ -31,7 +33,7 @@ def get_login_code(telegram_id):
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            res = requests.post(url, json=payload, auth=auth, timeout=DEFAULT_TIMEOUT)
+            res = requests.post(url, json=payload, auth=auth, timeout=BIFROST_TIMEOUT)
             res.raise_for_status()
             return res.json().get('code')
         except requests.exceptions.ReadTimeout:
@@ -67,7 +69,7 @@ def login_to_bifrost(user):
     }
 
     try:
-        res = requests.post(url, json=payload, timeout=DEFAULT_TIMEOUT)
+        res = requests.post(url, json=payload, timeout=BIFROST_TIMEOUT)
         res.raise_for_status()
         data = res.json()
 
@@ -155,7 +157,7 @@ def sync_subscription_status(telegram_id):
     auth = HTTPBasicAuth(BIFROST_CLIENT_ID, BIFROST_CLIENT_SECRET)
 
     try:
-        res = requests.post(url, json=payload, auth=auth, timeout=DEFAULT_TIMEOUT)
+        res = requests.post(url, json=payload, auth=auth, timeout=BIFROST_TIMEOUT)
 
         if res.status_code == 200:
             return res.json().get('role', 'user')

@@ -5,6 +5,7 @@ from app.utils.auth import auth_required
 
 payments_bp = Blueprint('payments', __name__, url_prefix='/payments')
 
+BIFROST_TIMEOUT = 60
 
 @payments_bp.route('/checkout', methods=['POST', 'OPTIONS'])
 @auth_required(min_role="user")
@@ -48,7 +49,7 @@ def create_checkout_session():
 
     try:
         auth = HTTPBasicAuth(config["BIFROST_CLIENT_ID"], config["BIFROST_CLIENT_SECRET"])
-        response = requests.post(target_url, json=bifrost_payload, auth=auth, timeout=30)
+        response = requests.post(target_url, json=bifrost_payload, auth=auth, timeout=BIFROST_TIMEOUT)
 
         if response.status_code != 200:
             current_app.logger.error(f"Bifrost Payment Error: {response.text}")

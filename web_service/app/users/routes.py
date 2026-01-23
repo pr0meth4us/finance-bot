@@ -13,6 +13,7 @@ from app.models import User
 
 users_bp = Blueprint('users', __name__, url_prefix='/users')
 UTC_TZ = ZoneInfo("UTC")
+BIFROST_TIMEOUT = 60
 
 
 @users_bp.route('/me', methods=['GET'])
@@ -149,7 +150,7 @@ def update_me():
 
         try:
             auth = HTTPBasicAuth(config["BIFROST_CLIENT_ID"], config["BIFROST_CLIENT_SECRET"])
-            resp = requests.post(url, json=bifrost_updates, auth=auth, timeout=10)
+            resp = requests.post(url, json=bifrost_updates, auth=auth, timeout=BIFROST_TIMEOUT)
 
             if resp.status_code != 200:
                 # Bifrost rejected the update (e.g., username taken)
@@ -205,7 +206,7 @@ def set_credentials():
 
     try:
         auth = HTTPBasicAuth(config["BIFROST_CLIENT_ID"], config["BIFROST_CLIENT_SECRET"])
-        response = requests.post(url, json=payload, auth=auth, timeout=10)
+        response = requests.post(url, json=payload, auth=auth, timeout=BIFROST_TIMEOUT)
 
         if response.status_code == 200:
             return jsonify({"message": "Credentials updated successfully"})
@@ -285,7 +286,7 @@ def delete_account():
         url = f"{bifrost_url}/internal/users/{account_id_str}"
 
         auth = HTTPBasicAuth(config["BIFROST_CLIENT_ID"], config["BIFROST_CLIENT_SECRET"])
-        requests.delete(url, auth=auth, timeout=5)
+        requests.delete(url, auth=auth, timeout=BIFROST_TIMEOUT)
 
         return jsonify({"message": "Account permanently deleted."})
 
@@ -350,7 +351,7 @@ def admin_delete_user(target_id):
         bifrost_url = config.get("BIFROST_URL", "").rstrip('/')
         url = f"{bifrost_url}/internal/users/{target_id}"
         auth = HTTPBasicAuth(config["BIFROST_CLIENT_ID"], config["BIFROST_CLIENT_SECRET"])
-        requests.delete(url, auth=auth, timeout=5)
+        requests.delete(url, auth=auth, timeout=BIFROST_TIMEOUT)
 
         return jsonify({"message": f"User {target_id} deleted."})
     except Exception as e:

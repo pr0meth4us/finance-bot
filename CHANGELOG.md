@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.2] - 2026-01-23
+
+### Added
+- **API Client**: Introduced explicit `BIFROST_TIMEOUT` (60s) in `telegram_bot/api_client/core.py`.
+
+### Changed
+- **Reliability**: Standardized all Bifrost API calls (`get_login_code`, `login_to_bifrost`, `sync_subscription_status`, `create_payment_intent`) to use the dedicated 60-second timeout, separating them from the default Web Service timeout.
+
 ## [0.6.1] - 2026-01-23
 
 ### Added

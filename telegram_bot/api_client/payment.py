@@ -1,9 +1,11 @@
+# telegram_bot/api_client/payment.py
+
 import requests
 import logging
 from requests.auth import HTTPBasicAuth
 from .core import (
     BIFROST_URL, BIFROST_CLIENT_ID, BIFROST_CLIENT_SECRET,
-    DEFAULT_TIMEOUT
+    BIFROST_TIMEOUT
 )
 
 log = logging.getLogger(__name__)
@@ -35,7 +37,7 @@ def create_payment_intent(user_id, amount, duration, target_role, client_ref_id)
     auth = HTTPBasicAuth(BIFROST_CLIENT_ID, BIFROST_CLIENT_SECRET)
 
     try:
-        res = requests.post(url, json=payload, auth=auth, timeout=DEFAULT_TIMEOUT)
+        res = requests.post(url, json=payload, auth=auth, timeout=BIFROST_TIMEOUT)
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
