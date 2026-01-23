@@ -7,7 +7,9 @@ Refactor: Removed per-request identity syncing from the auth_required utility to
 Added: Implemented webhook support for account_update events in web_service/app/auth/routes.py to sync telegram_id, email, and username from Bifrost .
 
 
-
+- [Added] `web_service` now processes `duration` and `expires_at` from Bifrost's `subscription_success` webhook (v2.3.3).
+- [Changed] "Premium Activated" Telegram notification now displays the Plan Duration and Expiration Date.
+- [Database] The `expires_at` timestamp is now stored in the user's `settings` collection for subscription tracking.
 
 Fixed: Updated web_service/app/models.py to store telegram_id into the settings collection during initial user creation (Lazy Provisioning)
 - [Refactor] Removed per-request identity syncing from `auth_required` utility.
