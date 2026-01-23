@@ -1,11 +1,11 @@
 # Changelog
 
-## [1.6.1] - 2026-01-23
+## [0.6.1] - 2026-01-23
 
 ### Added
 - **Auth**: Added `/auth/link-command` endpoint to securely generate Telegram linking strings server-side.
 
-## [1.6.0] - 2026-01-23
+## [0.6.0] - 2026-01-23
 
 ### Added
 - **Bifrost 2.3.3 Support**:
@@ -24,9 +24,9 @@
   - Added missing Khmer (km) keys for `onboarding.ask_subscription`, `keyboards.plan_free`, and `keyboards.plan_premium`.
   - Added missing Khmer keys for `settings.link_email`.
 
-## [1.5.3] - 2026-01-22
+## [0.5.3] - 2026-01-22
 
-### Refactor
+### Changed
 - **Bifrost Alignment**:
   - Standardized all premium logic to use `role: "premium_user"` matching Bifrost's `secure-intent` target role.
   - Updated `auth_event_webhook` to parse `subscription_success` and `subscription_expired` payloads exactly as defined in Bifrost docs.
@@ -35,7 +35,7 @@
 ### Added
 - **Migration**: Added `migrate_legacy_users.sh` to convert existing `tier: premium` records to `role: premium_user`.
 
-## [1.5.2] - 2026-01-22
+## [0.5.2] - 2026-01-22
 
 ### Added
 - **Subscription Notifications**: The Web Service now listens for `subscription_success` and `subscription_expired` webhook events from Bifrost.
@@ -44,24 +44,24 @@
 ### Changed
 - **Webhook Handler**: Refactored `auth_event_webhook` in `web_service/app/auth/routes.py` to look up the user's Telegram ID via `account_id` and trigger notifications accordingly.
 
-## [1.5.1] - 2026-01-22
+## [0.5.1] - 2026-01-22
 
 ### Fixed
 - **Config Validation**: Added specific check for `BIFROST_CLIENT_ID` being set to the placeholder value "lookup_skipped", which was causing `App lookup_skipped not found` errors in the auth service.
 - **Webhook Robustness**: Improved error handling in `web_service/app/auth/routes.py` to prevent `ConnectionResetError` (server crash) if malformed data or empty tokens are received in the `auth-event` webhook.
 
-## [1.5.0] - 2026-01-22
-
-### Security
-- **Secure Payment Flow**: Updated `/upgrade` command to use the "Intent-Based" payment system.
-- The bot now calls Bifrost's `POST /secure-intent` to register transactions server-side.
-- Removed client-side link generation to prevent parameter tampering (price manipulation).
+## [0.5.0] - 2026-01-22
 
 ### Added
+- **Secure Payment Flow**: Updated `/upgrade` command to use the "Intent-Based" payment system.
+- The bot now calls Bifrost's `POST /secure-intent` to register transactions server-side.
 - **Pricing Packages**: Added selection menu for **1 Month ($5.00)** and **1 Year ($45.00)** plans.
 - **API Client**: Added `api_client.payment` module to handle secure intent creation.
 
-## [1.4.0] - 2026-01-22
+### Security
+- Removed client-side link generation to prevent parameter tampering (price manipulation).
+
+## [0.4.0] - 2026-01-22
 
 ### Added
 - **Manual Account Linking**: Added `/link <token>` command.
@@ -70,10 +70,10 @@
 
 ### Changed
 - **Performance**: Removed the redundant `sync_subscription_status` check in the `/menu` handler.
-- The bot now relies on **Push-Based Cache Invalidation** (introduced in 1.3.3) and lazy provisioning.
+- The bot now relies on **Push-Based Cache Invalidation** (introduced in 0.3.3) and lazy provisioning.
 - The dashboard now loads significantly faster as it no longer waits for an upstream HTTP check on every request.
 
-## [1.3.3] - 2026-01-21
+## [0.3.3] - 2026-01-21
 
 ### Changed
 - **Auth Architecture**: Implemented **Push-Based Cache Invalidation**.
@@ -82,19 +82,19 @@
 - **Provisioning**: Switched to **Lazy Provisioning**. The `/sync-session` endpoint has been removed.
   User profiles are now automatically created in the Finance DB upon the first valid request.
 
-## [1.3.2] - 2026-01-20
+## [0.3.2] - 2026-01-20
 
 ### Fixed
 - **Auth Architecture**: Fixed the "Shared Secret" vulnerability.
   The Finance Service no longer attempts to decode Bifrost tokens locally.
 - **Web Service**: Updated `/sync-session` to validate tokens by calling `Bifrost` directly, removing the need for `JWT_SECRET_KEY` synchronization between services.
 
-## [1.3.1] - 2026-01-20
+## [0.3.1] - 2026-01-20
 
 ### Fixed
 - **Web Service**: Resolved critical `ImportError` by restoring missing `create_jwt`, `decode_jwt`, and `auth_required` functions in `web_service/app/utils/auth.py`.
 
-## [1.3.0] - 2026-01-20
+## [0.3.0] - 2026-01-20
 
 ### Added
 - **Payment Delegation**: Added `/upgrade` command which generates a secure deep link to the central **Bifrost Bot**.
@@ -103,7 +103,7 @@
 ### Changed
 - **Payment Flow**: Removed legacy direct-payment logic; the bot now acts as a gateway to the central Bifrost ecosystem.
 
-## [1.2.2] - 2026-01-20
+## [0.2.2] - 2026-01-20
 
 ### Added
 - **Web-to-Telegram Linking**: Added endpoints `/auth/link/initiate-telegram` and `/auth/link/complete-telegram` to support Deep Link binding.
@@ -113,14 +113,14 @@
 ### Changed
 - **Auth Flow**: The linking process now offloads identity merging logic completely to Bifrost.
 
-## [1.2.1] - 2026-01-19
+## [0.2.1] - 2026-01-19
 
 ### Added
 - **Telegram Bot Onboarding**: Added a "Subscription Tier" selection step at the end of the onboarding flow.
 - **Telegram Bot Settings**: Added "Link Email" feature to allow Telegram-only users to set email/password credentials for Web login.
 - **Telegram Bot API**: Added `link_credentials` method to `api_client.py`.
 
-## [1.2.0] - 2026-01-19
+## [0.2.0] - 2026-01-19
 
 ### Added
 - **Finance Service Models**: Updated `User` model in `web_service/app/models.py` to support `email`, `password`, and `subscription_tier`.
@@ -132,7 +132,7 @@
 ### Changed
 - **Finance Service Auth**: Updated `sync-session` to return premium status.
 
-## [1.1.0] - 2026-01-16
+## [0.1.0] - 2026-01-16
 
 ### Added
 - **Finance Service Models**: Created `web_service/app/models.py` containing the `User` class to handle `account_id` mapping and local profile provisioning, as well as centralized category constants.
@@ -146,9 +146,9 @@
   - Updated `telegram_bot/api_client.py` to include `sync_session` method.
   - Updated `telegram_bot/decorators.py` to call `sync_session` after successful login.
 
-## [1.0.0] - 2026-01-01
+## [0.0.1] - 2026-01-01
 
-### Initial Release
+### Added
 - **Core Features**:
   - **Smart Text Input**: Natural language logging for expenses and income (e.g., "Coffee 2.50", "Salary 500").
   - **Dual Currency Support**: Full support for USD and KHR with live or fixed exchange rates.
