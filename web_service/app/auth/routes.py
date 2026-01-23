@@ -260,7 +260,7 @@ def generate_link_command():
             f"{bifrost_url}/internal/generate-link-token",
             json={"account_id": g.account_id},
             auth=HTTPBasicAuth(client_id, client_secret),
-            timeout=5
+            timeout=60
         )
         resp.raise_for_status()
 
