@@ -1,25 +1,28 @@
 # Changelog
-Finance App Changelog
 
-Refactor: Removed per-request identity syncing from the auth_required utility to optimize performance.
+## [1.6.1] - 2026-01-23
 
+### Added
+- **Auth**: Added `/auth/link-command` endpoint to securely generate Telegram linking strings server-side.
 
-Added: Implemented webhook support for account_update events in web_service/app/auth/routes.py to sync telegram_id, email, and username from Bifrost .
+## [1.6.0] - 2026-01-23
 
+### Added
+- **Bifrost 2.3.3 Support**:
+  - The Web Service now extracts `duration` (e.g., '1m') and `expires_at` from `subscription_success` webhooks.
+  - **Database**: The `expires_at` timestamp is now stored in the user's `settings` collection to accurately track subscription validity.
+- **Profile Sync**: Implemented webhook support for `account_update` events. Changes to `email`, `username`, or `telegram_id` in Bifrost now automatically propagate to the Finance App database.
 
+### Changed
+- **Performance**: Refactored `auth_required` to remove per-request identity syncing, significantly reducing database load on high-traffic endpoints.
+- **Notifications**: The "Premium Activated" Telegram alert now informs the user of their specific **Plan Duration** and **Expiration Date**.
+- **Localization**: Converted date formats and code-like strings in all locale files to use HTML `<code>` tags. This prevents formatting errors when the bot uses `parse_mode='HTML'`.
 
-
-Fixed: Updated web_service/app/models.py to store telegram_id into the settings collection during initial user creation (Lazy Provisioning)
-- [Refactor] Removed per-request identity syncing from `auth_required` utility.
-- [Added] Webhook support for `account_update` events to sync `telegram_id`, `email`, and `username` from Bifrost.
-- [Fixed] Logic now stores `telegram_id` only once during user creation (Lazy Provisioning).
-  [Audit] Verified consistency between English and Khmer locale files.
-
-[Fixed] Added missing onboarding.ask_subscription, keyboards.plan_free, and keyboards.plan_premium to km.json.
-
-[Fixed] Added missing settings.link_email keys and descriptions to km.json.
-
-[Improved] Converted YYYY-MM-DD and other code-like strings in locales to use HTML <code> tags instead of backticks to ensure safety when using parse_mode='HTML'.
+### Fixed
+- **Provisioning**: Fixed logic in `web_service/app/models.py` to ensure `telegram_id` is stored immediately during Lazy Provisioning (initial user creation).
+- **Locales**:
+  - Added missing Khmer (km) keys for `onboarding.ask_subscription`, `keyboards.plan_free`, and `keyboards.plan_premium`.
+  - Added missing Khmer keys for `settings.link_email`.
 
 ## [1.5.3] - 2026-01-22
 
@@ -51,8 +54,8 @@ Fixed: Updated web_service/app/models.py to store telegram_id into the settings 
 
 ### Security
 - **Secure Payment Flow**: Updated `/upgrade` command to use the "Intent-Based" payment system.
-  - The bot now calls Bifrost's `POST /secure-intent` to register transactions server-side.
-  - Removed client-side link generation to prevent parameter tampering (price manipulation).
+- The bot now calls Bifrost's `POST /secure-intent` to register transactions server-side.
+- Removed client-side link generation to prevent parameter tampering (price manipulation).
 
 ### Added
 - **Pricing Packages**: Added selection menu for **1 Month ($5.00)** and **1 Year ($45.00)** plans.
@@ -61,7 +64,8 @@ Fixed: Updated web_service/app/models.py to store telegram_id into the settings 
 ## [1.4.0] - 2026-01-22
 
 ### Added
-- **Manual Account Linking**: Added `/link <token>` command. This serves as a reliable alternative to deep links for users on devices where standard URL redirection fails.
+- **Manual Account Linking**: Added `/link <token>` command.
+  This serves as a reliable alternative to deep links for users on devices where standard URL redirection fails.
 - **Bifrost Compatibility**: Updated `/upgrade` payload format to support Bifrost 1.4.0 features (Duration and Explicit Roles).
 
 ### Changed
@@ -76,13 +80,13 @@ Fixed: Updated web_service/app/models.py to store telegram_id into the settings 
 - The Finance Service now caches token validation results for 24 hours to maximize performance.
 - Added a new `/internal/webhook/auth-event` endpoint to receive invalidation signals from Bifrost (e.g., on ban or password change).
 - **Provisioning**: Switched to **Lazy Provisioning**. The `/sync-session` endpoint has been removed.
-User profiles are now automatically created in the Finance DB upon the first valid request.
+  User profiles are now automatically created in the Finance DB upon the first valid request.
 
 ## [1.3.2] - 2026-01-20
 
 ### Fixed
 - **Auth Architecture**: Fixed the "Shared Secret" vulnerability.
-The Finance Service no longer attempts to decode Bifrost tokens locally.
+  The Finance Service no longer attempts to decode Bifrost tokens locally.
 - **Web Service**: Updated `/sync-session` to validate tokens by calling `Bifrost` directly, removing the need for `JWT_SECRET_KEY` synchronization between services.
 
 ## [1.3.1] - 2026-01-20

@@ -9,6 +9,7 @@ import os
 from bson import ObjectId
 import hmac
 import hashlib
+from datetime import datetime
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -16,14 +17,12 @@ BIFROST_URL = os.getenv("BIFROST_URL", "http://bifrost:5000")
 BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")
 BIFROST_CLIENT_SECRET = os.getenv("BIFROST_CLIENT_SECRET")
 
-
 # --- HELPER: Send Telegram Notification ---
 def send_telegram_alert(telegram_id, message):
     """
     Sends a message to a specific Telegram user via the Bot API.
     """
     bot_token = os.getenv("TELEGRAM_TOKEN") or current_app.config.get("TELEGRAM_TOKEN")
-
     if not bot_token:
         current_app.logger.error("❌ Notification Failed: TELEGRAM_TOKEN not found in environment.")
         return
@@ -44,7 +43,6 @@ def send_telegram_alert(telegram_id, message):
             current_app.logger.error(f"❌ Telegram API Error {resp.status_code}: {resp.text}")
         else:
             current_app.logger.info(f"✅ Notification sent to {telegram_id}")
-
     except Exception as e:
         current_app.logger.error(f"❌ Failed to send Telegram alert: {e}")
 
@@ -110,8 +108,8 @@ def login():
 @auth_bp.route('/verify-otp', methods=['POST'])
 def verify_otp_and_login():
     """
-    Receives a 6-digit code from the Frontend.
-    Calls Bifrost to verify it. If valid, finds/creates the User profile via Telegram ID.
+    Receives a 6-digit code from the Frontend. Calls Bifrost to verify it.
+    If valid, finds/creates the User profile via Telegram ID.
     """
     data = request.get_json()
     code = data.get('code')
@@ -193,6 +191,7 @@ def link_account():
             auth=HTTPBasicAuth(client_id, client_secret),
             timeout=10
         )
+
         if resp.status_code == 200:
             if 'email' in data:
                 try:
@@ -229,8 +228,8 @@ def initiate_telegram_link():
             timeout=5
         )
         resp.raise_for_status()
-        token = resp.json().get('token')
 
+        token = resp.json().get('token')
         bot_username = os.getenv("TELEGRAM_BOT_USERNAME", "savvify_bot")
         deep_link = f"https://t.me/{bot_username}?start=link_{token}"
 
@@ -238,8 +237,46 @@ def initiate_telegram_link():
             "link_url": deep_link,
             "token": token
         })
+
     except Exception as e:
         current_app.logger.error(f"Failed to init telegram link: {e}")
+        return jsonify({"error": "Service unavailable"}), 503
+
+
+@auth_bp.route('/link-command', methods=['POST'])
+@auth_required(min_role="user")
+def generate_link_command():
+    """
+    Generates a secure '/link <token>' command string for manual entry in Telegram.
+    Reuses Bifrost's link-token generation logic.
+    """
+    try:
+        bifrost_url = current_app.config.get("BIFROST_URL", "").rstrip('/')
+        client_id = current_app.config.get("BIFROST_CLIENT_ID")
+        client_secret = current_app.config.get("BIFROST_CLIENT_SECRET")
+
+        # Reuse the generate-link-token endpoint from Bifrost
+        resp = requests.post(
+            f"{bifrost_url}/internal/generate-link-token",
+            json={"account_id": g.account_id},
+            auth=HTTPBasicAuth(client_id, client_secret),
+            timeout=5
+        )
+        resp.raise_for_status()
+
+        token = resp.json().get('token')
+        if not token:
+            return jsonify({"error": "Failed to generate token"}), 500
+
+        # Return the manual command string
+        return jsonify({
+            "command": f"/link {token}",
+            "token": token,
+            "expires_in": "10 minutes"
+        })
+
+    except Exception as e:
+        current_app.logger.error(f"Failed to generate link command: {e}")
         return jsonify({"error": "Service unavailable"}), 503
 
 
@@ -268,6 +305,7 @@ def complete_telegram_link():
             return jsonify({"success": True}), 200
         else:
             return jsonify(resp.json()), resp.status_code
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -302,24 +340,50 @@ def auth_event_webhook():
 
         # --- A. Subscription Events ---
         if event_type == 'subscription_success':
-            # 1. Update DB Role
+            # Extract Bifrost 2.3.3 Data
+            extra = data.get('extra_data', {})
+            expires_at = extra.get('expires_at')
+            duration = extra.get('duration')
+
+            # 1. Update DB
+            update_data = {"role": "premium_user"}
+            if expires_at:
+                update_data["expires_at"] = expires_at
+
             get_db().settings.update_one(
                 {"account_id": ObjectId(account_id)},
-                {"$set": {"role": "premium_user"}}
+                {"$set": update_data}
             )
             current_app.logger.info(f" 🎉 Premium Activated for {account_id}")
 
-            # 2. Notify User
+            # 2. Notify User with details
             if telegram_id:
-                send_telegram_alert(
-                    telegram_id,
-                    "🌟 **Premium Activated!**\n\nThank you for supporting Savvify. Your Premium features are now active!"
-                )
+                msg = "🌟 **Premium Activated!**\n\nThank you for supporting Savvify."
+
+                # Format Duration
+                if duration:
+                    d_map = {"1m": "1 Month", "1y": "1 Year"}
+                    readable_duration = d_map.get(duration, duration)
+                    msg += f"\n\n**Plan:** {readable_duration}"
+
+                # Format Expiry
+                if expires_at:
+                    try:
+                        # Assuming ISO format (e.g. 2026-02-23T10:00:00Z)
+                        dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                        date_str = dt.strftime('%Y-%m-%d')
+                        msg += f"\n**Valid until:** {date_str}"
+                    except Exception:
+                        pass # Fallback if format differs
+
+                msg += "\n\nYour Premium features are now active!"
+                send_telegram_alert(telegram_id, msg)
             else:
                 current_app.logger.warning(f"⚠️ Could not notify user {account_id}: No Telegram ID found.")
 
             # 3. Invalidate Cache
-            if token: invalidate_token_cache(token)
+            if token:
+                invalidate_token_cache(token)
 
         elif event_type == 'subscription_expired':
             # 1. Downgrade DB Role
@@ -337,7 +401,8 @@ def auth_event_webhook():
                 )
 
             # 3. Invalidate Cache
-            if token: invalidate_token_cache(token)
+            if token:
+                invalidate_token_cache(token)
 
         # --- B. Profile Update Sync ---
         elif event_type == 'account_update':
@@ -354,15 +419,19 @@ def auth_event_webhook():
                 )
                 current_app.logger.info(f" 📝 Profile synced via Webhook: {list(updates.keys())}")
 
-            if token: invalidate_token_cache(token)
+            if token:
+                invalidate_token_cache(token)
 
         # --- C. Security Events ---
         elif event_type in ['invalidation', 'security_password_change']:
-            if token: invalidate_token_cache(token)
+            if token:
+                invalidate_token_cache(token)
+
             if event_type == 'security_password_change' and telegram_id:
                 send_telegram_alert(telegram_id, "🔐 **Security Alert**: Your password was just changed.")
 
         return jsonify({"status": "processed", "event": event_type}), 200
+
     except Exception as e:
         current_app.logger.error(f"Webhook error: {e}")
         return jsonify({"error": "Failed"}), 500
