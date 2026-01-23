@@ -1,10 +1,10 @@
-import requests
 import logging
 import hashlib
 import hmac
 import time
 from functools import wraps
 from flask import request, jsonify, g, current_app
+import requests
 from requests.auth import HTTPBasicAuth
 from cachetools import TTLCache
 import jwt
@@ -117,8 +117,11 @@ def auth_required(min_role="user"):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
+            # --- FIX: Handle OPTIONS (CORS Preflight) Gracefully ---
+            # DO NOT call f(*args, **kwargs). The view function likely depends on
+            # g.account_id, which hasn't been set yet.
             if request.method == 'OPTIONS':
-                return f(*args, **kwargs)
+                return jsonify({'status': 'ok'}), 200
 
             auth_header = request.headers.get("Authorization")
             if not auth_header:
@@ -175,6 +178,7 @@ def auth_required(min_role="user"):
             return f(*args, **kwargs)
         return decorated_function
     return decorator
+
 def service_auth_required(f):
     """
     SECURITY LOCK: Ensures the request comes from a trusted service (Bifrost)
@@ -182,8 +186,9 @@ def service_auth_required(f):
     """
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # --- FIX: Handle OPTIONS here as well ---
         if request.method == 'OPTIONS':
-            return f(*args, **kwargs)
+            return jsonify({'status': 'ok'}), 200
 
         auth = request.authorization
         if not auth or not auth.username or not auth.password:
