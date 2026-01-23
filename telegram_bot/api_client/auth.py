@@ -99,7 +99,7 @@ def link_credentials(email, password, user_id):
             'password': password
         }
         res = requests.post(
-            f"{BASE_URL}/auth/link-account",
+            f"{BASE_URL}/link-account",
             json=payload,
             headers=_get_headers(user_id),
             timeout=DEFAULT_TIMEOUT
@@ -118,7 +118,7 @@ def link_telegram_via_token(telegram_id, token):
     Flow: Bot -> Finance Backend -> Bifrost.
     Completes the account linking process using a deep link token.
     """
-    url = f"{BASE_URL}/auth/link/complete-telegram"
+    url = f"{BASE_URL}/link/complete-telegram"
     payload = {
         "telegram_id": str(telegram_id),
         "token": token
