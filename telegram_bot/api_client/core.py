@@ -72,8 +72,9 @@ def ensure_auth(func):
             if e.response.status_code == 401:
                 log.warning(f"401 received. Clearing token for identifier: {user_id}")
                 _USER_TOKENS.pop(user_id, None)
-                # Propagate error so bot knows to re-login
-                raise e
+                # Return None so the bot treats this as a failed request,
+                # but the Next request will force a re-login because token is gone.
+                return None
             raise e
         except requests.exceptions.RequestException as e:
             log.error(f"Connection error in {func.__name__}: {e}")

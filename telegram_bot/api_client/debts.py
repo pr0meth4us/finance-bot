@@ -14,6 +14,8 @@ def add_debt(data, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error adding debt: {e}")
         if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 403:
             raise PremiumFeatureException("Premium required")
@@ -27,6 +29,8 @@ def add_reminder(data, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error adding reminder: {e}")
         return None
 
@@ -42,6 +46,8 @@ def get_open_debts(user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error fetching debts: {e}")
         if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 403:
             raise PremiumFeatureException("Premium required")
@@ -61,6 +67,8 @@ def get_open_debts_export(user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error fetching debts for export: {e}")
         if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 403:
             raise PremiumFeatureException("Premium required")
@@ -80,6 +88,8 @@ def get_settled_debts_grouped(user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error fetching settled debts: {e}")
         if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 403:
             raise PremiumFeatureException("Premium required")
@@ -98,6 +108,8 @@ def get_debts_by_person_and_currency(person_name, currency, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(
             f"API Error fetching debts for {person_name} ({currency}): {e}"
         )
@@ -116,6 +128,8 @@ def get_all_debts_by_person(person_name, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error fetching all debts for {person_name}: {e}")
         return []
 
@@ -132,6 +146,8 @@ def get_all_settled_debts_by_person(person_name, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(
             f"API Error fetching all settled debts for {person_name}: {e}"
         )
@@ -149,6 +165,8 @@ def get_debt_details(debt_id, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error fetching debt details: {e}")
         return None
 
@@ -165,6 +183,8 @@ def cancel_debt(debt_id, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error canceling debt: {e}")
         try:
             return e.response.json()
@@ -181,6 +201,8 @@ def update_debt(debt_id, data, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error updating debt: {e}")
         try:
             return e.response.json()
@@ -208,6 +230,8 @@ def record_lump_sum_repayment(
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error recording lump-sum repayment: {e}")
         try:
             return e.response.json()
@@ -228,6 +252,8 @@ def get_debt_analysis(user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error fetching debt analysis: {e}")
         if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 403:
             raise PremiumFeatureException("Premium required")

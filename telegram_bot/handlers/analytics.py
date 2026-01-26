@@ -1,5 +1,6 @@
 # telegram_bot/handlers/analytics.py
 
+import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from telegram import Update
@@ -103,10 +104,11 @@ async def _generate_report(update, context, start, end):
 
     try:
         # 1. Determine User Tier
-        # Hardcoded admin bypass
         user_id = str(update.effective_user.id)
         role = context.user_data.get('role', 'user')
-        is_premium = (role in ['premium_user', 'admin']) or (user_id == "1836585300")
+        admin_id = os.getenv("ADMIN_USER_ID")
+
+        is_premium = (role in ['premium_user', 'admin']) or (admin_id and user_id == admin_id)
 
         data = api_client.get_detailed_report(context.user_data['jwt'], start, end)
         await loading.delete()

@@ -1,5 +1,6 @@
 # telegram_bot/handlers/settings.py
 
+import os
 from telegram import Update
 from telegram.ext import (
     ContextTypes,
@@ -175,8 +176,9 @@ async def category_action_start(update: Update, context: ContextTypes.DEFAULT_TY
     if profile.get('role') == 'premium_user':
         role = 'premium_user'
 
-    # Hardcoded admin bypass
-    if str(update.effective_user.id) == "1836585300":
+    # Admin bypass via env
+    admin_id = os.getenv("ADMIN_USER_ID")
+    if admin_id and str(update.effective_user.id) == admin_id:
         role = 'premium_user'
 
     if role != 'premium_user':

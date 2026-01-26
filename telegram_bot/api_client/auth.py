@@ -109,6 +109,8 @@ def link_credentials(email, password, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error linking account: {e}")
         try:
             return e.response.json()

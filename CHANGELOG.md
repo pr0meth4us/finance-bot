@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.6.7] - 2026-01-26
+
+### Fixed
+- **Core Architecture**: Resolved critical decorator inconsistency in the Web Service.
+  - Replaced the simple `auth_required` decorator with a **Decorator Factory** in `app/utils/auth.py`.
+  - This supports the `@auth_required(min_role="user")` syntax used throughout the application routes.
+- **Data Integrity**: Updated `auth_required` to explicitly set `g.account_id`, `g.role`, and `g.email`, fixing `AttributeError` crashes in `transactions`, `debts`, and `settings` endpoints.
+- **Consistency**: Renamed internal calls in `auth.py` to match `app/models.py` (`get_by_account_id` instead of `find_by_account_id`, `create` instead of `create_user`).
+- **Dependencies**: Added missing exports `service_auth_required` and `invalidate_token_cache` to `app/utils/auth.py` to fix `ImportError` in `auth/routes.py`.
+# Changelog
+
+## [0.6.6] - 2026-01-26
+
+### Fixed
+- **Web Service Auth**: Completely rewrote `auth_required` in `web_service/app/utils/auth.py`.
+  - It now functions as a "Decorator Factory," allowing arguments like `@auth_required(min_role="premium_user")`.
+  - Added logic to explicitly set `g.account_id` from the token, fixing `AttributeError` in routes.
+  - Implemented the `403 Forbidden` check if a user lacks the required `min_role`.
+- **Web Service Debts**: Updated `web_service/app/debts/routes.py` to handle empty JSON bodies gracefully and ensure `g.account_id` is available.
+
+## [0.6.4] - 2026-01-26
+
+### Fixed
+- **API Client**: Fixed 7 debt endpoints in `telegram_bot/api_client/debts.py` that were suppressing `401 Unauthorized` errors, preventing the automatic re-login logic from triggering.
+  - Fixed: `add_reminder`, `get_all_debts_by_person`, `get_all_settled_debts_by_person`, `get_debt_details`, `cancel_debt`, `update_debt`, `record_lump_sum_repayment`.
+
+## [0.6.3] - 2026-01-26
+
+### Fixed
+- **Security**: Removed hardcoded Admin IDs in `handlers/analytics.py` and `handlers/settings.py`. Now uses `ADMIN_USER_ID` environment variable.
+- **Auth**: Fixed `ensure_auth` decorator in `api_client/core.py` to gracefully handle 401 errors by clearing the token and returning `None`, preventing handler crashes while ensuring re-login on the next request.
+- **API Client**: Updated all API modules (`transactions`, `settings`, `analytics`, `debts`, `auth`) to propagate `401 Unauthorized` exceptions to the `ensure_auth` decorator instead of swallowing them.
+
 ## [0.6.2] - 2026-01-23
 
 ### Added

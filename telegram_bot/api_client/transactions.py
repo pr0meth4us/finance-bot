@@ -13,6 +13,8 @@ def add_transaction(data, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error adding transaction: {e}")
         return None
 
@@ -28,6 +30,8 @@ def get_recent_transactions(user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error fetching recent transactions: {e}")
         return []
 
@@ -43,6 +47,8 @@ def get_transaction_details(tx_id, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error fetching transaction details: {e}")
         return None
 
@@ -56,6 +62,8 @@ def update_transaction(tx_id, data, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error updating transaction: {e}")
         return None
 
@@ -72,6 +80,8 @@ def delete_transaction(tx_id, user_id):
         res.raise_for_status()
         return True
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error deleting transaction: {e}")
         return False
 
@@ -89,6 +99,8 @@ def search_transactions_for_management(params, user_id):
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+            raise e
         log.error(f"API Error searching transactions for management: {e}")
         if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 403:
             raise PremiumFeatureException("Premium required")
