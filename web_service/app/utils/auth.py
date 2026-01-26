@@ -6,40 +6,69 @@ import logging
 import jwt
 from functools import wraps
 from flask import request, jsonify, g, current_app
+from requests.auth import HTTPBasicAuth
 from app.models import User
 
 log = logging.getLogger(__name__)
 
 BIFROST_URL = os.getenv("BIFROST_URL", "http://bifrost:5000")
-# Dedicated timeout for Bifrost calls (60s)
+BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")
+BIFROST_CLIENT_SECRET = os.getenv("BIFROST_CLIENT_SECRET")
 BIFROST_TIMEOUT = 60
 
 
 def validate_bifrost_token(token):
     """
-    Validates the JWT with Bifrost.
-    Returns the user data (dict) if valid, None otherwise.
+    Validates the JWT with Bifrost using the Internal API.
+    Ref: bifrost/internal/routes.py -> validate_token()
     """
     if not token:
         return None
 
+    # Safety check for config
+    if not BIFROST_CLIENT_ID or not BIFROST_CLIENT_SECRET:
+        log.error("Bifrost Client ID/Secret not configured in Web Service.")
+        return None
+
     try:
-        # Call Bifrost to validate
-        url = f"{BIFROST_URL}/auth/api/verify"
-        response = requests.get(
-            url,
-            params={"token": token},
-            timeout=BIFROST_TIMEOUT
-        )
+        # FIXED: Use the correct internal endpoint
+        url = f"{BIFROST_URL}/internal/validate-token"
+
+        # FIXED: Use Basic Auth (Service-to-Service)
+        auth = HTTPBasicAuth(BIFROST_CLIENT_ID, BIFROST_CLIENT_SECRET)
+
+        # FIXED: Send token in Body
+        payload = {"jwt": token}
+
+        response = requests.post(url, json=payload, auth=auth, timeout=BIFROST_TIMEOUT)
 
         if response.status_code == 200:
-            return response.json().get('user')
+            data = response.json()
+
+            if not data.get('is_valid'):
+                return None
+
+            # Map Bifrost response to our User structure
+            # Bifrost returns: { account_id, app_specific_role, email, username, telegram_id ... }
+            user_data = {
+                'id': data.get('account_id'),
+                'role': data.get('app_specific_role', 'user'),
+                'email': data.get('email'),
+                'username': data.get('username'),
+                'telegram_id': data.get('telegram_id'),
+                'display_name': data.get('display_name')
+            }
+            return user_data
+
+        elif response.status_code == 401:
+            log.warning("Bifrost rejected the token (expired or invalid).")
+            return None
         else:
-            log.warning(f"Bifrost token validation failed: {response.status_code} - {response.text}")
+            log.error(f"Bifrost Validation Error ({response.status_code}): {response.text}")
             return None
 
     except requests.exceptions.RequestException as e:
-        log.error(f"Error connecting to Bifrost for token validation: {e}")
+        log.error(f"Error connecting to Bifrost: {e}")
         return None
 
 
@@ -95,7 +124,6 @@ def auth_required(min_role=None):
                         return jsonify({'error': 'Insufficient permissions'}), 403
 
             # 4. Find or Create Local User
-            # FIXED: Uses User.get_by_account_id (was find_by_account_id)
             user = User.get_by_account_id(account_id)
 
             if not user:
@@ -107,13 +135,13 @@ def auth_required(min_role=None):
             if not user:
                 # Lazy Provisioning: Create profile on the fly
                 log.info(f"Lazy provisioning user for account_id: {account_id}")
-                # FIXED: Uses User.create (was create_user)
                 user = User.create(
                     account_id=account_id,
                     role=user_role,
                     username=bifrost_user.get('username'),
                     email=bifrost_user.get('email'),
-                    telegram_id=bifrost_user.get('telegram_id')
+                    telegram_id=bifrost_user.get('telegram_id'),
+                    display_name=bifrost_user.get('display_name')
                 )
 
             if not user:

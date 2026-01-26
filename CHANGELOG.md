@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.8] - 2026-01-26
+
+### Fixed
+- **Auth Service**: Corrected the Bifrost integration in `web_service/app/utils/auth.py`.
+  - Switched from the non-existent `/auth/api/me` endpoint to the correct `POST /internal/validate-token` endpoint found in Bifrost source.
+  - Implemented `HTTPBasicAuth` using the service's Client Credentials.
+  - Updated payload format to send `{"jwt": token}` as expected by Bifrost's `validate_token` route.
+  - Added robust response parsing to map Bifrost's `app_specific_role` to the local User model.
+
 ## [0.6.7] - 2026-01-26
 
 ### Fixed
