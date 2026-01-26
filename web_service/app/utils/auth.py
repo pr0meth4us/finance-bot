@@ -14,6 +14,7 @@ log = logging.getLogger(__name__)
 BIFROST_URL = os.getenv("BIFROST_URL", "http://bifrost:5000")
 BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")
 BIFROST_CLIENT_SECRET = os.getenv("BIFROST_CLIENT_SECRET")
+# Dedicated timeout for Bifrost calls (60s)
 BIFROST_TIMEOUT = 60
 
 
@@ -85,6 +86,7 @@ def auth_required(min_role=None):
       g.account_id (Bifrost ID)
       g.role (current role)
     """
+
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
@@ -152,9 +154,10 @@ def auth_required(min_role=None):
             g.account_id = account_id
             g.role = user_role
             g.email = bifrost_user.get('email')
-            g.token = token # Useful for downstream calls
+            g.token = token  # Useful for downstream calls
 
             return f(*args, **kwargs)
+
         return decorated_function
 
     # Magic to handle @auth_required without parentheses

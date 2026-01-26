@@ -1,132 +1,106 @@
 # telegram_bot/decorators.py
 
+import logging
 from functools import wraps
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
+from telegram.error import BadRequest
+
 import api_client
-from api_client import UpstreamUnavailable
-import logging
+from api_client.core import PremiumFeatureException, UpstreamUnavailable
 from utils.i18n import t
 
 log = logging.getLogger(__name__)
 
 
-async def _send_auth_error(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str):
-    """Sends a standardized auth error message."""
-    if update.message:
-        await update.message.reply_text(f"🚫 {message}")
-    elif update.callback_query:
-        await context.bot.answer_callback_query(
-            callback_query_id=update.callback_query.id,
-            text=f"🚫 {message}",
-            show_alert=True,
-        )
-
-
-async def _send_upstream_error(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sends a friendly 'Service Unavailable' message."""
-    msg = t("common.upstream_error", context)
-
+async def _send_auth_error(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, show_alert=False):
+    """
+    Helper to safely display errors to the user via CallbackQuery or Message.
+    """
     if update.callback_query:
-        await context.bot.answer_callback_query(
-            callback_query_id=update.callback_query.id,
-            text=t("common.upstream_alert", context),
-            show_alert=True
-        )
-    elif update.message:
-        await update.message.reply_text(msg, parse_mode='Markdown')
+        try:
+            if show_alert:
+                await update.callback_query.answer(message, show_alert=True)
+            else:
+                await update.callback_query.answer()
+                await update.callback_query.edit_message_text(message)
+        except BadRequest as e:
+            # If the message content is identical, Telegram raises MessageNotModified.
+            # We can safely ignore this as the UI is already in the desired state.
+            if "Message is not modified" in str(e):
+                log.warning("Supressed MessageNotModified error in auth error handler.")
+            else:
+                # If we can't edit (e.g. message too old), try sending a fresh message
+                try:
+                    await context.bot.send_message(update.effective_chat.id, message)
+                except Exception as inner_e:
+                    log.error(f"Failed to send fallback auth error: {inner_e}")
+    else:
+        await update.message.reply_text(message)
 
 
 def authenticate_user(func):
     """
-    Decorator for JWT authentication and profile fetching.
+    Decorator: Ensures the user is logged in.
+    Also handles global API exceptions like Premium limits.
     """
 
     @wraps(func)
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-        if not update.effective_user:
-            return ConversationHandler.END
-
         user = update.effective_user
-        user_id = user.id
 
-        try:
-            # 1. Auth: Get or Refresh JWT
-            jwt = context.user_data.get("jwt")
+        # 1. Check Local Cache
+        jwt = api_client.get_cached_token(user.id)
 
+        # 2. Login if missing
+        if not jwt:
+            log.info(f"User {user.id}: Logging in via Bifrost.")
+            jwt = api_client.login_to_bifrost(user)
             if not jwt:
-                log.info(f"User {user_id}: Logging in via Bifrost.")
-                # New api_client returns the JWT string directly or None
-                jwt = api_client.login_to_bifrost(user)
-
-                if not jwt:
-                    msg = "Authentication failed."
-                    log.error(f"User {user_id}: Bifrost login returned None.")
-                    await _send_auth_error(update, context, msg)
-                    return ConversationHandler.END
-
-            # Lazy Provisioning is now handled by the backend upon the first API call.
-            # We skip explicit sync-session here.
-            context.user_data["jwt"] = jwt
-
-            # 2. Profile: Get or Refresh
-            profile_data = context.user_data.get("profile_data")
-            if not profile_data:
-                # Pass JWT explicitly
-                # This call triggers lazy provisioning on the backend if user is missing
-                profile_data = api_client.get_my_profile(jwt)
-
-                # Handle Auth Errors (401 from Web Service)
-                if profile_data and profile_data.get("status") == 401:
-                    log.warning(f"User {user_id}: JWT expired. Clearing session.")
-                    context.user_data.pop("jwt", None)
-                    # Optional: Retry once? For now, ask user to retry
-                    await _send_auth_error(update, context, "Session expired. Please try again.")
-                    return ConversationHandler.END
-
-                if not profile_data or "error" in profile_data:
-                    msg = profile_data.get("error", "Failed to fetch profile.") if profile_data else "Connection error."
-                    log.error(f"User {user_id}: Profile fetch failed: {msg}")
-                    context.user_data.pop("jwt", None)  # Clear invalid token
-                    await _send_auth_error(update, context, msg)
-                    return ConversationHandler.END
-
-                context.user_data["profile_data"] = profile_data
-                context.user_data["profile"] = profile_data.get("profile", {})
-                context.user_data["role"] = profile_data.get("role", "user")
-
-            # 3. Onboarding Check
-            is_complete = context.user_data.get("profile", {}).get("onboarding_complete")
-
-            if not is_complete and func.__name__ != 'onboarding_start':
-                # Check if user is trying to run start/reset
-                msg_text = update.message.text if update.message else ""
-                if msg_text and (msg_text.startswith("/start") or msg_text.startswith("/reset")):
-                    return await func(update, context, *args, **kwargs)
-
-                log.info(f"User {user_id}: Onboarding incomplete. Blocking {func.__name__}.")
-                message = t("common.onboarding_required", context)
-
-                if update.message:
-                    await update.message.reply_text(message)
-                elif update.callback_query:
-                    await context.bot.answer_callback_query(
-                        callback_query_id=update.callback_query.id,
-                        text=message,
-                        show_alert=True,
-                    )
+                # Login Failed
+                from keyboards import login_keyboard
+                msg = t("auth.login_required", context)
+                if update.callback_query:
+                    await update.callback_query.message.reply_text(msg, reply_markup=login_keyboard(context))
+                else:
+                    await update.message.reply_text(msg, reply_markup=login_keyboard(context))
                 return ConversationHandler.END
 
+        # 3. Store Token in Context
+        context.user_data['jwt'] = jwt
+        context.user_data['telegram_id'] = user.id
+
+        # 4. Execute Handler with Global Error Catching
+        try:
             return await func(update, context, *args, **kwargs)
 
-        except UpstreamUnavailable:
-            log.warning(f"User {user_id}: UpstreamUnavailable caught in decorator.")
-            await _send_upstream_error(update, context)
+        except PremiumFeatureException:
+            # Handle Premium Limits Gracefully
+            upsell_msg = t("common.premium_required", context)
+            await _send_auth_error(update, context, upsell_msg, show_alert=True)
             return ConversationHandler.END
 
+        except UpstreamUnavailable:
+            # Handle Server Errors
+            error_msg = t("common.upstream_error", context)
+            await _send_auth_error(update, context, error_msg, show_alert=False)
+            return ConversationHandler.END
+
+        except BadRequest as e:
+            # Swallow "Message not modified" errors to prevent crashes on double-clicks
+            if "Message is not modified" in str(e):
+                log.info(f"Ignored MessageNotModified in {func.__name__}")
+                try:
+                    await update.callback_query.answer()
+                except:
+                    pass
+                return
+            log.error(f"Telegram BadRequest in {func.__name__}: {e}")
+            raise e
+
         except Exception as e:
-            log.error(f"Auth decorator error for {user_id}: {e}", exc_info=True)
-            await _send_auth_error(update, context, "An unexpected error occurred.")
+            log.error(f"Unhandled error in {func.__name__}: {e}", exc_info=True)
+            await _send_auth_error(update, context, t("common.error_generic", context))
             return ConversationHandler.END
 
     return wrapped

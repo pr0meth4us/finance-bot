@@ -1,4 +1,16 @@
 # Changelog
+# Changelog
+
+## [0.6.10] - 2026-01-26
+
+### Fixed
+- **Auth Integration**: Updated `web_service/app/utils/auth.py` to match the actual Bifrost Internal API.
+  - Endpoint: Changed from `/auth/api/verify` (404) to `POST /internal/validate-token`.
+  - Auth Method: Switched from Bearer Token to **Basic Auth** (Client ID/Secret).
+  - Payload: Sending `{"jwt": token}` in the body instead of query params.
+- **Bot Stability**: Hardened `telegram_bot/decorators.py` to gracefully handle `PremiumFeatureException`.
+  - Instead of crashing or trying to edit the message (which fails if content is identical), it now shows a **native Telegram alert** (popup).
+  - Added specific handling for `MessageNotModified` to prevent log spam and crashes when the UI state is already correct.
 
 ## [0.6.8] - 2026-01-26
 
