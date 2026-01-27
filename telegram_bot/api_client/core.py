@@ -32,6 +32,9 @@ class UpstreamUnavailable(Exception):
     """Raised when the web service or Cloudflare/Koyeb is down (5xx, Timeout)."""
     pass
 
+def get_cached_token(user_id):
+    """Retrieves the JWT for a user from the in-memory cache."""
+    return _USER_TOKENS.get(user_id)
 
 def _get_headers(user_id_or_token):
     """
