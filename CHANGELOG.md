@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.12] - 2026-01-28
+
+### Fixed
+- **Profile Loading**: Fixed a critical issue where the bot failed to load user settings (Name, Role, Currency Preferences) during a "cold start" (when a cached JWT existed but memory was empty).
+- **Premium Access**: Resolved the bug where premium users were incorrectly blocked from features because their role defaulted to 'user' instead of 'premium_user'.
+- **Decorator Logic**: Updated `authenticate_user` in `telegram_bot/decorators.py` to explicitly fetch and cache the user profile from the API if it is missing from `context.user_data`.
+
 ## [0.6.11] - 2026-01-27
 
 ### Fixed

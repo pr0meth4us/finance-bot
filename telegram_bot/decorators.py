@@ -70,7 +70,29 @@ def authenticate_user(func):
         context.user_data['jwt'] = jwt
         context.user_data['telegram_id'] = user.id
 
-        # 4. Execute Handler with Global Error Catching
+        # 4. Ensure Profile & Role are Loaded (FIX)
+        # If the bot restarted, we might have the JWT (from cache/login) but not the profile data.
+        if 'profile' not in context.user_data or not context.user_data.get('profile'):
+            try:
+                # log.info(f"User {user.id}: Fetching missing profile data.")
+                user_settings = api_client.get_user_settings(jwt)
+
+                if user_settings and 'profile' in user_settings:
+                    profile = user_settings['profile']
+                    context.user_data['profile'] = profile
+                    context.user_data['role'] = profile.get('role', 'user')
+                    # log.info(f"User {user.id}: Profile loaded. Role: {context.user_data['role']}")
+                else:
+                    # Fallback if settings fetch fails (e.g. backend error)
+                    # We don't block the user, but they will be 'User' and 'user' role.
+                    log.warning(f"User {user.id}: Failed to fetch profile. Using defaults.")
+                    context.user_data['profile'] = {}
+                    context.user_data['role'] = 'user'
+            except Exception as e:
+                log.error(f"Error fetching profile in decorator: {e}")
+                context.user_data['profile'] = {}
+
+        # 5. Execute Handler with Global Error Catching
         try:
             return await func(update, context, *args, **kwargs)
 
