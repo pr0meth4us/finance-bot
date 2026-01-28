@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.16] - 2026-01-28
+
+### Fixed
+- **Authorization Bug**: Fixed 403 Forbidden errors where `premium_user` was blocked from accessing standard `user` routes.
+- **Role Hierarchy**: Implemented integer-based role levels (`user=1`, `premium_user=2`, `admin=99`) in `web_service/app/utils/auth.py`.
+- **Logic**: Updated `auth_required` to permit access if `user_level >= required_level`, ensuring premium users inherit base user permissions.
+
 ## [0.6.15] - 2026-01-28
 
 ### Refactored
