@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.14] - 2026-01-28
+
+### Refactored
+- **Backend Auth**: Completely replaced `web_service/app/utils/auth.py` with a robust Bifrost-integrated version.
+- **Compatibility**: Added alias wrappers (`login_required`, `role_required`) to the new `auth_required` core to maintain backward compatibility with existing routes.
+- **Security**: Implemented real-time token validation against Bifrost Internal API using Basic Auth.
+
+## [0.6.13] - 2026-01-28
+
+### Fixed
+- **Role Standardization**: Conducted a complete overhaul of role verification logic to strictly enforce `'premium_user'`.
+- **Legacy Removal**: Deprecated and removed all code that accepted `'premium'` as an alias for premium users.
+- **Backend Auth**: Updated `web_service/app/utils/auth.py` to perform strict equality checks on user roles, rejecting any ambiguous role names.
+- **Bot Commands**: Updated `/upgrade` and `/menu` handlers to strictly validate against `'premium_user'`.
+
 ## [0.6.12] - 2026-01-28
 
 ### Fixed

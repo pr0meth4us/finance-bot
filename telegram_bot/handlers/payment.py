@@ -1,24 +1,28 @@
+# telegram_bot/handlers/payment.py
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 import time
-import api_client  # Import the facade
+import api_client
 from decorators import authenticate_user
-
 
 @authenticate_user
 async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows the package selection menu."""
 
-    # FIX: Force a fresh profile fetch to ensure 'role' is up-to-date.
-    # The cached role in context.user_data might be stale (e.g. 'user') even if they just upgraded via Bifrost.
+    # Force a fresh profile fetch to ensure 'role' is up-to-date.
     jwt = context.user_data.get('jwt')
     if jwt:
         profile_data = api_client.get_my_profile(jwt)
+        # Note: api_client.get_my_profile returns the direct user object
         if profile_data and "role" in profile_data:
             context.user_data["role"] = profile_data["role"]
+            # Ensure profile struct is consistent
+            if "profile" not in context.user_data:
+                context.user_data["profile"] = {}
             context.user_data["profile"]["role"] = profile_data["role"]
 
-    # 1. Check if already premium
+    # 1. STRICT CHECK: Check if already premium_user
     role = context.user_data.get('role', 'user')
 
     if role == 'premium_user':
@@ -76,6 +80,7 @@ async def upgrade_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(f"🔄 Generating secure payment link for <b>{plan['label']}</b>...", parse_mode='HTML')
 
     # Call Bifrost API
+    # STRICT: target_role MUST be 'premium_user'
     intent = api_client.create_payment_intent(
         user_id=user_id,
         amount=plan['price'],
@@ -91,8 +96,8 @@ async def upgrade_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    secure_link = intent['secure_link']  # e.g. https://t.me/BifrostBot?start=tx-123...
-    manual_command = intent['manual_command']  # e.g. /pay tx-123...
+    secure_link = intent['secure_link']
+    manual_command = intent['manual_command']
 
     keyboard = [
         [InlineKeyboardButton(f"💎 Pay ${plan['price']:.2f}", url=secure_link)]
