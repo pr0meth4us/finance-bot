@@ -3,13 +3,9 @@
 import os
 import requests
 import logging
-import jwt
 from functools import wraps
 from flask import request, jsonify, g, current_app
 from requests.auth import HTTPBasicAuth
-
-# Use local import to avoid circular dependency issues if User model imports auth
-# from app.models import User (Moved inside function)
 
 log = logging.getLogger(__name__)
 
@@ -21,13 +17,9 @@ BIFROST_TIMEOUT = 60
 
 def validate_bifrost_token(token):
     """
-    Validates the JWT with Bifrost using the Internal API.
+    Asks Bifrost: "Is this token valid?"
     """
-    if not token:
-        return None
-
-    if not BIFROST_CLIENT_ID or not BIFROST_CLIENT_SECRET:
-        log.error("Bifrost Client ID/Secret not configured.")
+    if not token or not BIFROST_CLIENT_ID:
         return None
 
     try:
@@ -42,7 +34,6 @@ def validate_bifrost_token(token):
             if not data.get('is_valid'):
                 return None
 
-            # Return standardized user data
             return {
                 'id': data.get('account_id'),
                 'role': data.get('app_specific_role', 'user'),
@@ -51,21 +42,15 @@ def validate_bifrost_token(token):
                 'telegram_id': data.get('telegram_id'),
                 'display_name': data.get('display_name')
             }
-        elif response.status_code == 401:
-            log.warning("Bifrost rejected token.")
-            return None
-        else:
-            log.error(f"Bifrost Error {response.status_code}: {response.text}")
-            return None
-
-    except requests.exceptions.RequestException as e:
+        return None
+    except Exception as e:
         log.error(f"Error connecting to Bifrost: {e}")
         return None
 
 
 def auth_required(min_role=None):
     """
-    Core Decorator Logic.
+    Authenticates requests using ONLY Bifrost Tokens.
     """
 
     def decorator(f):
@@ -83,53 +68,31 @@ def auth_required(min_role=None):
             # 1. Validate with Bifrost
             bifrost_user = validate_bifrost_token(token)
             if not bifrost_user:
-                return jsonify({'message': 'Invalid or Expired Token'}), 401
+                return jsonify({'message': 'Invalid or Expired Bifrost Token'}), 401
 
-            # 2. Extract Data
+            # 2. Lazy Provisioning (Sync Local DB)
+            from app.models import User
             account_id = bifrost_user.get('id')
-            user_role = bifrost_user.get('role', 'user')
-
-            # 3. Check Role (Strict 'premium_user' check)
-            if min_role:
-                # Hierarchy: user < premium_user < admin
-                roles_hierarchy = ['user', 'premium_user', 'admin']
-
-                # Check 1: Strict Equality (Fast path)
-                if user_role == min_role:
-                    pass
-                # Check 2: Admin Override
-                elif user_role == 'admin':
-                    pass
-                # Check 3: Hierarchy (Optional, but good for admin checks)
-                else:
-                    try:
-                        u_idx = roles_hierarchy.index(user_role)
-                        r_idx = roles_hierarchy.index(min_role)
-                        if u_idx < r_idx:
-                            return jsonify({'message': f'Required role: {min_role}'}), 403
-                    except ValueError:
-                        # Unknown role -> Deny
-                        return jsonify({'message': 'Insufficient permissions'}), 403
-
-            # 4. Load/Create Local User
-            from app.models import User  # Late import to prevent circular deps
             user = User.get_by_account_id(account_id)
 
-            if not user and bifrost_user.get('telegram_id'):
-                user = User.find_by_telegram_id(bifrost_user.get('telegram_id'))
-
             if not user:
-                log.info(f"Lazy provisioning user: {account_id}")
+                log.info(f"Provisioning local user for Bifrost Account: {account_id}")
                 user = User.create(
                     account_id=account_id,
-                    role=user_role,
+                    role=bifrost_user.get('role', 'user'),
                     username=bifrost_user.get('username'),
                     email=bifrost_user.get('email'),
                     telegram_id=bifrost_user.get('telegram_id'),
                     display_name=bifrost_user.get('display_name')
                 )
 
-            # 5. Set Global Context
+            # 3. Role Check
+            user_role = bifrost_user.get('role', 'user')
+            if min_role:
+                if user_role != min_role and user_role != 'admin':
+                    return jsonify({'message': f'Forbidden: Requires {min_role}'}), 403
+
+            # 4. Set Context
             g.user = user
             g.account_id = account_id
             g.role = user_role
@@ -143,39 +106,21 @@ def auth_required(min_role=None):
         f = min_role
         min_role = None
         return decorator(f)
-
     return decorator
 
 
-# ==========================================
-# COMPATIBILITY ALIASES (Keep these!)
-# ==========================================
-
+# --- Aliases for Backward Compatibility ---
 def login_required(f):
-    """Alias for @auth_required (no role check)"""
     return auth_required(min_role=None)(f)
 
 
 def role_required(required_role):
-    """Alias for @auth_required(min_role=...)"""
     return auth_required(min_role=required_role)
 
 
 def service_auth_required(f):
-    """Alias for Admin only"""
     return auth_required(min_role="admin")(f)
 
 
-def get_token_from_header():
-    """Helper used by some legacy utils"""
-    auth_header = request.headers.get('Authorization')
-    if auth_header:
-        try:
-            return auth_header.split(" ")[1]
-        except IndexError:
-            return None
-    return None
-
-
-def invalidate_token_cache(user_id):
+def invalidate_token_cache(token):
     pass

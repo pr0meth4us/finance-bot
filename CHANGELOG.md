@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.15] - 2026-01-28
+
+### Refactored
+- **Authentication Architecture**: Transitioned `web_service` to a "Pure Bifrost" model.
+- **Routes**: Updated `auth/routes.py` to **proxy** `/login` and `/verify-otp` requests directly to Bifrost API, removing local token generation.
+- **Utils**: Cleaned up `utils/auth.py` to remove `create_jwt` and enforce strict Bifrost token validation.
+- **Lazy Provisioning**: The `auth_required` decorator now automatically creates/syncs a local `User` record when a valid Bifrost token is presented.
+
 ## [0.6.14] - 2026-01-28
 
 ### Refactored

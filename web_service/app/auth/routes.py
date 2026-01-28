@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, current_app, g
 from app.models import User
-from app.utils.auth import create_jwt, auth_required, decode_jwt, service_auth_required, invalidate_token_cache
+from app.utils.auth import auth_required, service_auth_required, invalidate_token_cache, login_required
 from app import get_db
 from app.utils.db import settings_collection
 import requests
@@ -50,8 +50,11 @@ def send_telegram_alert(telegram_id, message):
 
 # --- WEB AUTHENTICATION ---
 
-@auth_bp.route('/register', methods=['POST'])
-def register():
+@auth_bp.route('/login', methods=['POST'])
+def login():
+    """
+    Proxies login credentials to Bifrost and returns the Bifrost JWT.
+    """
     data = request.get_json()
     email = data.get('email')
     password = data.get('password')
@@ -59,59 +62,61 @@ def register():
     if not email or not password:
         return jsonify({"error": "Email and password required"}), 400
 
-    existing = User.find_by_email(email)
-    if existing:
-        return jsonify({"error": "Email already exists"}), 409
+    try:
+        # Call Bifrost API
+        response = requests.post(
+            f"{BIFROST_URL}/auth/api/login",
+            json={
+                "client_id": BIFROST_CLIENT_ID,
+                "email": email,
+                "password": password
+            },
+            timeout=10
+        )
 
-    user = User.create_from_email(email, password)
-    token = create_jwt(str(user['_id']), user.get('roles', ['user']))
+        if response.status_code == 200:
+            # Success! Return the Bifrost JWT to the frontend
+            return jsonify(response.json()), 200
+        else:
+            # Pass through the error from Bifrost
+            return jsonify(response.json()), response.status_code
 
-    return jsonify({
-        "message": "Registration successful",
-        "token": token,
-        "user": {
-            "id": str(user['_id']),
-            "email": user['email'],
-            "onboarding_complete": False
-        }
-    }), 201
+    except Exception as e:
+        current_app.logger.error(f"Bifrost Login Proxy Error: {e}")
+        return jsonify({"error": "Authentication service unavailable"}), 503
 
 
-@auth_bp.route('/login', methods=['POST'])
-def login():
+@auth_bp.route('/register', methods=['POST'])
+def register():
+    """
+    Bifrost does not allow open registration via API (requires OTP).
+    We direct the user to the OTP flow.
+    """
     data = request.get_json()
     email = data.get('email')
-    password = data.get('password')
 
-    user = User.find_by_email(email)
-    if user and User.verify_password(user, password):
-        token = create_jwt(str(user['_id']), user.get('roles', ['user']))
+    if not email:
+        return jsonify({"error": "Email required"}), 400
 
-        # Check onboarding status
-        profile = get_db().settings.find_one({"account_id": user['_id']})
-        onboarding = profile.get('onboarding_complete', False) if profile else False
+    # Trigger Bifrost OTP Flow
+    try:
+        response = requests.post(
+            f"{BIFROST_URL}/auth/api/request-email-otp",
+            json={
+                "client_id": BIFROST_CLIENT_ID,
+                "email": email
+            },
+            timeout=10
+        )
+        return jsonify(response.json()), response.status_code
+    except Exception as e:
+        return jsonify({"error": "Registration service unavailable"}), 503
 
-        return jsonify({
-            "token": token,
-            "user": {
-                "id": str(user['_id']),
-                "email": user['email'],
-                "telegram_connected": bool(user.get('telegram_id')),
-                "onboarding_complete": onboarding
-            }
-        }), 200
-
-    return jsonify({"error": "Invalid credentials"}), 401
-
-
-# --- TELEGRAM -> WEB LOGIN FLOW ---
 
 @auth_bp.route('/verify-otp', methods=['POST'])
 def verify_otp_and_login():
     """
-    Receives a 6-digit code from the Frontend.
-    Calls Bifrost to verify it.
-    If valid, finds/creates the User profile via Telegram ID.
+    Proxies OTP verification to Bifrost (for Telegram/Email login codes).
     """
     data = request.get_json()
     code = data.get('code')
@@ -119,46 +124,36 @@ def verify_otp_and_login():
     if not code:
         return jsonify({"error": "Code required"}), 400
 
-    # 1. Verify Code with Bifrost
     try:
-        res = requests.post(
-            f"{BIFROST_URL}/internal/verify-otp",
-            json={"code": code},
-            auth=(BIFROST_CLIENT_ID, BIFROST_CLIENT_SECRET),
-            timeout=BIFROST_TIMEOUT
+        # Call Bifrost API
+        response = requests.post(
+            f"{BIFROST_URL}/auth/api/verify-otp-login",
+            json={
+                "client_id": BIFROST_CLIENT_ID,
+                "code": code
+            },
+            timeout=10
         )
-        res.raise_for_status()
-        bifrost_data = res.json()
-
-        if not bifrost_data.get('valid'):
-            return jsonify({"error": "Invalid or expired code"}), 401
-
-        telegram_id = bifrost_data.get('telegram_id')
+        return jsonify(response.json()), response.status_code
 
     except Exception as e:
-        current_app.logger.error(f"Bifrost OTP verify failed: {e}")
+        current_app.logger.error(f"Bifrost OTP Proxy Error: {e}")
         return jsonify({"error": "Verification service unavailable"}), 503
 
-    # 2. Find or Create User
-    user = User.find_by_telegram_id(telegram_id)
-    if not user:
-        user = User.create_from_telegram(telegram_id, "Unknown")
 
-    # 3. Generate Web Token
-    token = create_jwt(str(user['_id']), user.get('roles', ['user']))
-
-    profile = get_db().settings.find_one({"account_id": user['_id']})
-    onboarding = profile.get('onboarding_complete', False) if profile else False
-
+@auth_bp.route('/me', methods=['GET'])
+@login_required
+def get_current_user():
+    """
+    Returns the current user profile (synced from Bifrost).
+    """
+    user = g.user
     return jsonify({
-        "message": "Login successful",
-        "token": token,
-        "user": {
-            "id": str(user['_id']),
-            "telegram_id": telegram_id,
-            "email_connected": bool(user.get('email')),
-            "onboarding_complete": onboarding
-        }
+        "id": str(user['_id']),
+        "email": user.get('email'),
+        "role": user.get('role', 'user'),
+        "telegram_id": user.get('telegram_id'),
+        "display_name": user.get('display_name')
     }), 200
 
 
