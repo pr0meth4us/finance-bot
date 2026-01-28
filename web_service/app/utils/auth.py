@@ -14,6 +14,13 @@ BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")
 BIFROST_CLIENT_SECRET = os.getenv("BIFROST_CLIENT_SECRET")
 BIFROST_TIMEOUT = 60
 
+# Define Role Hierarchy: Higher numbers include lower permissions
+ROLE_LEVELS = {
+    'user': 1,
+    'premium_user': 2,
+    'admin': 99
+}
+
 
 def validate_bifrost_token(token):
     """
@@ -50,7 +57,8 @@ def validate_bifrost_token(token):
 
 def auth_required(min_role=None):
     """
-    Authenticates requests using ONLY Bifrost Tokens.
+    Authenticates requests using Bifrost Tokens.
+    Enforces Role Hierarchy (Admin > Premium > User).
     """
 
     def decorator(f):
@@ -86,11 +94,22 @@ def auth_required(min_role=None):
                     display_name=bifrost_user.get('display_name')
                 )
 
-            # 3. Role Check
+            # 3. Role Hierarchy Check
             user_role = bifrost_user.get('role', 'user')
+
             if min_role:
-                if user_role != min_role and user_role != 'admin':
-                    return jsonify({'message': f'Forbidden: Requires {min_role}'}), 403
+                # Get integer levels (Default to 0 if unknown role)
+                u_lvl = ROLE_LEVELS.get(user_role, 0)
+                r_lvl = ROLE_LEVELS.get(min_role, 99)
+
+                # Special Case: Admin passes everything
+                if user_role == 'admin':
+                    pass
+                # Standard Check: Current Level must be >= Required Level
+                elif u_lvl < r_lvl:
+                    return jsonify({
+                        'message': f'Forbidden: Requires {min_role} (Current: {user_role})'
+                    }), 403
 
             # 4. Set Context
             g.user = user
@@ -111,7 +130,7 @@ def auth_required(min_role=None):
 
 # --- Aliases for Backward Compatibility ---
 def login_required(f):
-    return auth_required(min_role=None)(f)
+    return auth_required(min_role='user')(f)
 
 
 def role_required(required_role):
