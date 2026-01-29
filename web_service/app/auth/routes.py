@@ -307,7 +307,30 @@ def complete_telegram_link():
         return jsonify({"error": str(e)}), 500
 
 
-# --- CACHE INVALIDATION & NOTIFICATION WEBHOOK ---
+@auth_bp.route('/telegram-login', methods=['POST'])
+def telegram_login():
+    data = request.get_json()
+    telegram_data = data.get('telegram_data')
+
+    if not telegram_data:
+        return jsonify({"error": "Missing telegram_data"}), 400
+
+    payload = {
+        "client_id": BIFROST_CLIENT_ID,
+        "telegram_data": telegram_data
+    }
+
+    try:
+        # Forward to Bifrost
+        response = requests.post(
+            f"{BIFROST_URL}/auth/api/telegram-login",
+            json=payload,
+            timeout=10
+        )
+        return jsonify(response.json()), response.status_code
+    except Exception as e:
+        current_app.logger.error(f"Bifrost Telegram Login Error: {e}")
+        return jsonify({"error": "Authentication service unavailable"}), 503
 
 @auth_bp.route('/internal/webhook/auth-event', methods=['POST'])
 def auth_event_webhook():

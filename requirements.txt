@@ -4,7 +4,7 @@ cachetools~=6.2.0
 
 # --- Backend ---
 Flask~=3.1.2
-pymongo[srv]==3.11
+pymongo[srv]==4.6.3
 python-dotenv~=1.1.1
 APScheduler~=3.11.0
 matplotlib~=3.10.6
@@ -20,3 +20,5 @@ pandas
 certifi
 flask-cors
 PyJWT
+flask-swagger-ui
+flasgger

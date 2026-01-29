@@ -10,7 +10,7 @@ from apscheduler.triggers.cron import CronTrigger
 from .config import Config
 from datetime import datetime, time, timedelta, date
 from zoneinfo import ZoneInfo
-from bson import ObjectId
+from flasgger import Swagger
 
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 UTC_TZ = ZoneInfo("UTC")
@@ -321,7 +321,6 @@ def create_app():
 
     client = MongoClient(Config.MONGODB_URI, tls=True, tlsCAFile=certifi.where())
     app.db = client[Config.DB_NAME]
-    print("✅ MongoDB connection successful.")
 
     scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Phnom_Penh')
 
@@ -362,7 +361,6 @@ def create_app():
 
     scheduler.start()
     app.scheduler = scheduler
-    print("⏰ Scheduler started with daily, weekly, monthly, semesterly, and yearly jobs.")
 
     # Register Blueprints
     from .settings.routes import settings_bp
@@ -383,7 +381,8 @@ def create_app():
     app.register_blueprint(reminders_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
-    app.register_blueprint(payments_bp)  # <--- REGISTER HERE
+    app.register_blueprint(payments_bp)
+    Swagger(app, template_file='../swagger.yaml')
 
     @app.route("/health")
     def health_check():

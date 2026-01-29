@@ -1,0 +1,830 @@
+swagger: '2.0'
+info:
+  title: Finance-Bot (Savvify-App) API
+  description: API for finance tracking, debts, analytics. Auth via Bifrost JWT.
+  version: 0.6.16
+basePath: /
+
+
+tags:
+  - name: Auth
+    description: Authentication and Account Linking via Bifrost
+  - name: Transactions
+    description: Income and Expense tracking
+  - name: Debts
+    description: Debt management and repayment
+  - name: Settings
+    description: User preferences and configuration
+  - name: Analytics
+    description: Reports, graphs, and insights
+  - name: Users
+    description: Profile management and GDPR
+  - name: Admin
+    description: Administration routes
+
+securityDefinitions:
+  BearerAuth:
+    type: apiKey
+    name: Authorization
+    in: header
+    description: "Enter your token with the 'Bearer ' prefix, e.g. 'Bearer eyJhbG...'"
+
+definitions:
+  TelegramLoginRequest:
+    type: object
+    required:
+      - telegram_data
+    properties:
+      telegram_data:
+        type: object
+        description: The JSON object returned by the Telegram Login Widget (signed).
+        example:
+          id: 123456789
+          first_name: "TestUser"
+          username: "testuser"
+          auth_date: 1769679778
+          hash: "Paste_Your_Hash_From_Python_Script_Here"
+
+  AuthLoginRequest:
+    type: object
+    required:
+      - email
+      - password
+    properties:
+      email:
+        type: string
+        format: email
+        example: user@example.com
+      password:
+        type: string
+        format: password
+        example: securePassword123!
+
+  AuthResponse:
+    type: object
+    properties:
+      jwt:
+        type: string
+        description: The Bifrost Session Token (JWT)
+  Transaction:
+    type: object
+    properties:
+      _id:
+        type: string
+      type:
+        type: string
+        enum: [income, expense]
+      amount:
+        type: number
+      currency:
+        type: string
+        enum: [USD, KHR]
+      categoryId:
+        type: string
+      accountName:
+        type: string
+      description:
+        type: string
+      timestamp:
+        type: string
+        format: date-time
+  Debt:
+    type: object
+    properties:
+      _id:
+        type: string
+      type:
+        type: string
+        enum: [lent, borrowed]
+      person:
+        type: string
+      amount:
+        type: number
+      currency:
+        type: string
+      remainingAmount:
+        type: number
+      description:
+        type: string
+      created_at:
+        type: string
+        format: date-time
+      status:
+        type: string
+        enum: [open, settled, cancelled]
+  Settings:
+    type: object
+    properties:
+      currency_mode:
+        type: string
+        enum: [single, dual]
+      primary_currency:
+        type: string
+      initial_balances:
+        type: object
+        additionalProperties:
+          type: number
+      categories:
+        type: object
+        properties:
+          expense:
+            type: array
+            items:
+              type: string
+          income:
+            type: array
+            items:
+              type: string
+      rate_preference:
+        type: string
+        enum: [live, fixed]
+      fixed_rate:
+        type: number
+  Profile:
+    type: object
+    properties:
+      account_id:
+        type: string
+      username:
+        type: string
+      display_name:
+        type: string
+      email:
+        type: string
+      role:
+        type: string
+        enum: [user, premium_user, admin]
+      created_at:
+        type: string
+        format: date-time
+  Error:
+    type: object
+    properties:
+      error:
+        type: string
+
+paths:
+  # ================= AUTH GROUP =================
+  /login:
+    post:
+      tags: [Auth]
+      summary: Login via Email/Password
+      description: Standard login using email and password.
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/AuthLoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          schema:
+            $ref: '#/definitions/AuthResponse'
+        '400':
+          description: Missing email or password
+        '401':
+          description: Invalid credentials
+
+  /telegram-login:
+    post:
+      tags: [Auth]
+      summary: Login via Telegram (Widget)
+      description: Exchanges signed Telegram data for a Bifrost JWT. Use generate_telegram_hash.py to create test data.
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/TelegramLoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          schema:
+            $ref: '#/definitions/AuthResponse'
+        '400':
+          description: Invalid hash or missing data
+        '503':
+          description: Bifrost unavailable
+  /verify-otp:
+    post:
+      tags: [Auth]
+      summary: Proxy OTP verification to Bifrost
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              telegram_id:
+                type: string
+              code:
+                type: string
+      responses:
+        '200':
+          description: JWT token
+          schema:
+            type: object
+            properties:
+              jwt:
+                type: string
+  /link/complete-telegram:
+    post:
+      tags: [Auth]
+      summary: Complete Telegram linking via token
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              telegram_id:
+                type: string
+              token:
+                type: string
+      responses:
+        '200':
+          description: Success message
+  /link-account:
+    post:
+      tags: [Auth]
+      summary: Link email/password credentials to current account
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              email:
+                type: string
+              password:
+                type: string
+      responses:
+        '200':
+          description: Success
+
+  # ================= TRANSACTIONS GROUP =================
+  /transactions/:
+    post:
+      tags: [Transactions]
+      summary: Add transaction
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/Transaction'
+      responses:
+        '201':
+          description: Transaction added
+    get:
+      tags: [Transactions]
+      summary: Get recent transactions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          type: integer
+          default: 20
+      responses:
+        '200':
+          description: List of transactions
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/Transaction'
+  /transactions/search:
+    post:
+      tags: [Transactions]
+      summary: Search transactions (premium)
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              period:
+                type: string
+                enum: [today, this_week, last_week, this_month]
+              start_date:
+                type: string
+                format: date
+              end_date:
+                type: string
+                format: date
+              transaction_type:
+                type: string
+                enum: [income, expense]
+              categories:
+                type: array
+                items:
+                  type: string
+              keywords:
+                type: array
+                items:
+                  type: string
+              keyword_logic:
+                type: string
+                enum: [AND, OR]
+      responses:
+        '200':
+          description: List of transactions
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/Transaction'
+  /transactions/{tx_id}:
+    get:
+      tags: [Transactions]
+      summary: Get transaction details
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tx_id
+          in: path
+          required: true
+          type: string
+      responses:
+        '200':
+          description: Transaction
+          schema:
+            $ref: '#/definitions/Transaction'
+    put:
+      tags: [Transactions]
+      summary: Update transaction
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tx_id
+          in: path
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              amount:
+                type: number
+              categoryId:
+                type: string
+              description:
+                type: string
+              timestamp:
+                type: string
+                format: date-time
+      responses:
+        '200':
+          description: Updated
+    delete:
+      tags: [Transactions]
+      summary: Delete transaction
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tx_id
+          in: path
+          required: true
+          type: string
+      responses:
+        '200':
+          description: Deleted
+
+  # ================= DEBTS GROUP =================
+  /debts/:
+    post:
+      tags: [Debts]
+      summary: Add debt
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/Debt'
+      responses:
+        '201':
+          description: Debt added
+    get:
+      tags: [Debts]
+      summary: Get open debts (premium)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of open debts
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/Debt'
+  /debts/{debt_id}:
+    get:
+      tags: [Debts]
+      summary: Get debt details
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: debt_id
+          in: path
+          required: true
+          type: string
+      responses:
+        '200':
+          description: Debt
+          schema:
+            $ref: '#/definitions/Debt'
+    put:
+      tags: [Debts]
+      summary: Update debt
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: debt_id
+          in: path
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              amount:
+                type: number
+              description:
+                type: string
+      responses:
+        '200':
+          description: Updated
+  /debts/{debt_id}/cancel:
+    post:
+      tags: [Debts]
+      summary: Cancel debt
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: debt_id
+          in: path
+          required: true
+          type: string
+      responses:
+        '200':
+          description: Cancelled
+  /debts/person/{person}/{currency}/repay:
+    post:
+      tags: [Debts]
+      summary: Record lump-sum repayment
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: person
+          in: path
+          required: true
+          type: string
+        - name: currency
+          in: path
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              amount:
+                type: number
+              type:
+                type: string
+                enum: [lent, borrowed]
+              timestamp:
+                type: string
+                format: date-time
+      responses:
+        '200':
+          description: Repaid
+  /debts/analysis:
+    get:
+      tags: [Debts]
+      summary: Get debt analysis (premium)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Analysis data
+
+  # ================= SETTINGS GROUP =================
+  /settings/:
+    get:
+      tags: [Settings]
+      summary: Get user settings
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Settings
+          schema:
+            $ref: '#/definitions/Settings'
+  /settings/balance:
+    post:
+      tags: [Settings]
+      summary: Update initial balance
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              currency:
+                type: string
+              amount:
+                type: number
+      responses:
+        '200':
+          description: Updated
+  /settings/category:
+    post:
+      tags: [Settings]
+      summary: Add category (premium)
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: [expense, income]
+              name:
+                type: string
+      responses:
+        '200':
+          description: Added
+    delete:
+      tags: [Settings]
+      summary: Remove category (premium)
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: [expense, income]
+              name:
+                type: string
+      responses:
+        '200':
+          description: Removed
+  /settings/rate:
+    post:
+      tags: [Settings]
+      summary: Update fixed exchange rate
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              rate:
+                type: number
+      responses:
+        '200':
+          description: Updated
+    get:
+      tags: [Settings]
+      summary: Get current rate
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Rate info
+  /settings/mode:
+    post:
+      tags: [Settings]
+      summary: Update currency mode
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              mode:
+                type: string
+                enum: [single, dual]
+              primary_currency:
+                type: string
+              language:
+                type: string
+              name_en:
+                type: string
+              name_km:
+                type: string
+      responses:
+        '200':
+          description: Updated
+  /settings/complete_onboarding:
+    post:
+      tags: [Settings]
+      summary: Complete onboarding
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Completed
+
+  # ================= ANALYTICS GROUP =================
+  /summary/detailed:
+    get:
+      tags: [Analytics]
+      summary: Get detailed summary
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Balances, debts, periods
+  /analytics/report/detailed:
+    get:
+      tags: [Analytics]
+      summary: Get detailed report (premium)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: start_date
+          in: query
+          type: string
+          format: date-time
+        - name: end_date
+          in: query
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: Report data
+  /analytics/habits:
+    get:
+      tags: [Analytics]
+      summary: Get spending habits (premium)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: start_date
+          in: query
+          required: true
+          type: string
+          format: date-time
+        - name: end_date
+          in: query
+          required: true
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: Habits data
+  /analytics/search:
+    post:
+      tags: [Analytics]
+      summary: Sum transactions for analytics (premium)
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+      responses:
+        '200':
+          description: Summed data
+
+  # ================= USERS GROUP =================
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Get my profile
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Profile
+          schema:
+            $ref: '#/definitions/Profile'
+    put:
+      tags: [Users]
+      summary: Update profile
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              display_name:
+                type: string
+              username:
+                type: string
+              email:
+                type: string
+              proof_token:
+                type: string
+      responses:
+        '200':
+          description: Updated
+  /users/credentials:
+    post:
+      tags: [Users]
+      summary: Set email/password credentials
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              email:
+                type: string
+              password:
+                type: string
+              proof_token:
+                type: string
+      responses:
+        '200':
+          description: Updated
+  /users/data/export:
+    post:
+      tags: [Users]
+      summary: Export user data (GDPR)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: JSON dump
+  /users/data/delete:
+    delete:
+      tags: [Users]
+      summary: Delete account (GDPR)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Deleted
+
+  # ================= ADMIN GROUP =================
+  /users/admin/list:
+    get:
+      tags: [Admin]
+      summary: List all users (admin)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User list
+  /users/admin/user/{target_id}:
+    delete:
+      tags: [Admin]
+      summary: Delete user (admin)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: target_id
+          in: path
+          required: true
+          type: string
+      responses:
+        '200':
+          description: Deleted
+
+security:
+  - BearerAuth: []
