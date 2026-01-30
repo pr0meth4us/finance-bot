@@ -3,70 +3,42 @@
 import hashlib
 import hmac
 import time
-import json
-import os
-import logging
-
-log = logging.getLogger(__name__)
-
-
-def generate_telegram_hash(user_data: dict, bot_token: str) -> str:
-    """
-    Generates the HMAC-SHA256 hash for Telegram login data,
-    mimicking the browser-based Telegram Login Widget.
-
-    Bifrost requires this hash to verify the data originates from
-    a trusted source (us) that possesses the bot_token.
-    """
-    if not bot_token:
-        log.error("Cannot generate hash: Missing Bot Token")
-        return ""
-
-    # 1. Filter out None values and the hash itself if present
-    data_check_arr = []
-    for key, value in sorted(user_data.items()):
-        if value is None or key == 'hash':
-            continue
-        data_check_arr.append(f"{key}={value}")
-
-    # 2. Construct data-check-string (alphabetical order, newline separated)
-    data_check_string = '\n'.join(data_check_arr)
-
-    # 3. Calculate Secret Key (SHA256 of the bot token)
-    secret_key = hashlib.sha256(bot_token.encode('utf-8')).digest()
-
-    # 4. Calculate HMAC-SHA256 signature
-    signature = hmac.new(
-        secret_key,
-        data_check_string.encode('utf-8'),
-        hashlib.sha256
-    ).hexdigest()
-
-    return signature
-
+from collections import OrderedDict
 
 def prepare_bifrost_payload(user, bot_token):
     """
-    Constructs the full payload required by Bifrost's /telegram-login endpoint.
-    Includes the critical 'hash' field for verification.
+    Creates a valid Telegram Login payload signed with the bot token.
+    This resolves the 401 error by strictly following Telegram's data-check-string rules.
     """
-    now = int(time.time())
-
-    # Structure matches what Telegram Widget sends
-    tg_data = {
-        "id": user.id,
-        "first_name": user.first_name,
-        "username": user.username,
-        "auth_date": now
+    # 1. Construct standard Telegram Auth Object
+    # All values must be strings or convertible to strings
+    user_data = {
+        'auth_date': str(int(time.time())),
+        'first_name': user.first_name,
+        'id': str(user.id),
+        'username': user.username or "",
     }
 
     if user.last_name:
-        tg_data["last_name"] = user.last_name
+        user_data['last_name'] = user.last_name
+    if user.language_code:
+        user_data['language_code'] = user.language_code
+    if user.photo_url:
+        user_data['photo_url'] = user.photo_url
 
-    # Note: The Python Telegram Bot User object usually doesn't provide photo_url
-    # directly in this context, so we skip it to avoid signing errors.
+    # 2. Create data-check-string (key=value\n...)
+    # Keys MUST be sorted alphabetically.
+    # The 'hash' field is NOT included in this string.
+    sorted_items = sorted(user_data.items())
+    data_check_string = "\n".join([f"{k}={v}" for k, v in sorted_items if v is not None])
 
-    # Sign the data
-    tg_data['hash'] = generate_telegram_hash(tg_data, bot_token)
+    # 3. Create Secret Key = SHA256(bot_token)
+    secret_key = hashlib.sha256(bot_token.encode()).digest()
 
-    return tg_data
+    # 4. Calculate HMAC-SHA256
+    _hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+
+    # 5. Add hash to payload
+    user_data['hash'] = _hash
+
+    return user_data

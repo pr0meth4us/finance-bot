@@ -15,40 +15,51 @@ async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     log.debug(f"🐞 [Upgrade Start] User: {user_id}")
 
-    # 1. Force a fresh status check via Internal API (Most Reliable)
-    log.debug("🐞 [Upgrade Start] Calling api_client.sync_subscription_status...")
-    fresh_role = api_client.sync_subscription_status(user_id)
-    log.debug(f"🐞 [Upgrade Start] Result from sync: {fresh_role}")
+    # 1. Try to fetch profile from Finance DB (Source of Truth for "Premium")
+    jwt = context.user_data.get('jwt')
+    db_role = None
 
-    if fresh_role:
-        context.user_data["role"] = fresh_role
-        if "profile" in context.user_data:
-            context.user_data["profile"]["role"] = fresh_role
-    else:
-        # Fallback to existing context
-        log.debug("🐞 [Upgrade Start] Sync failed/timeout. Trying cached JWT profile...")
-        jwt = context.user_data.get('jwt')
-        if jwt:
-            profile_data = api_client.get_my_profile(jwt)
-            if profile_data and "role" in profile_data:
-                log.debug(f"🐞 [Upgrade Start] Profile fetch success. Role: {profile_data['role']}")
-                context.user_data["role"] = profile_data["role"]
-                if "profile" not in context.user_data:
-                    context.user_data["profile"] = {}
-                context.user_data["profile"]["role"] = profile_data["role"]
+    if jwt:
+        log.debug("🐞 [Upgrade Start] Fetching profile from Finance DB...")
+        profile_data = api_client.get_my_profile(jwt)
 
-    # 2. STRICT CHECK: Check if already premium_user
-    role = context.user_data.get('role', 'user')
-    log.debug(f"🐞 [Upgrade Start] Final Role for Decision: {role} (Type: {type(role)})")
+        if profile_data and "role" in profile_data:
+            db_role = profile_data["role"]
+            log.debug(f"🐞 [Upgrade Start] DB says role is: {db_role}")
+            # Update Context
+            context.user_data["role"] = db_role
+            if "profile" not in context.user_data:
+                context.user_data["profile"] = {}
+            context.user_data["profile"]["role"] = db_role
+        else:
+            log.error("🐞 [Upgrade Start] Failed to fetch profile (401 or Network).")
+            # If we CANNOT verify the user status against the DB, we should NOT ask for money.
+            await update.message.reply_text(
+                "⚠️ <b>Connection Error</b>\n\n"
+                "We could not verify your subscription status with the Finance Server.\n"
+                "Please try logging in again: /login",
+                parse_mode='HTML'
+            )
+            return
 
-    # FIX: Handle integer roles (2=Premium, 99=Admin) and legacy strings
+    # 2. Check if Premium (Trust DB First)
     is_premium = False
-    if isinstance(role, int):
-        is_premium = role >= 2
-    elif isinstance(role, str):
-        is_premium = role in ['premium_user', 'admin']
 
-    log.debug(f"🐞 [Upgrade Start] is_premium decision: {is_premium}")
+    # Check DB role first
+    if db_role:
+        if isinstance(db_role, int) and db_role >= 2:
+            is_premium = True
+        elif isinstance(db_role, str) and db_role in ['premium_user', 'admin']:
+            is_premium = True
+
+    # Fallback to Bifrost Sync only if DB didn't say premium
+    if not is_premium:
+        log.debug("🐞 [Upgrade Start] DB says not premium. Checking Bifrost...")
+        fresh_role = api_client.sync_subscription_status(user_id)
+        if fresh_role == 'premium_user':
+            is_premium = True
+            # Update local to match Bifrost
+            context.user_data["role"] = 'premium_user'
 
     if is_premium:
         log.debug("🐞 [Upgrade Start] User is premium. Showing success message.")
