@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.1] - 2026-01-30
+
+### Fixed
+- **Upgrade Flow**: Enhanced `/upgrade` to force a `sync_subscription_status` check against Bifrost Internal API before showing payment options.
+  - This ensures users who are already `premium_user` in the DB but have a stale local session are not asked to pay again.
+
 ## [0.7.0] - 2026-01-30
 
 ### Refactored

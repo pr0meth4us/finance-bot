@@ -9,26 +9,41 @@ from decorators import authenticate_user
 @authenticate_user
 async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows the package selection menu."""
-    # Force a fresh profile fetch to ensure 'role' is up-to-date.
     user_id = update.effective_user.id
-    profile_data = api_client.get_my_profile(user_id)  # Use user_id to leverage token cache
-    # Note: api_client.get_my_profile returns the direct user object
-    if profile_data and "role" in profile_data:
-        context.user_data["role"] = profile_data["role"]
-    # Ensure profile struct is consistent
-    if "profile" not in context.user_data:
-        context.user_data["profile"] = {}
-    if profile_data:  # Guard against None to prevent AttributeError
-        context.user_data["profile"]["role"] = profile_data["role"]
 
-    # 1. STRICT CHECK: Check if already premium_user
+    # 1. Force a fresh status check via Internal API (Most Reliable)
+    # This bypasses potential cache issues with get_my_profile / JWT
+    fresh_role = api_client.sync_subscription_status(user_id)
+
+    if fresh_role:
+        context.user_data["role"] = fresh_role
+        # Sync to profile structure if it exists
+        if "profile" in context.user_data:
+            context.user_data["profile"]["role"] = fresh_role
+    else:
+        # Fallback to existing context if sync fails (e.g. timeout)
+        # Try fetching profile as backup
+        jwt = context.user_data.get('jwt')
+        if jwt:
+            profile_data = api_client.get_my_profile(jwt)
+            # Note: api_client.get_my_profile returns the direct user object
+            if profile_data and "role" in profile_data:
+                context.user_data["role"] = profile_data["role"]
+                # Ensure profile struct is consistent
+                if "profile" not in context.user_data:
+                    context.user_data["profile"] = {}
+                context.user_data["profile"]["role"] = profile_data["role"]
+
+    # 2. STRICT CHECK: Check if already premium_user
     role = context.user_data.get('role', 'user')
+
     # FIX: Handle integer roles (2=Premium, 99=Admin) and legacy strings
     is_premium = False
     if isinstance(role, int):
         is_premium = role >= 2
     elif isinstance(role, str):
         is_premium = role in ['premium_user', 'admin']
+
     if is_premium:
         await update.message.reply_text(
             "🌟 <b>You are already Premium!</b>\n\n"
@@ -38,11 +53,12 @@ async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 2. Show Packages
+    # 3. Show Packages
     keyboard = [
         [InlineKeyboardButton("📅 1 Month ($5.00)", callback_data="upgrade:1m")],
         [InlineKeyboardButton("🗓 1 Year ($45.00) - Save 25%", callback_data="upgrade:1y")]
     ]
+
     await update.message.reply_text(
         "<b>💎 Upgrade to Premium</b>\n\n"
         "Unlock advanced features like:\n"
@@ -53,6 +69,7 @@ async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML',
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+
 
 @authenticate_user
 async def upgrade_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
