@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.0] - 2026-01-30
+
+### Refactored
+- **Web Service Structure**: Split the monolithic `web_service/app/__init__.py` into modular services.
+    - Extracted report generation logic to `web_service/app/services/reporting.py`.
+    - Extracted scheduler jobs and configuration to `web_service/app/services/scheduler.py`.
+    - Extracted Telegram API helpers to `web_service/app/utils/telegram_helpers.py`.
+- **Telegram Bot Keyboards**: Converted `telegram_bot/keyboards.py` into a package (`telegram_bot/keyboards/`).
+    - Modularized keyboards into `menus.py`, `transactions.py`, `iou.py`, `analytics.py`, `settings.py`, and `utils.py`.
+    - Maintained full backward compatibility via `telegram_bot/keyboards/__init__.py` exports.
+
 ## [0.6.18] - 2026-01-30
 
 ### Fixed
