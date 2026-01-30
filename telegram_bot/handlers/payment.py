@@ -15,7 +15,30 @@ async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     log.debug(f"🐞 [Upgrade Start] User: {user_id}")
 
-    # 1. Try to fetch profile from Finance DB (Source of Truth for "Premium")
+    # --- 1. UI FEEDBACK (Loading State) ---
+    # We send this immediately because the DB/API sync below can take seconds.
+    query = update.callback_query
+    loading_msg = None
+
+    if query:
+        await query.answer()
+        # If clicked from a menu, replace the menu with loading text
+        loading_msg = await query.edit_message_text(
+            "⏳ <b>Verifying subscription status...</b>\n"
+            "<i>Syncing with Bifrost Identity...</i>",
+            parse_mode='HTML'
+        )
+    else:
+        # If typed /upgrade, reply with loading text
+        loading_msg = await update.message.reply_text(
+            "⏳ <b>Verifying subscription status...</b>\n"
+            "<i>Syncing with Bifrost Identity...</i>",
+            parse_mode='HTML'
+        )
+
+    # --- 2. DATA SYNC (The Slow Part) ---
+
+    # Try to fetch profile from Finance DB (Source of Truth for "Premium")
     jwt = context.user_data.get('jwt')
     db_role = None
 
@@ -33,8 +56,8 @@ async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["profile"]["role"] = db_role
         else:
             log.error("🐞 [Upgrade Start] Failed to fetch profile (401 or Network).")
-            # If we CANNOT verify the user status against the DB, we should NOT ask for money.
-            await update.message.reply_text(
+            # Edit the loading message to show error
+            await loading_msg.edit_text(
                 "⚠️ <b>Connection Error</b>\n\n"
                 "We could not verify your subscription status with the Finance Server.\n"
                 "Please try logging in again: /login",
@@ -42,7 +65,7 @@ async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-    # 2. Check if Premium (Trust DB First)
+    # --- 3. CHECK STATUS ---
     is_premium = False
 
     # Check DB role first
@@ -63,7 +86,7 @@ async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if is_premium:
         log.debug("🐞 [Upgrade Start] User is premium. Showing success message.")
-        await update.message.reply_text(
+        await loading_msg.edit_text(
             "🌟 <b>You are already Premium!</b>\n\n"
             "You have full access to all features.\n"
             "There is no need to upgrade again.",
@@ -71,14 +94,14 @@ async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 3. Show Packages
+    # --- 4. SHOW MENU ---
     log.debug("🐞 [Upgrade Start] User is NOT premium. Showing packages.")
     keyboard = [
         [InlineKeyboardButton("📅 1 Month ($5.00)", callback_data="upgrade:1m")],
         [InlineKeyboardButton("🗓 1 Year ($45.00) - Save 25%", callback_data="upgrade:1y")]
     ]
 
-    await update.message.reply_text(
+    await loading_msg.edit_text(
         "<b>💎 Upgrade to Premium</b>\n\n"
         "Unlock advanced features like:\n"
         "• 📊 Advanced Analytics\n"
@@ -117,7 +140,7 @@ async def upgrade_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ref_id = f"finance_SUB_{user_id}_{int(time.time())}"
     log.debug(f"🐞 [Upgrade Confirm] Generated Ref: {ref_id}")
 
-    # UI Feedback
+    # UI Feedback (Already acting as a loading state)
     await query.edit_message_text(f"🔄 Generating secure payment link for <b>{plan['label']}</b>...", parse_mode='HTML')
 
     # Call Bifrost API

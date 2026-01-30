@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.2] - 2026-01-30
+
+### Added
+- **UX**: Added an immediate "⏳ Verifying subscription status..." loading message to the `/upgrade` command in `telegram_bot/handlers/payment.py`.
+  - This informs the user that the bot is working while it syncs data with Bifrost and the Finance API, preventing confusion during the ~2s delay.
+
 ## [0.7.1] - 2026-01-30
 
 ### Fixed
