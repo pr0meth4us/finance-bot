@@ -18,11 +18,10 @@ BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")
 BIFROST_CLIENT_SECRET = os.getenv("BIFROST_CLIENT_SECRET")
 BIFROST_TIMEOUT = 60
 
+
 # --- HELPER: Send Telegram Notification ---
 def send_telegram_alert(telegram_id, message):
-    """
-    Sends a message to a specific Telegram user via the Bot API.
-    """
+    """Sends a security alert to the user's Telegram."""
     bot_token = os.getenv("TELEGRAM_TOKEN") or current_app.config.get("TELEGRAM_TOKEN")
     if not bot_token:
         current_app.logger.error("❌ Notification Failed: TELEGRAM_TOKEN not found in environment.")
@@ -71,7 +70,7 @@ def login():
                 "email": email,
                 "password": password
             },
-            timeout=10
+            timeout=BIFROST_TIMEOUT
         )
 
         if response.status_code == 200:
@@ -106,7 +105,7 @@ def register():
                 "client_id": BIFROST_CLIENT_ID,
                 "email": email
             },
-            timeout=10
+            timeout=BIFROST_TIMEOUT
         )
         return jsonify(response.json()), response.status_code
     except Exception as e:
@@ -132,13 +131,44 @@ def verify_otp_and_login():
                 "client_id": BIFROST_CLIENT_ID,
                 "code": code
             },
-            timeout=10
+            timeout=BIFROST_TIMEOUT
         )
         return jsonify(response.json()), response.status_code
 
     except Exception as e:
         current_app.logger.error(f"Bifrost OTP Proxy Error: {e}")
         return jsonify({"error": "Verification service unavailable"}), 503
+
+
+@auth_bp.route('/telegram-login', methods=['POST'])
+def telegram_login():
+    """
+    Proxies login via Telegram Widget to Bifrost.
+    """
+    data = request.get_json()
+    telegram_data = data.get('telegram_data')
+
+    if not telegram_data:
+        return jsonify({"error": "telegram_data object required"}), 400
+
+    payload = {
+        "client_id": BIFROST_CLIENT_ID,
+        "telegram_data": telegram_data
+    }
+
+    try:
+        # Call Bifrost
+        # FIX: Increased timeout from 10s to BIFROST_TIMEOUT (60s) to handle cold starts
+        response = requests.post(
+            f"{BIFROST_URL}/auth/api/telegram-login",
+            json=payload,
+            timeout=BIFROST_TIMEOUT
+        )
+        return jsonify(response.json()), response.status_code
+
+    except Exception as e:
+        current_app.logger.error(f"Bifrost Telegram Login Error: {e}")
+        return jsonify({"error": "Authentication service unavailable"}), 503
 
 
 @auth_bp.route('/me', methods=['GET'])
@@ -225,8 +255,8 @@ def initiate_telegram_link():
             timeout=BIFROST_TIMEOUT
         )
         resp.raise_for_status()
-
         token = resp.json().get('token')
+
         bot_username = os.getenv("TELEGRAM_BOT_USERNAME", "savvify_bot")
         deep_link = f"https://t.me/{bot_username}?start=link_{token}"
 
@@ -234,7 +264,6 @@ def initiate_telegram_link():
             "link_url": deep_link,
             "token": token
         })
-
     except Exception as e:
         current_app.logger.error(f"Failed to init telegram link: {e}")
         return jsonify({"error": "Service unavailable"}), 503
@@ -260,8 +289,8 @@ def generate_link_command():
             timeout=BIFROST_TIMEOUT
         )
         resp.raise_for_status()
-
         token = resp.json().get('token')
+
         if not token:
             return jsonify({"error": "Failed to generate token"}), 500
 
@@ -304,33 +333,11 @@ def complete_telegram_link():
             return jsonify(resp.json()), resp.status_code
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        current_app.logger.error(f"Telegram link completion failed: {e}")
+        return jsonify({"error": "Internal Error"}), 500
 
 
-@auth_bp.route('/telegram-login', methods=['POST'])
-def telegram_login():
-    data = request.get_json()
-    telegram_data = data.get('telegram_data')
-
-    if not telegram_data:
-        return jsonify({"error": "Missing telegram_data"}), 400
-
-    payload = {
-        "client_id": BIFROST_CLIENT_ID,
-        "telegram_data": telegram_data
-    }
-
-    try:
-        # Forward to Bifrost
-        response = requests.post(
-            f"{BIFROST_URL}/auth/api/telegram-login",
-            json=payload,
-            timeout=10
-        )
-        return jsonify(response.json()), response.status_code
-    except Exception as e:
-        current_app.logger.error(f"Bifrost Telegram Login Error: {e}")
-        return jsonify({"error": "Authentication service unavailable"}), 503
+# --- INTERNAL WEBHOOKS ---
 
 @auth_bp.route('/internal/webhook/auth-event', methods=['POST'])
 def auth_event_webhook():
@@ -374,11 +381,12 @@ def auth_event_webhook():
                 {"account_id": ObjectId(account_id)},
                 {"$set": update_data}
             )
-            current_app.logger.info(f" 🎉 Premium Activated for {account_id}")
+            current_app.logger.info(f"   🎉 Premium Activated for {account_id}")
 
             # 2. Notify User with details
             if telegram_id:
                 msg = "🌟 **Premium Activated!**\n\nThank you for supporting Savvify."
+
                 # Format Duration
                 if duration:
                     d_map = {"1m": "1 Month", "1y": "1 Year"}
@@ -393,9 +401,10 @@ def auth_event_webhook():
                         date_str = dt.strftime('%Y-%m-%d')
                         msg += f"\n**Valid until:** {date_str}"
                     except Exception:
-                        pass # Fallback if format differs
+                        pass  # Fallback if format differs
 
                 msg += "\n\nYour Premium features are now active!"
+
                 send_telegram_alert(telegram_id, msg)
             else:
                 current_app.logger.warning(f"⚠️ Could not notify user {account_id}: No Telegram ID found.")
@@ -410,7 +419,7 @@ def auth_event_webhook():
                 {"account_id": ObjectId(account_id)},
                 {"$set": {"role": "user"}}
             )
-            current_app.logger.info(f" 📉 Premium Expired for {account_id}")
+            current_app.logger.info(f"   📉 Premium Expired for {account_id}")
 
             # 2. Notify User
             if telegram_id:
@@ -427,16 +436,19 @@ def auth_event_webhook():
         elif event_type == 'account_update':
             # NEW: Sync updated fields directly from payload
             updates = {}
-            if data.get('telegram_id'): updates['telegram_id'] = data.get('telegram_id')
-            if data.get('email'): updates['email'] = data.get('email')
-            if data.get('username'): updates['username'] = data.get('username')
+            if data.get('telegram_id'):
+                updates['telegram_id'] = data.get('telegram_id')
+            if data.get('email'):
+                updates['email'] = data.get('email')
+            if data.get('username'):
+                updates['username'] = data.get('username')
 
             if updates:
                 get_db().settings.update_one(
                     {"account_id": ObjectId(account_id)},
                     {"$set": updates}
                 )
-                current_app.logger.info(f" 📝 Profile synced via Webhook: {list(updates.keys())}")
+                current_app.logger.info(f"   📝 Profile synced via Webhook: {list(updates.keys())}")
 
             if token:
                 invalidate_token_cache(token)
