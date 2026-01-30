@@ -25,8 +25,6 @@ class User:
         self.account_id = doc.get('account_id')
         self.settings = doc.get('settings', {})
         self._id = doc.get('_id')
-
-        # Identity fields synced from Bifrost
         self.username = doc.get('username')
         self.email = doc.get('email')
         self.display_name = doc.get('display_name')

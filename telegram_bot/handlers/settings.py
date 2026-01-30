@@ -167,21 +167,36 @@ async def categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def category_action_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
-    # [REFACTOR] Checked role strictly against 'premium_user'
-    # Fallback to context role if profile not yet updated
+    # [REFACTOR] Fix Role check for Integers
     role = context.user_data.get('role', 'user')
     profile = context.user_data.get('profile', {})
 
-    # Also check profile directly in case context is stale but profile was fetched
-    if profile.get('role') == 'premium_user':
-        role = 'premium_user'
+    # Check profile directly
+    profile_role = profile.get('role')
 
-    # Admin bypass via env
+    # Admin bypass
     admin_id = os.getenv("ADMIN_USER_ID")
-    if admin_id and str(update.effective_user.id) == admin_id:
-        role = 'premium_user'
+    is_admin = admin_id and str(update.effective_user.id) == admin_id
 
-    if role != 'premium_user':
+    # Determine if premium
+    is_premium = False
+
+    # Check context role
+    if isinstance(role, int) and role >= 2:
+        is_premium = True
+    elif role in ['premium_user', 'admin']:
+        is_premium = True
+
+    # Check profile role (redundant but safe)
+    if isinstance(profile_role, int) and profile_role >= 2:
+        is_premium = True
+    elif profile_role in ['premium_user', 'admin']:
+        is_premium = True
+
+    if is_admin:
+        is_premium = True
+
+    if not is_premium:
         await query.answer("🔒 Premium Feature", show_alert=True)
         upsell_text = (
             "🔒 <b>Manage Categories is Locked</b>\n\n"

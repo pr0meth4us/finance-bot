@@ -7,7 +7,7 @@ from collections import OrderedDict
 
 # --- CONFIGURATION ---
 # Replace this with your actual TELEGRAM_TOKEN from .env
-BOT_TOKEN = "8240695334:AAFjKEfnxS_fXcbtY7XMeoAwy0TzTDIExZE"
+BOT_TOKEN = ":"
 
 # Test User Data
 USER_DATA = {

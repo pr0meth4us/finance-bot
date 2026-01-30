@@ -1,44 +1,36 @@
-# web_service/app/utils/auth.py
-
-import os
 import requests
 import logging
 from functools import wraps
-from flask import request, jsonify, g, current_app
+from flask import request, jsonify, g
 from requests.auth import HTTPBasicAuth
+from app.config import Config
 
 log = logging.getLogger(__name__)
-
-BIFROST_URL = os.getenv("BIFROST_URL", "http://bifrost:5000")
-BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")
-BIFROST_CLIENT_SECRET = os.getenv("BIFROST_CLIENT_SECRET")
-BIFROST_TIMEOUT = 60
-
-# Define Role Hierarchy: Higher numbers include lower permissions
-ROLE_LEVELS = {
-    'user': 1,
-    'premium_user': 2,
-    'admin': 99
-}
 
 
 def validate_bifrost_token(token):
     """
     Asks Bifrost: "Is this token valid?"
+    Uses Basic Auth to authenticate the Service (Finance Bot) itself.
     """
-    if not token or not BIFROST_CLIENT_ID:
+    if not Config.BIFROST_CLIENT_ID or not Config.BIFROST_CLIENT_SECRET:
+        log.error("CRITICAL: BIFROST_CLIENT_ID or BIFROST_CLIENT_SECRET is missing in environment!")
+        return None
+
+    if not token:
         return None
 
     try:
-        url = f"{BIFROST_URL}/internal/validate-token"
-        auth = HTTPBasicAuth(BIFROST_CLIENT_ID, BIFROST_CLIENT_SECRET)
+        url = f"{Config.BIFROST_URL}/internal/validate-token"
+        auth = HTTPBasicAuth(Config.BIFROST_CLIENT_ID, Config.BIFROST_CLIENT_SECRET)
         payload = {"jwt": token}
 
-        response = requests.post(url, json=payload, auth=auth, timeout=BIFROST_TIMEOUT)
+        response = requests.post(url, json=payload, auth=auth, timeout=Config.BIFROST_TIMEOUT)
 
         if response.status_code == 200:
             data = response.json()
             if not data.get('is_valid'):
+                log.warning(f"Bifrost rejected token. Reason: {data.get('reason', 'Unknown')}")
                 return None
 
             return {
@@ -49,9 +41,15 @@ def validate_bifrost_token(token):
                 'telegram_id': data.get('telegram_id'),
                 'display_name': data.get('display_name')
             }
+
+        log.error(f"Bifrost Validation Failed. HTTP {response.status_code}: {response.text}")
+        return None
+
+    except requests.exceptions.ConnectionError:
+        log.error(f"Could not connect to Bifrost at {Config.BIFROST_URL}. Is the service running?")
         return None
     except Exception as e:
-        log.error(f"Error connecting to Bifrost: {e}")
+        log.error(f"Unexpected error validating Bifrost token: {e}")
         return None
 
 
@@ -68,9 +66,13 @@ def auth_required(min_role=None):
             if not auth_header:
                 return jsonify({'message': 'Missing Authorization Header'}), 401
 
-            try:
-                token = auth_header.split(" ")[1]
-            except IndexError:
+            # Robust Token Extraction: Handle "Bearer <token>" and raw "<token>"
+            parts = auth_header.split()
+            if len(parts) == 2 and parts[0].lower() == 'bearer':
+                token = parts[1]
+            elif len(parts) == 1:
+                token = parts[0]
+            else:
                 return jsonify({'message': 'Invalid Token Format'}), 401
 
             # 1. Validate with Bifrost
@@ -98,9 +100,9 @@ def auth_required(min_role=None):
             user_role = bifrost_user.get('role', 'user')
 
             if min_role:
-                # Get integer levels (Default to 0 if unknown role)
-                u_lvl = ROLE_LEVELS.get(user_role, 0)
-                r_lvl = ROLE_LEVELS.get(min_role, 99)
+                # Use ROLE_LEVELS from config
+                u_lvl = Config.ROLE_LEVELS.get(user_role, 0)
+                r_lvl = Config.ROLE_LEVELS.get(min_role, 99)
 
                 # Special Case: Admin passes everything
                 if user_role == 'admin':

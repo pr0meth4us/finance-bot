@@ -25,7 +25,14 @@ async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 1. STRICT CHECK: Check if already premium_user
     role = context.user_data.get('role', 'user')
 
-    if role == 'premium_user':
+    # FIX: Handle integer roles (2=Premium, 99=Admin) and legacy strings
+    is_premium = False
+    if isinstance(role, int):
+        is_premium = role >= 2
+    elif isinstance(role, str):
+        is_premium = role in ['premium_user', 'admin']
+
+    if is_premium:
         await update.message.reply_text(
             "🌟 <b>You are already Premium!</b>\n\n"
             "You have full access to all features.\n"

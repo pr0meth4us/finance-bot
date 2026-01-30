@@ -3,6 +3,7 @@ from app.models import User
 from app.utils.auth import auth_required, service_auth_required, invalidate_token_cache, login_required
 from app import get_db
 from app.utils.db import settings_collection
+from app.config import Config
 import requests
 from requests.auth import HTTPBasicAuth
 import os
@@ -13,17 +14,10 @@ from datetime import datetime
 
 auth_bp = Blueprint('auth', __name__)
 
-BIFROST_URL = os.getenv("BIFROST_URL", "http://bifrost:5000")
-BIFROST_CLIENT_ID = os.getenv("BIFROST_CLIENT_ID")
-BIFROST_CLIENT_SECRET = os.getenv("BIFROST_CLIENT_SECRET")
-BIFROST_TIMEOUT = 60
-
-
 # --- HELPER: Send Telegram Notification ---
 def send_telegram_alert(telegram_id, message):
     """Sends a security alert to the user's Telegram."""
-    bot_token = os.getenv("TELEGRAM_TOKEN") or current_app.config.get("TELEGRAM_TOKEN")
-    if not bot_token:
+    if not Config.TELEGRAM_TOKEN:
         current_app.logger.error("❌ Notification Failed: TELEGRAM_TOKEN not found in environment.")
         return
 
@@ -32,7 +26,7 @@ def send_telegram_alert(telegram_id, message):
         return
 
     try:
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        url = f"https://api.telegram.org/bot{Config.TELEGRAM_TOKEN}/sendMessage"
         payload = {
             "chat_id": telegram_id,
             "text": message,
@@ -64,13 +58,13 @@ def login():
     try:
         # Call Bifrost API
         response = requests.post(
-            f"{BIFROST_URL}/auth/api/login",
+            f"{Config.BIFROST_URL}/auth/api/login",
             json={
-                "client_id": BIFROST_CLIENT_ID,
+                "client_id": Config.BIFROST_CLIENT_ID,
                 "email": email,
                 "password": password
             },
-            timeout=BIFROST_TIMEOUT
+            timeout=Config.BIFROST_TIMEOUT
         )
 
         if response.status_code == 200:
@@ -100,12 +94,12 @@ def register():
     # Trigger Bifrost OTP Flow
     try:
         response = requests.post(
-            f"{BIFROST_URL}/auth/api/request-email-otp",
+            f"{Config.BIFROST_URL}/auth/api/request-email-otp",
             json={
-                "client_id": BIFROST_CLIENT_ID,
+                "client_id": Config.BIFROST_CLIENT_ID,
                 "email": email
             },
-            timeout=BIFROST_TIMEOUT
+            timeout=Config.BIFROST_TIMEOUT
         )
         return jsonify(response.json()), response.status_code
     except Exception as e:
@@ -126,12 +120,12 @@ def verify_otp_and_login():
     try:
         # Call Bifrost API
         response = requests.post(
-            f"{BIFROST_URL}/auth/api/verify-otp-login",
+            f"{Config.BIFROST_URL}/auth/api/verify-otp-login",
             json={
-                "client_id": BIFROST_CLIENT_ID,
+                "client_id": Config.BIFROST_CLIENT_ID,
                 "code": code
             },
-            timeout=BIFROST_TIMEOUT
+            timeout=Config.BIFROST_TIMEOUT
         )
         return jsonify(response.json()), response.status_code
 
@@ -152,7 +146,7 @@ def telegram_login():
         return jsonify({"error": "telegram_data object required"}), 400
 
     payload = {
-        "client_id": BIFROST_CLIENT_ID,
+        "client_id":Config.BIFROST_CLIENT_ID,
         "telegram_data": telegram_data
     }
 
@@ -160,9 +154,9 @@ def telegram_login():
         # Call Bifrost
         # FIX: Increased timeout from 10s to BIFROST_TIMEOUT (60s) to handle cold starts
         response = requests.post(
-            f"{BIFROST_URL}/auth/api/telegram-login",
+            f"{Config.BIFROST_URL}/auth/api/telegram-login",
             json=payload,
-            timeout=BIFROST_TIMEOUT
+            timeout=Config.BIFROST_TIMEOUT
         )
         return jsonify(response.json()), response.status_code
 
@@ -216,7 +210,7 @@ def link_account():
             target_url,
             json=payload,
             auth=HTTPBasicAuth(client_id, client_secret),
-            timeout=BIFROST_TIMEOUT
+            timeout=Config.BIFROST_TIMEOUT
         )
 
         if resp.status_code == 200:
@@ -252,7 +246,7 @@ def initiate_telegram_link():
             f"{bifrost_url}/internal/generate-link-token",
             json={"account_id": g.account_id},
             auth=HTTPBasicAuth(client_id, client_secret),
-            timeout=BIFROST_TIMEOUT
+            timeout=Config.BIFROST_TIMEOUT
         )
         resp.raise_for_status()
         token = resp.json().get('token')
@@ -286,7 +280,7 @@ def generate_link_command():
             f"{bifrost_url}/internal/generate-link-token",
             json={"account_id": g.account_id},
             auth=HTTPBasicAuth(client_id, client_secret),
-            timeout=BIFROST_TIMEOUT
+            timeout=Config.BIFROST_TIMEOUT
         )
         resp.raise_for_status()
         token = resp.json().get('token')
@@ -324,7 +318,7 @@ def complete_telegram_link():
             f"{bifrost_url}/internal/link-account",
             json={"link_token": token, "telegram_id": telegram_id},
             auth=HTTPBasicAuth(client_id, client_secret),
-            timeout=BIFROST_TIMEOUT
+            timeout=Config.BIFROST_TIMEOUT
         )
 
         if resp.status_code == 200:
