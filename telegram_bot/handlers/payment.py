@@ -3,39 +3,43 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 import time
+import logging
 import api_client
 from decorators import authenticate_user
+
+log = logging.getLogger(__name__)
 
 @authenticate_user
 async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows the package selection menu."""
     user_id = update.effective_user.id
+    log.debug(f"🐞 [Upgrade Start] User: {user_id}")
 
     # 1. Force a fresh status check via Internal API (Most Reliable)
-    # This bypasses potential cache issues with get_my_profile / JWT
+    log.debug("🐞 [Upgrade Start] Calling api_client.sync_subscription_status...")
     fresh_role = api_client.sync_subscription_status(user_id)
+    log.debug(f"🐞 [Upgrade Start] Result from sync: {fresh_role}")
 
     if fresh_role:
         context.user_data["role"] = fresh_role
-        # Sync to profile structure if it exists
         if "profile" in context.user_data:
             context.user_data["profile"]["role"] = fresh_role
     else:
-        # Fallback to existing context if sync fails (e.g. timeout)
-        # Try fetching profile as backup
+        # Fallback to existing context
+        log.debug("🐞 [Upgrade Start] Sync failed/timeout. Trying cached JWT profile...")
         jwt = context.user_data.get('jwt')
         if jwt:
             profile_data = api_client.get_my_profile(jwt)
-            # Note: api_client.get_my_profile returns the direct user object
             if profile_data and "role" in profile_data:
+                log.debug(f"🐞 [Upgrade Start] Profile fetch success. Role: {profile_data['role']}")
                 context.user_data["role"] = profile_data["role"]
-                # Ensure profile struct is consistent
                 if "profile" not in context.user_data:
                     context.user_data["profile"] = {}
                 context.user_data["profile"]["role"] = profile_data["role"]
 
     # 2. STRICT CHECK: Check if already premium_user
     role = context.user_data.get('role', 'user')
+    log.debug(f"🐞 [Upgrade Start] Final Role for Decision: {role} (Type: {type(role)})")
 
     # FIX: Handle integer roles (2=Premium, 99=Admin) and legacy strings
     is_premium = False
@@ -44,7 +48,10 @@ async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif isinstance(role, str):
         is_premium = role in ['premium_user', 'admin']
 
+    log.debug(f"🐞 [Upgrade Start] is_premium decision: {is_premium}")
+
     if is_premium:
+        log.debug("🐞 [Upgrade Start] User is premium. Showing success message.")
         await update.message.reply_text(
             "🌟 <b>You are already Premium!</b>\n\n"
             "You have full access to all features.\n"
@@ -54,6 +61,7 @@ async def upgrade_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # 3. Show Packages
+    log.debug("🐞 [Upgrade Start] User is NOT premium. Showing packages.")
     keyboard = [
         [InlineKeyboardButton("📅 1 Month ($5.00)", callback_data="upgrade:1m")],
         [InlineKeyboardButton("🗓 1 Year ($45.00) - Save 25%", callback_data="upgrade:1y")]
@@ -79,6 +87,7 @@ async def upgrade_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Parse choice (1m or 1y)
     duration_code = query.data.split(":")[1]
+    log.debug(f"🐞 [Upgrade Confirm] User selected duration: {duration_code}")
 
     # Define Packages
     packages = {
@@ -88,18 +97,20 @@ async def upgrade_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     plan = packages.get(duration_code)
     if not plan:
+        log.error(f"🐞 [Upgrade Confirm] Invalid plan code: {duration_code}")
         await query.edit_message_text("❌ Invalid plan selected.")
         return
 
     # Generate Ref
     user_id = update.effective_user.id
     ref_id = f"finance_SUB_{user_id}_{int(time.time())}"
+    log.debug(f"🐞 [Upgrade Confirm] Generated Ref: {ref_id}")
 
     # UI Feedback
     await query.edit_message_text(f"🔄 Generating secure payment link for <b>{plan['label']}</b>...", parse_mode='HTML')
 
     # Call Bifrost API
-    # STRICT: target_role MUST be 'premium_user'
+    log.debug(f"🐞 [Upgrade Confirm] Calling create_payment_intent for ${plan['price']}...")
     intent = api_client.create_payment_intent(
         user_id=user_id,
         amount=plan['price'],
@@ -109,6 +120,7 @@ async def upgrade_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if not intent or not intent.get('success'):
+        log.error(f"🐞 [Upgrade Confirm] Intent creation failed. Result: {intent}")
         await query.edit_message_text(
             "❌ Error: Could not contact payment gateway. Please try again later.",
             parse_mode='HTML'
@@ -117,6 +129,7 @@ async def upgrade_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     secure_link = intent['secure_link']
     manual_command = intent['manual_command']
+    log.debug(f"🐞 [Upgrade Confirm] Success. Link: {secure_link}")
 
     keyboard = [
         [InlineKeyboardButton(f"💎 Pay ${plan['price']:.2f}", url=secure_link)]

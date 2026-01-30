@@ -33,11 +33,22 @@ def create_payment_intent(user_id, amount, duration, target_role, client_ref_id)
         "currency": "USD"
     }
 
+    log.debug(f"🐞 API REQ [create_payment_intent] URL: {url}")
+    log.debug(f"🐞 API REQ Payload: {payload}")
+
     # Authenticate as the FinanceBot Service
     auth = HTTPBasicAuth(BIFROST_CLIENT_ID, BIFROST_CLIENT_SECRET)
 
     try:
         res = requests.post(url, json=payload, auth=auth, timeout=BIFROST_TIMEOUT)
+        log.debug(f"🐞 API RES Status: {res.status_code}")
+
+        # Log response body if error or debug
+        if res.status_code != 200:
+            log.error(f"🐞 API RES Error Body: {res.text}")
+        else:
+            log.debug(f"🐞 API RES Success Body: {res.text}")
+
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:

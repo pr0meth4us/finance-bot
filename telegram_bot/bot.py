@@ -40,10 +40,12 @@ from utils.i18n import load_translations
 
 load_dotenv()
 
+# --- ENABLE DEBUG LOGGING ---
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
+    level=logging.DEBUG, # CHANGED: INFO -> DEBUG for full visibility
 )
+# Keep noisy libraries quiet unless necessary
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
@@ -120,6 +122,7 @@ def main():
         return
 
     logger.info(f"Starting Bot. API URL: {os.getenv('WEB_SERVICE_URL')}")
+    logger.debug("🐞 DEBUG MODE ENABLED: Logging every step.")
 
     app = Application.builder().token(token).post_init(post_init).build()
     app.add_error_handler(on_error)
