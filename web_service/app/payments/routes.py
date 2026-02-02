@@ -60,3 +60,32 @@ def create_checkout_session():
     except Exception as e:
         current_app.logger.error(f"Payment Proxy Error: {e}")
         return jsonify({"error": "Internal service error"}), 500
+
+# Proxy route to forward proof screenshots to Bifrost securely
+@payments_bp.route('/upload-proof', methods=['POST'])
+@auth_required(min_role="user")
+def proxy_upload_proof():
+    if 'proof' not in request.files:
+        return jsonify({"error": "No proof file provided"}), 400
+
+    file = request.files['proof']
+    tx_id = request.form.get('transaction_id')
+
+    config = current_app.config
+    # Bifrost internal endpoint
+    target_url = f"{config['BIFROST_URL'].rstrip('/')}/internal/payments/submit-proof"
+
+    try:
+        # Stream file to Bifrost with Service Authentication
+        files = {'file': (file.filename, file.stream, file.mimetype)}
+        data = {'transaction_id': tx_id, 'account_id': str(g.account_id)}
+
+        # Service Auth (Client Credentials)
+        auth = HTTPBasicAuth(config["BIFROST_CLIENT_ID"], config["BIFROST_CLIENT_SECRET"])
+
+        response = requests.post(target_url, files=files, data=data, auth=auth, timeout=60)
+        return jsonify(response.json()), response.status_code
+
+    except Exception as e:
+        current_app.logger.error(f"Proof Upload Proxy Failed: {e}")
+        return jsonify({"error": "Failed to forward proof"}), 502
