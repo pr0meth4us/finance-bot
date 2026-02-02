@@ -50,3 +50,22 @@ def add_reminder():
 
     current_app.logger.info(f"Scheduled reminder for {account_id} at {remind_dt}")
     return jsonify({'message': 'Reminder scheduled successfully'}), 201
+
+# finance-app/web_service/app/reminders/routes.py
+
+@reminders_bp.route('/', methods=['GET'])
+@auth_required(min_role="user")
+def get_reminders():
+    # Fetch active reminders for the user
+    reminders = list(mongo.db.reminders.find(
+        {"account_id": str(g.account_id)},
+        {"_id": 1, "title": 1, "amount": 1, "currency": 1, "frequency": 1, "next_run_time": 1, "chat_id": 1}
+    ).sort("next_run_time", 1))
+
+    # Convert ObjectIds to strings
+    for r in reminders:
+        r["_id"] = str(r["_id"])
+        if "next_run_time" in r and r["next_run_time"]:
+            r["next_run_time"] = r["next_run_time"].isoformat()
+
+    return jsonify(reminders), 200
