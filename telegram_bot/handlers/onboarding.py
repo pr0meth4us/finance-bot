@@ -10,6 +10,7 @@ from telegram.ext import (
     CommandHandler
 )
 import logging
+import html
 import api_client
 from utils.i18n import t
 from decorators import authenticate_user
@@ -35,9 +36,6 @@ log = logging.getLogger(__name__)
 async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Entry point for /start.
-    Logic:
-    - If user already onboarded -> Show 'Already Onboarded' message + End.
-    - If new user -> Start Setup.
     """
     user_id = update.effective_user.id
     profile = context.user_data["profile"]
@@ -47,7 +45,6 @@ async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg, parse_mode='Markdown')
         return ConversationHandler.END
 
-    # New user? Go straight to setup
     log.info(f"User {user_id}: Starting onboarding (First Time).")
     return await _start_setup_flow(update, context)
 
@@ -56,14 +53,10 @@ async def onboarding_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reset_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Entry point for /reset.
-    Logic:
-    - If user already onboarded -> Show Confirmation Warning -> Then Start Setup.
-    - If new user -> Start Setup immediately.
     """
     user_id = update.effective_user.id
     profile = context.user_data["profile"]
 
-    # Safety Check for existing users
     if profile.get("onboarding_complete"):
         log.info(f"User {user_id}: Triggered /reset. Asking confirmation.")
 
@@ -79,7 +72,6 @@ async def reset_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
         return CONFIRM_RESET
 
-    # If they haven't onboarded yet, /reset just acts like /start
     return await _start_setup_flow(update, context)
 
 
@@ -96,7 +88,6 @@ async def confirm_reset_callback(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def _start_setup_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """The actual setup logic (Language -> Mode -> Balance)."""
     context.user_data['onboarding_data'] = {}
 
     msg = (
@@ -116,18 +107,15 @@ async def _start_setup_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ASK_LANGUAGE
 
 
-# --- Step Handlers ---
-
 async def received_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     choice = update.message.text.strip().lower()
     if choice not in ['en', 'km']:
-        await update.message.reply_text("Invalid choice. Reply `en` or `km`.\nមិនត្រឹមត្រូវទេ។ សូមឆ្លើយ `en` ឬ `km`។")
+        await update.message.reply_text("Invalid choice.\nReply `en` or `km`.\nមិនត្រឹមត្រូវទេ។ សូមឆ្លើយ `en` ឬ `km`។")
         return ASK_LANGUAGE
 
     context.user_data['onboarding_data']['language'] = choice
     context.user_data['profile']['settings']['language'] = choice
 
-    # FIX: parse_mode='HTML' added to render <code> tags correctly
     await update.message.reply_text(t("onboarding.ask_mode", context), parse_mode='HTML')
     return ASK_CURRENCY_MODE
 
@@ -149,7 +137,6 @@ async def received_currency_mode(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text(t("onboarding.invalid_mode", context))
         return ASK_CURRENCY_MODE
 
-    # FIX: parse_mode='HTML' added
     await update.message.reply_text(t(prompt_key, context), parse_mode='HTML')
     return next_state
 
@@ -163,10 +150,8 @@ async def received_name_en(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ASK_SINGLE_CURRENCY
     else:
         if 'name_km' not in data:
-            # FIX: Use existing name_en as default for name_km to streamline flow
             data['name_km'] = data['name_en']
             return await _save_mode_and_names(update, context)
-
         return await _save_mode_and_names(update, context)
 
 
@@ -179,10 +164,8 @@ async def received_name_km(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ASK_SINGLE_CURRENCY
     else:
         if 'name_en' not in data:
-            # FIX: Use existing name_km as default for name_en to streamline flow
             data['name_en'] = data['name_km']
             return await _save_mode_and_names(update, context)
-
         return await _save_mode_and_names(update, context)
 
 
@@ -203,8 +186,9 @@ async def _save_mode_and_names(update: Update, context: ContextTypes.DEFAULT_TYP
     profile['name_km'] = data.get('name_km')
     profile['settings']['currency_mode'] = data['mode']
 
-    display_name = data.get('name_km') if data['language'] == 'km' else data.get('name_en')
-    # FIX: parse_mode='HTML'
+    raw_display = data.get('name_km') if data['language'] == 'km' else data.get('name_en')
+    display_name = html.escape(str(raw_display))
+
     await update.message.reply_text(t("onboarding.ask_usd_balance", context, name=display_name), parse_mode='HTML')
     return ASK_USD_BALANCE
 
@@ -212,7 +196,14 @@ async def _save_mode_and_names(update: Update, context: ContextTypes.DEFAULT_TYP
 async def received_single_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = context.user_data['onboarding_data']
     jwt = context.user_data['jwt']
+
     currency = update.message.text.strip().upper()
+
+    # Input validation to prevent XSS / System misuse
+    if not currency.isalpha() or len(currency) > 5:
+        await update.message.reply_text("⚠️ Invalid currency. Please use 3-5 letters (e.g., USD, EUR).")
+        return ASK_SINGLE_CURRENCY
+
     data['primary_currency'] = currency
 
     api_client.update_user_mode(
@@ -230,9 +221,12 @@ async def received_single_currency(update: Update, context: ContextTypes.DEFAULT
     profile['settings']['currency_mode'] = data['mode']
     profile['settings']['primary_currency'] = currency
 
-    display_name = data.get('name_en') or data.get('name_km')
-    # FIX: parse_mode='HTML'
-    await update.message.reply_text(t("onboarding.ask_single_balance", context, name=display_name, currency=currency), parse_mode='HTML')
+    raw_display = data.get('name_en') or data.get('name_km')
+    display_name = html.escape(str(raw_display))
+    safe_curr = html.escape(currency)
+
+    await update.message.reply_text(t("onboarding.ask_single_balance", context, name=display_name, currency=safe_curr),
+                                    parse_mode='HTML')
     return ASK_SINGLE_BALANCE
 
 
@@ -242,7 +236,6 @@ async def received_usd_balance(update: Update, context: ContextTypes.DEFAULT_TYP
         api_client.update_initial_balance(context.user_data['jwt'], 'USD', amount)
         context.user_data['profile']['settings']['initial_balances']['USD'] = amount
 
-        # FIX: parse_mode='HTML'
         await update.message.reply_text(t("onboarding.ask_khr_balance", context), parse_mode='HTML')
         return ASK_KHR_BALANCE
     except ValueError:
@@ -258,7 +251,6 @@ async def received_khr_balance(update: Update, context: ContextTypes.DEFAULT_TYP
         api_client.update_initial_balance(jwt, 'KHR', amount)
         context.user_data['profile']['settings']['initial_balances']['KHR'] = amount
 
-        # Proceed to Subscription Step
         await update.message.reply_text(
             t("onboarding.ask_subscription", context),
             parse_mode='HTML',
@@ -279,8 +271,6 @@ async def received_single_balance(update: Update, context: ContextTypes.DEFAULT_
         api_client.update_initial_balance(jwt, currency, amount)
         context.user_data['profile']['settings']['initial_balances'][currency] = amount
 
-        # Proceed to Subscription Step
-        # FIX: Changed 'Markdown' to 'HTML' to support <code> tags in translation
         await update.message.reply_text(
             t("onboarding.ask_subscription", context),
             parse_mode='HTML',
@@ -298,7 +288,6 @@ async def received_subscription_choice(update: Update, context: ContextTypes.DEF
     choice = query.data
     jwt = context.user_data['jwt']
 
-    # FIX: Handle Premium selection gracefully instead of showing an error.
     if choice == 'plan_premium':
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -311,7 +300,6 @@ async def received_subscription_choice(update: Update, context: ContextTypes.DEF
             text="✅ Selected Free Plan."
         )
 
-    # Finalize
     api_client.complete_onboarding(jwt)
     context.user_data['profile']['onboarding_complete'] = True
     if 'profile_data' in context.user_data:
@@ -338,9 +326,7 @@ onboarding_conversation_handler = ConversationHandler(
         CallbackQueryHandler(onboarding_start, pattern='^start$')
     ],
     states={
-        # CONFIRM RESET
         CONFIRM_RESET: [CallbackQueryHandler(confirm_reset_callback, pattern='^reset_')],
-
         ASK_LANGUAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_language)],
         ASK_CURRENCY_MODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_currency_mode)],
         ASK_NAME_EN: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_name_en)],
@@ -349,7 +335,6 @@ onboarding_conversation_handler = ConversationHandler(
         ASK_USD_BALANCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_usd_balance)],
         ASK_KHR_BALANCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_khr_balance)],
         ASK_SINGLE_BALANCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_single_balance)],
-        # Subscription Step
         ASK_SUBSCRIPTION: [CallbackQueryHandler(received_subscription_choice, pattern='^plan_')]
     },
     fallbacks=[CommandHandler('cancel', cancel_onboarding)],

@@ -15,7 +15,6 @@ PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
 
 
 def _get_user_settings(context: ContextTypes.DEFAULT_TYPE):
-    """Extracts currency mode and currencies from context."""
     profile = context.user_data.get('profile', {})
     settings = profile.get('settings', {})
     mode = settings.get('currency_mode', 'dual')
@@ -28,36 +27,34 @@ def _get_user_settings(context: ContextTypes.DEFAULT_TYPE):
 
 
 def format_summary_message(summary_data, context: ContextTypes.DEFAULT_TYPE):
-    """Formats detailed summary data into a readable string."""
     if not summary_data:
         return ""
 
     mode, currencies = _get_user_settings(context)
     balances = summary_data.get('balances', {})
 
-    # 1. Balances
     balance_lines = [f"{t('summary.balances', context)}"]
     if mode == 'dual':
         balance_lines.append(f"💵 {balances.get('USD', 0):,.2f} USD")
         balance_lines.append(f"៛ {balances.get('KHR', 0):,.0f} KHR")
     else:
-        curr = currencies[0]
-        val = balances.get(curr, 0)
+        curr = html.escape(currencies[0])
+        val = balances.get(currencies[0], 0)
         fmt = ",.0f" if curr == 'KHR' else ",.2f"
         balance_lines.append(f"<b>{val:{fmt}} {curr}</b>")
 
-    # 2. Debts
     debt_lines = [f"{t('summary.debts', context)}"]
 
     def _format_debts(title, data):
         lines = [title]
         found = False
         for curr in currencies:
+            curr_esc = html.escape(curr)
             total = next((i['total'] for i in data if i['_id'] == curr), 0)
             if total > 0:
                 fmt = ",.0f" if curr == 'KHR' else ",.2f"
                 symbol = "៛" if curr == 'KHR' else "💵"
-                lines.append(f"    {symbol} {total:{fmt}} {curr}")
+                lines.append(f"    {symbol} {total:{fmt}} {curr_esc}")
                 found = True
         if not found:
             lines.append("    -")
@@ -66,7 +63,6 @@ def format_summary_message(summary_data, context: ContextTypes.DEFAULT_TYPE):
     debt_lines.extend(_format_debts(t('summary.you_are_owed', context), summary_data.get('debts_owed_to_you', [])))
     debt_lines.extend(_format_debts(t('summary.you_owe', context), summary_data.get('debts_owed_by_you', [])))
 
-    # 3. Activity
     periods = summary_data.get('periods', {})
     activity_lines = [f"{t('summary.activity_header', context)}"]
 
@@ -76,9 +72,9 @@ def format_summary_message(summary_data, context: ContextTypes.DEFAULT_TYPE):
         exp = p_data.get('expense', {})
 
         inc_str = " & ".join(
-            [f"{inc.get(c, 0):{',.0f' if c == 'KHR' else ',.2f'}} {c}" for c in currencies if inc.get(c, 0) > 0]) or "0"
+            [f"{inc.get(c, 0):{',.0f' if c == 'KHR' else ',.2f'}} {html.escape(c)}" for c in currencies if inc.get(c, 0) > 0]) or "0"
         exp_str = " & ".join(
-            [f"{exp.get(c, 0):{',.0f' if c == 'KHR' else ',.2f'}} {c}" for c in currencies if exp.get(c, 0) > 0]) or "0"
+            [f"{exp.get(c, 0):{',.0f' if c == 'KHR' else ',.2f'}} {html.escape(c)}" for c in currencies if exp.get(c, 0) > 0]) or "0"
 
         return f"{t(label_key, context)}\n{t('summary.in', context, value=inc_str)}\n{t('summary.out', context, value=exp_str)}"
 
@@ -97,7 +93,6 @@ def format_summary_message(summary_data, context: ContextTypes.DEFAULT_TYPE):
 
 
 def format_summation_results(params, results, context: ContextTypes.DEFAULT_TYPE):
-    """Formats summation analytics results."""
     if not results or results.get('total_count', 0) == 0:
         return t('search.no_results', context)
 
@@ -110,7 +105,7 @@ def format_summation_results(params, results, context: ContextTypes.DEFAULT_TYPE
         meta.append(f"<b>Period:</b> {s:%b %d, %Y} to {e:%b %d, %Y}")
 
     if params.get('transaction_type'):
-        meta.append(f"<b>Type:</b> {params['transaction_type'].title()}")
+        meta.append(f"<b>Type:</b> {html.escape(params['transaction_type'].title())}")
 
     if params.get('categories'):
         escaped_cats = [html.escape(c) for c in params['categories']]
@@ -118,7 +113,7 @@ def format_summation_results(params, results, context: ContextTypes.DEFAULT_TYPE
 
     stats = []
     for item in results.get('totals_by_currency', []):
-        c = item['currency']
+        c = html.escape(item['currency'])
         fmt = ",.0f" if c == 'KHR' else ",.2f"
         sym = "៛" if c == 'KHR' else "💵"
 
@@ -134,15 +129,10 @@ def format_summation_results(params, results, context: ContextTypes.DEFAULT_TYPE
 
 
 def _format_report_summary_message(data, context: ContextTypes.DEFAULT_TYPE, is_premium=False):
-    """
-    Generates the text report.
-    If is_premium is False, it truncates detailed sections and shows an upsell.
-    """
     s = data.get('summary', {})
     start = datetime.fromisoformat(data['startDate']).strftime('%b %d, %Y')
     end = datetime.fromisoformat(data['endDate']).strftime('%b %d, %Y')
 
-    # --- 1. Header & Balance (Everyone) ---
     header = t("analytics.report_header", context, start_date=start, end_date=end)
     balance = (
             t("analytics.balance_overview", context) +
@@ -150,7 +140,6 @@ def _format_report_summary_message(data, context: ContextTypes.DEFAULT_TYPE, is_
             t("analytics.ending_balance", context, balance=s.get('balanceAtEndUSD', 0))
     )
 
-    # --- 2. Operational Summary (Everyone) ---
     net = s.get('netSavingsUSD', 0)
     ops = (
             t("analytics.operational_summary", context) +
@@ -161,9 +150,7 @@ def _format_report_summary_message(data, context: ContextTypes.DEFAULT_TYPE, is_
 
     base_report = header + balance + ops
 
-    # --- 3. PREMIUM SECTIONS ---
     if not is_premium:
-        # UPSell Message for Free Users
         locked_msg = (
             "\n🔒 <b>Detailed Insights Locked</b>\n"
             "<i>Upgrade to Premium to see:</i>\n"
@@ -174,7 +161,6 @@ def _format_report_summary_message(data, context: ContextTypes.DEFAULT_TYPE, is_
         )
         return base_report + locked_msg
 
-    # -- Insights --
     insights = data.get('expenseInsights', {})
     top_exp = insights.get('topExpenseItem')
     busiest = insights.get('mostExpensiveDay')
@@ -186,16 +172,13 @@ def _format_report_summary_message(data, context: ContextTypes.DEFAULT_TYPE, is_
     if busiest:
         insights_text += t("analytics.busiest_day", context, date=busiest['_id'], amount=busiest['total_spent_usd'])
 
-    # -- Categories --
     cat_text = t("analytics.major_expenses", context)
     breakdown = data.get('expenseBreakdown', [])
     if breakdown:
-        # Sort by totalUSD descending
         sorted_cats = sorted(breakdown, key=lambda x: x['totalUSD'], reverse=True)
-        for item in sorted_cats[:5]:  # Top 5
+        for item in sorted_cats[:5]:
             cat_name = item['category']
-            # Try to translate category if it's a system one
-            if not " " in cat_name:  # Simple heuristic or use existing t() logic
+            if not " " in cat_name:
                 cat_display = t(f"categories.{cat_name}", context)
             else:
                 cat_display = html.escape(cat_name)
@@ -204,7 +187,6 @@ def _format_report_summary_message(data, context: ContextTypes.DEFAULT_TYPE, is_
     else:
         cat_text += t("analytics.no_major_expenses", context)
 
-    # -- Debt/Financials --
     fin = data.get('financialSummary', {})
     fin_text = t("analytics.loan_activity", context)
     has_fin = False
@@ -259,7 +241,6 @@ def _format_debt_analysis_message(data, context: ContextTypes.DEFAULT_TYPE):
         f"{t('iou.analysis_lent_header', context)}\n{_fmt_list(lent, 'iou.analysis_lent_none')}\n"
         f"{t('iou.analysis_borrow_header', context)}\n{_fmt_list(borrowed, 'iou.analysis_borrow_none')}"
     )
-
 
 # --- Charts ---
 

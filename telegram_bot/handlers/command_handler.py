@@ -17,7 +17,6 @@ import api_client
 import keyboards
 from decorators import authenticate_user
 from .helpers import format_summary_message
-# FIXED: Import 'menu' instead of 'start'
 from .common import cancel, menu
 from utils.i18n import t
 
@@ -99,7 +98,10 @@ def _format_success(data, context):
     lines.append(t("command.success_type", context, type=t(type_key, context)))
 
     amt = data.get('amount') or data.get('iou_amount')
-    curr = data.get('currency') or data.get('iou_currency')
+
+    raw_curr = data.get('currency') or data.get('iou_currency') or 'USD'
+    curr = html.escape(str(raw_curr))
+
     fmt = ",.0f" if curr == 'KHR' else ",.2f"
     lines.append(t("command.success_amount", context, amount_display=f"{amt:{fmt}} {curr}"))
 
@@ -228,7 +230,11 @@ async def handle_repayment(update, context, args, debt_type):
         if error_msg:
             error_msg = html.escape(str(error_msg))
 
-        text = response.get('message') or t("command.repayment_error", context, error=error_msg)
+        success_msg = response.get('message')
+        if success_msg:
+            success_msg = html.escape(str(success_msg))
+
+        text = success_msg or t("command.repayment_error", context, error=error_msg)
 
         summary = api_client.get_detailed_summary(context.user_data['jwt'])
         await update.message.reply_text(text + format_summary_message(summary, context), parse_mode='HTML')
@@ -244,12 +250,16 @@ async def unified_message_router(update: Update, context: ContextTypes.DEFAULT_T
     # Calculator
     if not text.startswith('!') and '=' in text:
         expression = text.split('=')[0].strip()
+
+        # PREVENT DoS (Thread blocking via exponentiation or large statements)
+        if len(expression) > 50 or '**' in expression:
+            return ConversationHandler.END
+
         try:
-            aeval = Interpreter() # Instantiated locally to prevent cross-user state leakage
+            aeval = Interpreter()  # Instantiated locally to prevent cross-user state leakage
             result = aeval.eval(expression)
             await update.message.reply_text(t("command.calculating", context, result=result), parse_mode='Markdown')
         except Exception:
-            # Not a calculation, just text
             pass
 
     # --- LOGIC UPDATE: Remove optional '!' prefix ---
@@ -301,9 +311,6 @@ async def unified_message_router(update: Update, context: ContextTypes.DEFAULT_T
 
     # --- LOGIC UPDATE: Unknown Command Flow (Natural Language Logging) ---
     else:
-        # If it wasn't a command, treat the whole line as the description/command
-        # We pass the original 'command' (first word) + 'args' (rest) to the unknown handler
-        # It attempts to parse a date and amount from the END of the string.
         context.user_data['unknown_cmd'] = {'command': command, 'args': args}
         return await unknown_command_entry_point(update, context)
 
@@ -328,7 +335,6 @@ async def unknown_command_entry_point(update, context):
         date_str, remaining = parse_date(full_args)
 
         if not remaining:
-            # If no text remains, we can't do anything
             await update.message.reply_text(t("command.unknown_fail", context))
             return ConversationHandler.END
 
@@ -336,12 +342,8 @@ async def unknown_command_entry_point(update, context):
         try:
             mode, primary = _get_currency_settings(context)
             amount_val, currency = parse_amount_and_currency(remaining[-1], mode, primary)
-            # If successful, the last word was the amount. Remove it from description.
             desc_parts = remaining[:-1]
         except ValueError:
-            # If parsing amount failed, this isn't a transaction log.
-            # It's just random chat text. Ignore it or show help.
-            # To be less intrusive, we just return END.
             return ConversationHandler.END
 
         desc = " ".join(desc_parts).title() if desc_parts else "Unspecified"
@@ -352,14 +354,15 @@ async def unknown_command_entry_point(update, context):
         }
 
         fmt = ",.0f" if currency == 'KHR' else ",.2f"
-        display = f"{amount_val:{fmt}} {currency}"
+        display = f"{amount_val:{fmt}} {html.escape(currency)}"
 
         cats = context.user_data['profile'].get('settings', {}).get('categories', {}).get('expense', [])
         kb = keyboards.expense_categories_keyboard(cats, context)
 
         safe_desc = html.escape(desc)
-        await update.message.reply_text(t("command.unknown_prompt", context, description=safe_desc, amount_display=display),
-                                        reply_markup=kb)
+        await update.message.reply_text(
+            t("command.unknown_prompt", context, description=safe_desc, amount_display=display),
+            reply_markup=kb)
         return SELECT_CATEGORY
     except Exception as e:
         log.error(f"Unknown cmd error: {e}")
@@ -403,7 +406,6 @@ unified_message_conversation_handler = ConversationHandler(
     },
     fallbacks=[
         CommandHandler('cancel', cancel),
-        # FIXED: Support menu command
         CommandHandler('menu', menu)
     ],
     per_message=False

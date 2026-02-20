@@ -1,3 +1,5 @@
+# telegram_bot/api_client/debts.py
+
 import requests
 import urllib.parse
 import logging
@@ -100,8 +102,9 @@ def get_settled_debts_grouped(user_id):
 def get_debts_by_person_and_currency(person_name, currency, user_id):
     try:
         encoded_name = urllib.parse.quote(person_name)
+        encoded_currency = urllib.parse.quote(currency)
         res = requests.get(
-            f"{BASE_URL}/debts/person/{encoded_name}/{currency}",
+            f"{BASE_URL}/debts/person/{encoded_name}/{encoded_currency}",
             headers=_get_headers(user_id),
             timeout=DEFAULT_TIMEOUT
         )

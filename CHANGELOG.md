@@ -2,6 +2,18 @@
 
 # Changelog
 
+## [0.7.10] - 2026-02-20
+
+### Fixed
+- **Security/DoS**: Prevented severe Event Loop Blocking via the calculator. Blocked `**` exponentiation and limited expression length in `command_handler.py`.
+- **Security/Path Traversal**: Fixed REST API routing injection in `api_client/debts.py` by strictly URL-encoding the `currency` parameter.
+- **Security/XSS & Validation**: Prevented Stored HTML Injection by validating custom currency inputs (`isalpha()`, max 5 chars) in `onboarding.py`. Defensively applied `html.escape()` to currency and display name strings across `helpers.py`, `settings.py`, `transaction.py`, `iou.py`, and `command_handler.py`.
+
+## [0.7.9] - 2026-02-20
+
+### Fixed
+- **Security/XSS**: Addressed overlooked HTML Injection vulnerabilities where API success and error messages were rendered without sanitization. Applied `html.escape()` to `message` and `error` responses in `telegram_bot/handlers/iou.py`, `telegram_bot/handlers/transaction.py`, and `telegram_bot/handlers/command_handler.py`.
+
 ## [0.7.8] - 2026-02-20
 
 ### Fixed
@@ -31,17 +43,13 @@
 ## [0.7.4] - 2026-02-20
 
 ### Fixed
-- **Efficiency/Security**: Implemented a 24-hour TTL (Time-To-Live) cache for token validation in `web_service/app/utils/auth.py`.
-This resolves a significant efficiency bottleneck where every backend request triggered a synchronous HTTP call to the Bifrost server.
-It also fully enables the `invalidate_token_cache` function for instant revocation of compromised tokens via webhooks.
+- **Efficiency/Security**: Implemented a 24-hour TTL (Time-To-Live) cache for token validation in `web_service/app/utils/auth.py`. This resolves a significant efficiency bottleneck where every backend request triggered a synchronous HTTP call to the Bifrost server. It also fully enables the `invalidate_token_cache` function for instant revocation of compromised tokens via webhooks.
 
 ## [0.7.3] - 2026-02-20
 
 ### Fixed
-- **Security/Memory**: Implemented a 24-hour TTL (Time-To-Live) cache for `_USER_TOKENS` in `telegram_bot/api_client/core.py`.
-This prevents unbounded memory growth over time and mitigates the risk of long-lived JWT exposure in memory.
-- **Security/Efficiency**: Reverted global `logging.basicConfig` level from `DEBUG` to `INFO` in `telegram_bot/bot.py`.
-This resolves an I/O bottleneck and prevents sensitive user payload data from writing to system logs.
+- **Security/Memory**: Implemented a 24-hour TTL (Time-To-Live) cache for `_USER_TOKENS` in `telegram_bot/api_client/core.py`. This prevents unbounded memory growth over time and mitigates the risk of long-lived JWT exposure in memory.
+- **Security/Efficiency**: Reverted global `logging.basicConfig` level from `DEBUG` to `INFO` in `telegram_bot/bot.py`. This resolves an I/O bottleneck and prevents sensitive user payload data from writing to system logs.
 
 ### Refactored
 - **API Client**: Encapsulated `_USER_TOKENS` dict access by introducing a `set_cached_token` method, eliminating unsafe direct memory assignments in `telegram_bot/api_client/auth.py`.
@@ -128,12 +136,12 @@ This resolves an I/O bottleneck and prevents sensitive user payload data from wr
 
 ### Fixed
 - **Auth Integration**: Updated `web_service/app/utils/auth.py` to match the actual Bifrost Internal API.
-- Endpoint: Changed from `/auth/api/verify` (404) to `POST /internal/validate-token`.
+  - Endpoint: Changed from `/auth/api/verify` (404) to `POST /internal/validate-token`.
   - Auth Method: Switched from Bearer Token to **Basic Auth** (Client ID/Secret).
-- Payload: Sending `{"jwt": token}` in the body instead of query params.
+  - Payload: Sending `{"jwt": token}` in the body instead of query params.
 - **Bot Stability**: Hardened `telegram_bot/decorators.py` to gracefully handle `PremiumFeatureException`.
   - Instead of crashing or trying to edit the message (which fails if content is identical), it now shows a **native Telegram alert** (popup).
-- Added specific handling for `MessageNotModified` to prevent log spam and crashes when the UI state is already correct.
+  - Added specific handling for `MessageNotModified` to prevent log spam and crashes when the UI state is already correct.
 
 ## [0.6.8] - 2026-01-26
 
@@ -172,8 +180,7 @@ This resolves an I/O bottleneck and prevents sensitive user payload data from wr
 ## [0.6.3] - 2026-01-26
 
 ### Fixed
-- **Security**: Removed hardcoded Admin IDs in `handlers/analytics.py` and `handlers/settings.py`.
-Now uses `ADMIN_USER_ID` environment variable.
+- **Security**: Removed hardcoded Admin IDs in `handlers/analytics.py` and `handlers/settings.py`. Now uses `ADMIN_USER_ID` environment variable.
 - **Auth**: Fixed `ensure_auth` decorator in `api_client/core.py` to gracefully handle 401 errors by clearing the token and returning `None`, preventing handler crashes while ensuring re-login on the next request.
 - **API Client**: Updated all API modules (`transactions`, `settings`, `analytics`, `debts`, `auth`) to propagate `401 Unauthorized` exceptions to the `ensure_auth` decorator instead of swallowing them.
 
@@ -181,6 +188,7 @@ Now uses `ADMIN_USER_ID` environment variable.
 
 ### Added
 - **API Client**: Introduced explicit `BIFROST_TIMEOUT` (60s) in `telegram_bot/api_client/core.py`.
+
 ### Changed
 - **Reliability**: Standardized all Bifrost API calls (`get_login_code`, `login_to_bifrost`, `sync_subscription_status`, `create_payment_intent`) to use the dedicated 60-second timeout, separating them from the default Web Service timeout.
 
@@ -194,28 +202,27 @@ Now uses `ADMIN_USER_ID` environment variable.
 ### Added
 - **Bifrost 2.3.3 Support**:
   - The Web Service now extracts `duration` (e.g., '1m') and `expires_at` from `subscription_success` webhooks.
-- **Database**: The `expires_at` timestamp is now stored in the user's `settings` collection to accurately track subscription validity.
+  - **Database**: The `expires_at` timestamp is now stored in the user's `settings` collection to accurately track subscription validity.
 - **Profile Sync**: Implemented webhook support for `account_update` events. Changes to `email`, `username`, or `telegram_id` in Bifrost now automatically propagate to the Finance App database.
 
 ### Changed
 - **Performance**: Refactored `auth_required` to remove per-request identity syncing, significantly reducing database load on high-traffic endpoints.
 - **Notifications**: The "Premium Activated" Telegram alert now informs the user of their specific **Plan Duration** and **Expiration Date**.
-- **Localization**: Converted date formats and code-like strings in all locale files to use HTML `<code>` tags.
-This prevents formatting errors when the bot uses `parse_mode='HTML'`.
+- **Localization**: Converted date formats and code-like strings in all locale files to use HTML `<code>` tags. This prevents formatting errors when the bot uses `parse_mode='HTML'`.
 
 ### Fixed
 - **Provisioning**: Fixed logic in `web_service/app/models.py` to ensure `telegram_id` is stored immediately during Lazy Provisioning (initial user creation).
 - **Locales**:
   - Added missing Khmer (km) keys for `onboarding.ask_subscription`, `keyboards.plan_free`, and `keyboards.plan_premium`.
-- Added missing Khmer keys for `settings.link_email`.
+  - Added missing Khmer keys for `settings.link_email`.
 
 ## [0.5.3] - 2026-01-22
 
 ### Changed
 - **Bifrost Alignment**:
   - Standardized all premium logic to use `role: "premium_user"` matching Bifrost's `secure-intent` target role.
-- Updated `auth_event_webhook` to parse `subscription_success` and `subscription_expired` payloads exactly as defined in Bifrost docs.
-- Implemented `X-Bifrost-Signature` verification using HMAC-SHA256.
+  - Updated `auth_event_webhook` to parse `subscription_success` and `subscription_expired` payloads exactly as defined in Bifrost docs.
+  - Implemented `X-Bifrost-Signature` verification using HMAC-SHA256.
 
 ### Added
 - **Migration**: Added `migrate_legacy_users.sh` to convert existing `tier: premium` records to `role: premium_user`.
@@ -239,7 +246,7 @@ This prevents formatting errors when the bot uses `parse_mode='HTML'`.
 
 ### Added
 - **Secure Payment Flow**: Updated `/upgrade` command to use the "Intent-Based" payment system.
-- The bot now calls Bifrost's `POST /secure-intent` to register transactions server-side.
+  - The bot now calls Bifrost's `POST /secure-intent` to register transactions server-side.
 - **Pricing Packages**: Added selection menu for **1 Month ($5.00)** and **1 Year ($45.00)** plans.
 - **API Client**: Added `api_client.payment` module to handle secure intent creation.
 
@@ -249,29 +256,26 @@ This prevents formatting errors when the bot uses `parse_mode='HTML'`.
 ## [0.4.0] - 2026-01-22
 
 ### Added
-- **Manual Account Linking**: Added `/link <token>` command.
-This serves as a reliable alternative to deep links for users on devices where standard URL redirection fails.
+- **Manual Account Linking**: Added `/link <token>` command. This serves as a reliable alternative to deep links for users on devices where standard URL redirection fails.
 - **Bifrost Compatibility**: Updated `/upgrade` payload format to support Bifrost 1.4.0 features (Duration and Explicit Roles).
 
 ### Changed
 - **Performance**: Removed the redundant `sync_subscription_status` check in the `/menu` handler.
-- The bot now relies on **Push-Based Cache Invalidation** (introduced in 0.3.3) and lazy provisioning.
-- The dashboard now loads significantly faster as it no longer waits for an upstream HTTP check on every request.
+  - The bot now relies on **Push-Based Cache Invalidation** (introduced in 0.3.3) and lazy provisioning.
+  - The dashboard now loads significantly faster as it no longer waits for an upstream HTTP check on every request.
 
 ## [0.3.3] - 2026-01-21
 
 ### Changed
 - **Auth Architecture**: Implemented **Push-Based Cache Invalidation**.
-- The Finance Service now caches token validation results for 24 hours to maximize performance.
-- Added a new `/internal/webhook/auth-event` endpoint to receive invalidation signals from Bifrost (e.g., on ban or password change).
-- **Provisioning**: Switched to **Lazy Provisioning**. The `/sync-session` endpoint has been removed.
-User profiles are now automatically created in the Finance DB upon the first valid request.
+  - The Finance Service now caches token validation results for 24 hours to maximize performance.
+  - Added a new `/internal/webhook/auth-event` endpoint to receive invalidation signals from Bifrost (e.g., on ban or password change).
+- **Provisioning**: Switched to **Lazy Provisioning**. The `/sync-session` endpoint has been removed. User profiles are now automatically created in the Finance DB upon the first valid request.
 
 ## [0.3.2] - 2026-01-20
 
 ### Fixed
-- **Auth Architecture**: Fixed the "Shared Secret" vulnerability.
-The Finance Service no longer attempts to decode Bifrost tokens locally.
+- **Auth Architecture**: Fixed the "Shared Secret" vulnerability. The Finance Service no longer attempts to decode Bifrost tokens locally.
 - **Web Service**: Updated `/sync-session` to validate tokens by calling `Bifrost` directly, removing the need for `JWT_SECRET_KEY` synchronization between services.
 
 ## [0.3.1] - 2026-01-20
@@ -311,8 +315,8 @@ The Finance Service no longer attempts to decode Bifrost tokens locally.
 - **Finance Service Models**: Updated `User` model in `web_service/app/models.py` to support `email`, `password`, and `subscription_tier`.
 - **Finance Service Auth**:
   - Added `POST /auth/register` and `POST /auth/login` for Web Email/Password flow.
-- Added `POST /auth/verify-otp` to allow Telegram users to login to Web using the 6-digit Bot code.
-- Added `POST /auth/link-account` to connect Email to Telegram accounts and vice versa.
+  - Added `POST /auth/verify-otp` to allow Telegram users to login to Web using the 6-digit Bot code.
+  - Added `POST /auth/link-account` to connect Email to Telegram accounts and vice versa.
 
 ### Changed
 - **Finance Service Auth**: Updated `sync-session` to return premium status.
@@ -329,18 +333,18 @@ The Finance Service no longer attempts to decode Bifrost tokens locally.
 - **Infrastructure**: Added `bifrost` service to `docker-compose.yml`. Updated `web` and `telegram` services to communicate with Bifrost.
 - **Auth (Telegram Bot)**:
   - Updated `telegram_bot/api_client.py` to include `sync_session` method.
-- Updated `telegram_bot/decorators.py` to call `sync_session` after successful login.
+  - Updated `telegram_bot/decorators.py` to call `sync_session` after successful login.
 
 ## [0.0.1] - 2026-01-01
 
 ### Added
 - **Core Features**:
   - **Smart Text Input**: Natural language logging for expenses and income (e.g., "Coffee 2.50", "Salary 500").
-- **Dual Currency Support**: Full support for USD and KHR with live or fixed exchange rates.
-- **Debt Management**: Tracking for "Lent" and "Borrowed" amounts with repayment logging.
-- **Reporting**: Weekly/Monthly analytics, spending habits, and CSV exports.
+  - **Dual Currency Support**: Full support for USD and KHR with live or fixed exchange rates.
+  - **Debt Management**: Tracking for "Lent" and "Borrowed" amounts with repayment logging.
+  - **Reporting**: Weekly/Monthly analytics, spending habits, and CSV exports.
   - **Reminders**: Custom scheduled notifications via Telegram.
 - **Architecture**:
   - **Telegram Bot**: Python-based interface using `python-telegram-bot`.
-- **Web Service**: Flask backend handling logic, database operations, and API endpoints.
-- **Database**: MongoDB for persistent storage of transactions, debts, and user settings.
+  - **Web Service**: Flask backend handling logic, database operations, and API endpoints.
+  - **Database**: MongoDB for persistent storage of transactions, debts, and user settings.
