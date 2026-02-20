@@ -1,6 +1,7 @@
 # telegram_bot/handlers/transaction.py
 
 import re
+import html
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 from telegram import Update
@@ -33,6 +34,7 @@ def _get_tx_settings(context):
 
 def parse_amount_and_currency_for_mode(amount_str: str, mode: str, primary_currency: str):
     s = amount_str.lower().strip()
+
     if mode == 'single':
         try:
             return float(re.sub(r"[^0-9.]", "", s)), primary_currency, False
@@ -60,8 +62,8 @@ async def add_transaction_start(update: Update, context: ContextTypes.DEFAULT_TY
 
     tx_type = 'expense' if query.data == 'add_expense' else 'income'
     context.user_data['tx_type'] = tx_type
-    emoji = "💸" if tx_type == 'expense' else "💰"
 
+    emoji = "💸" if tx_type == 'expense' else "💰"
     await query.message.reply_text(t("tx.ask_amount", context, emoji=emoji))
     return AMOUNT
 
@@ -142,9 +144,8 @@ async def received_custom_category(update: Update, context: ContextTypes.DEFAULT
 
 
 async def _ask_remark(message, context, category):
-    text = t("tx.ask_remark", context, category=category)
+    text = t("tx.ask_remark", context, category=html.escape(category))
     kb = keyboards.ask_remark_keyboard(context)
-
     if message.from_user.is_bot:
         await message.edit_text(text, parse_mode='HTML', reply_markup=kb)
     else:
@@ -182,6 +183,7 @@ async def save_transaction_and_end(update: Update, context: ContextTypes.DEFAULT
     }
 
     res = api_client.add_transaction(payload, d['jwt'])
+
     msg = t("tx.success", context) if 'id' in res else t("tx.fail", context)
 
     target = update.callback_query.message if update.callback_query else update.message
@@ -215,7 +217,6 @@ async def received_forgot_day(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     dt = datetime.now(PHNOM_PENH_TZ) - timedelta(days=int(choice))
     context.user_data['timestamp'] = dt.replace(hour=12, minute=0).isoformat()
-
     await query.message.reply_text(t("forgot.ask_type", context), reply_markup=keyboards.forgot_type_keyboard(context))
     return FORGOT_TYPE
 
@@ -225,8 +226,7 @@ async def received_forgot_custom_date(update: Update, context: ContextTypes.DEFA
     try:
         d = datetime.strptime(update.message.text, "%Y-%m-%d").date()
         context.user_data['timestamp'] = datetime.combine(d, time(12, 0), tzinfo=PHNOM_PENH_TZ).isoformat()
-        await update.message.reply_text(t("forgot.ask_type", context),
-                                        reply_markup=keyboards.forgot_type_keyboard(context))
+        await update.message.reply_text(t("forgot.ask_type", context), reply_markup=keyboards.forgot_type_keyboard(context))
         return FORGOT_TYPE
     except ValueError:
         await update.message.reply_text(t("forgot.invalid_date", context))
@@ -248,14 +248,13 @@ async def received_forgot_type(update: Update, context: ContextTypes.DEFAULT_TYP
 async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    txs = api_client.get_recent_transactions(context.user_data['jwt'])
 
+    txs = api_client.get_recent_transactions(context.user_data['jwt'])
     if not txs:
         await query.edit_message_text(t("history.no_tx", context), reply_markup=keyboards.main_menu_keyboard(context))
         return ConversationHandler.END
 
-    await query.edit_message_text(t("history.menu_header", context),
-                                  reply_markup=keyboards.history_keyboard(txs, context))
+    await query.edit_message_text(t("history.menu_header", context), reply_markup=keyboards.history_keyboard(txs, context))
     return ConversationHandler.END
 
 
@@ -264,8 +263,8 @@ async def manage_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     tx_id = query.data.replace('manage_tx_', '')
-    tx = api_client.get_transaction_details(tx_id, context.user_data['jwt'])
 
+    tx = api_client.get_transaction_details(tx_id, context.user_data['jwt'])
     if not tx:
         await query.edit_message_text(t("history.fetch_fail", context),
                                       reply_markup=keyboards.main_menu_keyboard(context))
@@ -275,10 +274,16 @@ async def manage_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE)
     date_str = datetime.fromisoformat(tx['timestamp']).astimezone(PHNOM_PENH_TZ).strftime('%d %b %Y, %I:%M %p')
     fmt = ",.0f" if tx['currency'] == 'KHR' else ",.2f"
 
-    text = t("history.tx_details", context, emoji=emoji, amount=f"{tx['amount']:{fmt}}", currency=tx['currency'],
-             category=tx['categoryId'], description=tx.get('description', 'N/A'), date=date_str)
+    text = t("history.tx_details", context,
+             emoji=emoji,
+             amount=f"{tx['amount']:{fmt}}",
+             currency=tx['currency'],
+             category=html.escape(tx['categoryId']),
+             description=html.escape(tx.get('description', 'N/A')),
+             date=date_str)
 
-    await query.edit_message_text(text, parse_mode='HTML', reply_markup=keyboards.manage_tx_keyboard(tx_id, context))
+    await query.edit_message_text(text, parse_mode='HTML',
+                                  reply_markup=keyboards.manage_tx_keyboard(tx_id, context))
 
 
 @authenticate_user
@@ -350,6 +355,7 @@ async def edit_choose_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @authenticate_user
 async def edit_received_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     val = update.message.text
+
     if context.user_data['edit_field'] == 'amount':
         try:
             float(val)
@@ -376,9 +382,11 @@ async def edit_received_new_category(update: Update, context: ContextTypes.DEFAU
     query = update.callback_query
     await query.answer()
     cat = query.data.split('_')[1]
+
     if cat == 'other':
         await query.edit_message_text(t("tx.ask_custom_category", context))
         return EDIT_GET_CUSTOM_CATEGORY
+
     return await _save_edit(query, context, cat)
 
 
@@ -390,6 +398,7 @@ async def edit_received_custom_category(update: Update, context: ContextTypes.DE
 async def _save_edit(update_obj, context, val):
     d = context.user_data
     payload = {d['edit_field']: val}
+
     if d['edit_field'] == 'currency':
         payload['accountName'] = f"{val} Account"
 
@@ -397,7 +406,6 @@ async def _save_edit(update_obj, context, val):
 
     msg = t("history.edit_success", context) if res.get('message') else t("history.edit_update_fail", context,
                                                                           error=res.get('error'))
-
     target = update_obj.message if isinstance(update_obj, Update) else update_obj
     await target.reply_text(msg, reply_markup=keyboards.main_menu_keyboard(context))
     return ConversationHandler.END

@@ -1,5 +1,6 @@
 # telegram_bot/handlers/iou.py
 
+import html
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 from telegram import Update
@@ -74,14 +75,14 @@ async def iou_person_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     debts = api_client.get_all_debts_by_person(person, context.user_data['jwt'])
     if not debts:
-        await query.edit_message_text(t("iou.person_fail", context, person=person),
+        await query.edit_message_text(t("iou.person_fail", context, person=html.escape(person)),
                                       reply_markup=keyboards.iou_menu_keyboard(context))
         return
 
     dtype = debts[0]['type']
     direction = t("iou.person_direction_lent", context) if dtype == 'lent' else t("iou.person_direction_borrowed",
                                                                                   context)
-    header = t("iou.person_header_open", context, person=person, direction=direction)
+    header = t("iou.person_header_open", context, person=html.escape(person), direction=direction)
 
     await query.edit_message_text(
         header + _format_person_ledger(debts, context, False),
@@ -97,14 +98,14 @@ async def iou_person_detail_settled(update: Update, context: ContextTypes.DEFAUL
 
     debts = api_client.get_all_settled_debts_by_person(person, context.user_data['jwt'])
     if not debts:
-        await query.edit_message_text(t("iou.person_fail_settled", context, person=person),
+        await query.edit_message_text(t("iou.person_fail_settled", context, person=html.escape(person)),
                                       reply_markup=keyboards.iou_menu_keyboard(context))
         return
 
     dtype = debts[0]['type']
     direction = t("iou.person_direction_lent_past", context) if dtype == 'lent' else t(
         "iou.person_direction_borrowed_past", context)
-    header = t("iou.person_header_settled", context, person=person, direction=direction)
+    header = t("iou.person_header_settled", context, person=html.escape(person), direction=direction)
 
     await query.edit_message_text(
         header + _format_person_ledger(debts, context, True),
@@ -330,7 +331,7 @@ async def repay_lump_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.update({'lump_person': person, 'lump_type': dtype})
 
     key = "iou.repay_ask_amount_lent" if dtype == 'lent' else "iou.repay_ask_amount_borrowed"
-    await query.message.reply_text(t(key, context, person=person))
+    await query.message.reply_text(t(key, context, person=html.escape(person)))
     return REPAY_LUMP_AMOUNT
 
 
@@ -365,7 +366,7 @@ async def iou_manage_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     _, _, _, debt_id, person, settled_str = query.data.split(':')
     await query.edit_message_text(
-        t("iou.manage_menu_header", context, person=person),
+        t("iou.manage_menu_header", context, person=html.escape(person)),
         reply_markup=keyboards.iou_manage_keyboard(debt_id, person, settled_str, context)
     )
 
@@ -446,12 +447,12 @@ def _format_debt_details(debt, context):
 
     lines = [
         t("iou.debt_details_header", context, status=status),
-        t("iou.debt_person", context, person=debt['person'], direction=direction),
+        t("iou.debt_person", context, person=html.escape(debt['person']), direction=direction),
         t("iou.debt_created", context, date=created),
     ]
 
     if debt.get('purpose'):
-        lines.append(t("iou.debt_purpose", context, purpose=debt['purpose']))
+        lines.append(t("iou.debt_purpose", context, purpose=html.escape(debt['purpose'])))
 
     lines.append(t("iou.debt_original", context, amount=f"{debt['originalAmount']:{fmt}}", currency=currency))
     lines.append(t("iou.debt_remaining", context, amount=f"{debt['remainingAmount']:{fmt}}", currency=currency))
@@ -484,7 +485,8 @@ def _format_person_ledger(debts, context, is_settled=False):
 
         created = datetime.fromisoformat(d['created_at'])
         icon = "✅" if d['status'] == 'settled' else ("❌" if d['status'] == 'canceled' else "🔹")
-        label = f"{icon} <b>{d['originalAmount']:{fmt}} {curr}</b> ({d.get('purpose', 'No purpose')})"
+        purpose = html.escape(d.get('purpose', 'No purpose'))
+        label = f"{icon} <b>{d['originalAmount']:{fmt}} {curr}</b> ({purpose})"
 
         items.append((created, label))
         for r in d.get('repayments', []):

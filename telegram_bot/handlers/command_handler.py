@@ -3,6 +3,7 @@
 import re
 import shlex
 import logging
+import html
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from asteval import Interpreter
@@ -22,7 +23,6 @@ from utils.i18n import t
 
 log = logging.getLogger(__name__)
 PHNOM_PENH_TZ = ZoneInfo("Asia/Phnom_Penh")
-aeval = Interpreter()
 
 SELECT_CATEGORY, GET_CUSTOM_CATEGORY = range(2)
 
@@ -104,15 +104,18 @@ def _format_success(data, context):
     lines.append(t("command.success_amount", context, amount_display=f"{amt:{fmt}} {curr}"))
 
     if 'categoryId' in data:
-        cat = t(f"categories.{data['categoryId']}", context)
+        cat = html.escape(t(f"categories.{data['categoryId']}", context))
         lines.append(t("command.success_category", context, category=cat))
         if data.get('description'):
-            lines.append(t("command.success_description", context, description=data['description']))
+            desc = html.escape(data['description'])
+            lines.append(t("command.success_description", context, description=desc))
 
     elif 'person' in data:
-        lines.append(t("command.success_person", context, person=data['person']))
+        person = html.escape(data['person'])
+        lines.append(t("command.success_person", context, person=person))
         if data.get('purpose'):
-            lines.append(t("command.success_purpose", context, purpose=data['purpose']))
+            purpose = html.escape(data['purpose'])
+            lines.append(t("command.success_purpose", context, purpose=purpose))
 
     date_str = datetime.fromisoformat(data['timestamp']).strftime('%Y-%m-%d') if data.get(
         'timestamp') else datetime.now().strftime('%Y-%m-%d')
@@ -221,7 +224,11 @@ async def handle_repayment(update, context, args, debt_type):
             person, currency, amount, debt_type, context.user_data['jwt'], date_str
         )
 
-        text = response.get('message') or t("command.repayment_error", context, error=response.get('error'))
+        error_msg = response.get('error')
+        if error_msg:
+            error_msg = html.escape(str(error_msg))
+
+        text = response.get('message') or t("command.repayment_error", context, error=error_msg)
 
         summary = api_client.get_detailed_summary(context.user_data['jwt'])
         await update.message.reply_text(text + format_summary_message(summary, context), parse_mode='HTML')
@@ -238,6 +245,7 @@ async def unified_message_router(update: Update, context: ContextTypes.DEFAULT_T
     if not text.startswith('!') and '=' in text:
         expression = text.split('=')[0].strip()
         try:
+            aeval = Interpreter() # Instantiated locally to prevent cross-user state leakage
             result = aeval.eval(expression)
             await update.message.reply_text(t("command.calculating", context, result=result), parse_mode='Markdown')
         except Exception:
@@ -251,7 +259,7 @@ async def unified_message_router(update: Update, context: ContextTypes.DEFAULT_T
     try:
         parts = shlex.split(clean_text.replace('“', '"').replace('”', '"').replace("‘", "'").replace("’", "'"))
     except ValueError as e:
-        await update.message.reply_text(t("command.parse_error", context, error=str(e)))
+        await update.message.reply_text(t("command.parse_error", context, error=html.escape(str(e))))
         return ConversationHandler.END
 
     if not parts: return ConversationHandler.END
@@ -349,7 +357,8 @@ async def unknown_command_entry_point(update, context):
         cats = context.user_data['profile'].get('settings', {}).get('categories', {}).get('expense', [])
         kb = keyboards.expense_categories_keyboard(cats, context)
 
-        await update.message.reply_text(t("command.unknown_prompt", context, description=desc, amount_display=display),
+        safe_desc = html.escape(desc)
+        await update.message.reply_text(t("command.unknown_prompt", context, description=safe_desc, amount_display=display),
                                         reply_markup=kb)
         return SELECT_CATEGORY
     except Exception as e:

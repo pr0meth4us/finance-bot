@@ -2,6 +2,7 @@
 
 import io
 import csv
+import html
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -112,7 +113,8 @@ def format_summation_results(params, results, context: ContextTypes.DEFAULT_TYPE
         meta.append(f"<b>Type:</b> {params['transaction_type'].title()}")
 
     if params.get('categories'):
-        meta.append(f"<b>Categories:</b> {', '.join(params['categories'])}")
+        escaped_cats = [html.escape(c) for c in params['categories']]
+        meta.append(f"<b>Categories:</b> {', '.join(escaped_cats)}")
 
     stats = []
     for item in results.get('totals_by_currency', []):
@@ -180,7 +182,7 @@ def _format_report_summary_message(data, context: ContextTypes.DEFAULT_TYPE, is_
     insights_text = t("analytics.expense_insights", context)
     if top_exp:
         insights_text += t("analytics.top_expense", context, amount=top_exp['amount_usd'],
-                           description=top_exp['description'], date=top_exp['date'])
+                           description=html.escape(top_exp['description']), date=top_exp['date'])
     if busiest:
         insights_text += t("analytics.busiest_day", context, date=busiest['_id'], amount=busiest['total_spent_usd'])
 
@@ -196,7 +198,7 @@ def _format_report_summary_message(data, context: ContextTypes.DEFAULT_TYPE, is_
             if not " " in cat_name:  # Simple heuristic or use existing t() logic
                 cat_display = t(f"categories.{cat_name}", context)
             else:
-                cat_display = cat_name
+                cat_display = html.escape(cat_name)
 
             cat_text += f"    - {cat_display}: ${item['totalUSD']:,.2f}\n"
     else:
@@ -208,17 +210,13 @@ def _format_report_summary_message(data, context: ContextTypes.DEFAULT_TYPE, is_
     has_fin = False
 
     if fin.get('totalLentUSD', 0) > 0:
-        fin_text += t("analytics.lent_to_others", context, amount=fin['totalLentUSD']);
-        has_fin = True
+        fin_text += t("analytics.lent_to_others", context, amount=fin['totalLentUSD']); has_fin = True
     if fin.get('totalBorrowedUSD', 0) > 0:
-        fin_text += t("analytics.borrowed_from_others", context, amount=fin['totalBorrowedUSD']);
-        has_fin = True
+        fin_text += t("analytics.borrowed_from_others", context, amount=fin['totalBorrowedUSD']); has_fin = True
     if fin.get('totalRepaidToYouUSD', 0) > 0:
-        fin_text += t("analytics.repayments_received", context, amount=fin['totalRepaidToYouUSD']);
-        has_fin = True
+        fin_text += t("analytics.repayments_received", context, amount=fin['totalRepaidToYouUSD']); has_fin = True
     if fin.get('totalYouRepaidUSD', 0) > 0:
-        fin_text += t("analytics.repayments_made", context, amount=fin['totalYouRepaidUSD']);
-        has_fin = True
+        fin_text += t("analytics.repayments_made", context, amount=fin['totalYouRepaidUSD']); has_fin = True
 
     if not has_fin:
         fin_text += t("analytics.no_loan_activity", context)
@@ -229,7 +227,6 @@ def _format_report_summary_message(data, context: ContextTypes.DEFAULT_TYPE, is_
 def _format_habits_message(data):
     if not data:
         return "Could not analyze spending habits."
-
     day_text = "\n<b>📅 Spending by Day of Week:</b>\n"
     days = sorted(data.get('byDayOfWeek', []), key=lambda x: x.get('total', 0), reverse=True)
     day_text += "\n".join([f"    - {i['day']}s: ${i['total']:,.2f}" for i in days]) or "    - Not enough data.\n"
@@ -239,7 +236,8 @@ def _format_habits_message(data):
     if kws:
         for item in kws:
             if item.get('topKeywords'):
-                kw_text += f"    - <b>{item['category']}:</b> {', '.join(item['topKeywords'])}\n"
+                escaped_kws = [html.escape(k) for k in item['topKeywords']]
+                kw_text += f"    - <b>{html.escape(item['category'])}:</b> {', '.join(escaped_kws)}\n"
     else:
         kw_text += "    - No descriptions found.\n"
 
@@ -252,7 +250,7 @@ def _format_debt_analysis_message(data, context: ContextTypes.DEFAULT_TYPE):
 
     def _fmt_list(items, key_none):
         return "\n".join([
-            t('iou.analysis_item', context, person=i['person'], total=i['total'])
+            t('iou.analysis_item', context, person=html.escape(i['person']), total=i['total'])
             for i in items[:3]
         ]) or t(key_none, context)
 

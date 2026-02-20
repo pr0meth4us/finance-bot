@@ -1,6 +1,7 @@
 # telegram_bot/handlers/settings.py
 
 import os
+import html
 from telegram import Update
 from telegram.ext import (
     ContextTypes,
@@ -10,6 +11,7 @@ from telegram.ext import (
     filters,
     CommandHandler
 )
+
 import api_client
 import keyboards
 # FIXED: Import 'menu' instead of 'start'
@@ -148,7 +150,6 @@ async def categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     user_data = api_client.get_user_settings(context.user_data['jwt'])
-
     # --- FIX: Handle None ---
     if not user_data or "error" in user_data:
         return await settings_menu(update, context)
@@ -156,10 +157,10 @@ async def categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["profile"] = user_data.get("profile", {})
     cats = context.user_data["profile"].get('settings', {}).get('categories', {})
 
-    text = t("settings.categories_header", context,
-             expense_cats=', '.join(cats.get('expense', [])) or 'None',
-             income_cats=', '.join(cats.get('income', [])) or 'None')
+    expense_cats = ', '.join([html.escape(c) for c in cats.get('expense', [])]) or 'None'
+    income_cats = ', '.join([html.escape(c) for c in cats.get('income', [])]) or 'None'
 
+    text = t("settings.categories_header", context, expense_cats=expense_cats, income_cats=income_cats)
     await query.edit_message_text(text, parse_mode='HTML', reply_markup=keyboards.manage_categories_keyboard(context))
     return CATEGORIES_MENU
 
@@ -170,7 +171,6 @@ async def category_action_start(update: Update, context: ContextTypes.DEFAULT_TY
     # [REFACTOR] Fix Role check for Integers
     role = context.user_data.get('role', 'user')
     profile = context.user_data.get('profile', {})
-
     # Check profile directly
     profile_role = profile.get('role')
 
@@ -180,7 +180,6 @@ async def category_action_start(update: Update, context: ContextTypes.DEFAULT_TY
 
     # Determine if premium
     is_premium = False
-
     # Check context role
     if isinstance(role, int) and role >= 2:
         is_premium = True
@@ -227,7 +226,6 @@ async def received_category_type(update: Update, context: ContextTypes.DEFAULT_T
     action = context.user_data['category_action']
     cat_type = query.data.split(':')[-1]
     context.user_data['category_type'] = cat_type
-
     await query.edit_message_text(t("settings.category_ask_name", context, cat_type=cat_type, action=action))
     return CATEGORY_ADD_GET_NAME if action == 'add' else CATEGORY_REMOVE_GET_NAME
 
@@ -241,15 +239,15 @@ async def received_category_name(update: Update, context: ContextTypes.DEFAULT_T
     if action == 'add':
         res = api_client.add_category(jwt, cat_type, name)
         if res and "error" not in res:
-            msg = t("settings.category_add_success", context, name=name, type=cat_type)
+            msg = t("settings.category_add_success", context, name=html.escape(name), type=cat_type)
         else:
-            msg = f"❌ {res.get('error', 'Unknown Error')}" if res else t("common.error_generic", context)
+            msg = f"❌ {html.escape(res.get('error', 'Unknown Error'))}" if res else t("common.error_generic", context)
     else:
         res = api_client.remove_category(jwt, cat_type, name)
         if res and "error" not in res:
-            msg = t("settings.category_remove_success", context, name=name, type=cat_type)
+            msg = t("settings.category_remove_success", context, name=html.escape(name), type=cat_type)
         else:
-            msg = f"❌ {res.get('error', 'Unknown Error')}" if res else t("common.error_generic", context)
+            msg = f"❌ {html.escape(res.get('error', 'Unknown Error'))}" if res else t("common.error_generic", context)
 
     await update.message.reply_text(msg)
     return await settings_menu(update, context)
@@ -277,7 +275,6 @@ async def received_km_name_for_switch(update: Update, context: ContextTypes.DEFA
     profile = context.user_data['profile']
 
     api_client.update_user_mode(jwt, mode='dual', language='km', name_en=profile.get('name_en'), name_km=km_name)
-
     profile['settings']['currency_mode'] = 'dual'
     profile['settings']['language'] = 'km'
     profile['name_km'] = km_name
@@ -300,6 +297,7 @@ async def received_new_language(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     new_lang = query.data.split(':')[-1]
     profile = context.user_data['profile']
+
     context.user_data['new_lang'] = new_lang
 
     if profile.get('settings', {}).get('currency_mode') == 'dual':
@@ -340,7 +338,6 @@ async def _finalize_language_switch(update_obj, context, new_lang):
         name_km=profile.get('name_km'),
         primary_currency=profile.get('settings', {}).get('primary_currency')
     )
-
     context.user_data['profile']['settings']['language'] = new_lang
 
     msg = t("settings.language_switch_success", context)
@@ -392,7 +389,7 @@ async def received_link_password(update: Update, context: ContextTypes.DEFAULT_T
         msg = t("settings.link_email_success", context)
     else:
         error = res.get("error", "Unknown error") if res else "Connection failed"
-        msg = t("settings.link_email_fail", context, error=error)
+        msg = t("settings.link_email_fail", context, error=html.escape(error))
 
     await update.message.reply_text(msg, parse_mode='HTML', reply_markup=keyboards.main_menu_keyboard(context))
     return ConversationHandler.END

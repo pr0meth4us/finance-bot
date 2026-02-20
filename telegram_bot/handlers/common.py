@@ -1,6 +1,7 @@
 # telegram_bot/handlers/common.py
 
 import telegram.error
+import html
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from telegram import Update
@@ -66,7 +67,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         summary_text = t("common.summary_unavailable", context)
     # ------------------------------
 
-    greeting_text = t(greeting_key, context, name=user_name)
+    greeting_text = t(greeting_key, context, name=html.escape(user_name))
 
     if summary_text:
         final_text = f"{greeting_text}\n\n{summary_text}"

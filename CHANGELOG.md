@@ -2,25 +2,38 @@
 
 # Changelog
 
+## [0.7.8] - 2026-02-20
+
+### Fixed
+- **Security/XSS**: Conducted a comprehensive audit and fixed HTML Injection vulnerabilities across the entire application. Applied `html.escape()` to user inputs rendered with `parse_mode='HTML'` in `helpers.py` (analytics/reports), `transaction.py`, `search.py`, `iou.py` (debts/ledgers), `settings.py` (categories), and `common.py` (dashboard names). This completely mitigates `BadRequest` crashes.
+
+## [0.7.7] - 2026-02-20
+
+### Fixed
+- **Security/State Leakage**: Resolved a critical vulnerability in `telegram_bot/handlers/command_handler.py` where a global `asteval.Interpreter` instance was shared across all users. This allowed cross-user state leakage via calculator commands. The interpreter is now instantiated locally per request.
+- **Security/XSS**: Fixed HTML Injection vulnerabilities in bot responses by utilizing `html.escape` to sanitize user inputs (descriptions, names, categories) before rendering them with `parse_mode='HTML'`, preventing `BadRequest` crashes and UI spoofing.
+
 ## [0.7.6] - 2026-02-20
 
 ### Fixed
 - **Performance/Database**: Addressed a critical scaling vulnerability where MongoDB collections lacked proper indexing.
-  - The absence of indexes forced MongoDB to execute a Full Collection Scan (`COLLSCAN`) for nearly every API request.
-  - Implemented `init_db_indexes` in `web_service/app/utils/db.py` to construct Compound Indexes on heavily queried fields like `account_id`, `timestamp`, and `status`.
-  - Integrated index initialization into the Flask app factory (`__init__.py`) to assure robust `O(1)` data retrieval performance.
+- The absence of indexes forced MongoDB to execute a Full Collection Scan (`COLLSCAN`) for nearly every API request.
+- Implemented `init_db_indexes` in `web_service/app/utils/db.py` to construct Compound Indexes on heavily queried fields like `account_id`, `timestamp`, and `status`.
+- Integrated index initialization into the Flask app factory (`__init__.py`) to assure robust `O(1)` data retrieval performance.
 
 ## [0.7.5] - 2026-02-20
 
 ### Fixed
-- **Performance/Database**: Resolved a critical MongoDB connection pooling issue in `web_service/app/utils/db.py`. 
-  - The application was previously creating a new `MongoClient` for every single incoming HTTP request, defeating connection pooling and introducing severe latency due to repeated TLS handshakes.
-  - Refactored `get_db()` to utilize the global `current_app.db` instance created at startup, dramatically reducing database response times and preventing connection storms.
+- **Performance/Database**: Resolved a critical MongoDB connection pooling issue in `web_service/app/utils/db.py`.
+- The application was previously creating a new `MongoClient` for every single incoming HTTP request, defeating connection pooling and introducing severe latency due to repeated TLS handshakes.
+- Refactored `get_db()` to utilize the global `current_app.db` instance created at startup, dramatically reducing database response times and preventing connection storms.
 
 ## [0.7.4] - 2026-02-20
 
 ### Fixed
-- **Efficiency/Security**: Implemented a 24-hour TTL (Time-To-Live) cache for token validation in `web_service/app/utils/auth.py`. This resolves a significant efficiency bottleneck where every backend request triggered a synchronous HTTP call to the Bifrost server. It also fully enables the `invalidate_token_cache` function for instant revocation of compromised tokens via webhooks.
+- **Efficiency/Security**: Implemented a 24-hour TTL (Time-To-Live) cache for token validation in `web_service/app/utils/auth.py`.
+This resolves a significant efficiency bottleneck where every backend request triggered a synchronous HTTP call to the Bifrost server.
+It also fully enables the `invalidate_token_cache` function for instant revocation of compromised tokens via webhooks.
 
 ## [0.7.3] - 2026-02-20
 
@@ -50,11 +63,11 @@ This resolves an I/O bottleneck and prevents sensitive user payload data from wr
 ### Refactored
 - **Web Service Structure**: Split the monolithic `web_service/app/__init__.py` into modular services.
 - Extracted report generation logic to `web_service/app/services/reporting.py`.
-    - Extracted scheduler jobs and configuration to `web_service/app/services/scheduler.py`.
+- Extracted scheduler jobs and configuration to `web_service/app/services/scheduler.py`.
 - Extracted Telegram API helpers to `web_service/app/utils/telegram_helpers.py`.
 - **Telegram Bot Keyboards**: Converted `telegram_bot/keyboards.py` into a package (`telegram_bot/keyboards/`).
 - Modularized keyboards into `menus.py`, `transactions.py`, `iou.py`, `analytics.py`, `settings.py`, and `utils.py`.
-    - Maintained full backward compatibility via `telegram_bot/keyboards/__init__.py` exports.
+- Maintained full backward compatibility via `telegram_bot/keyboards/__init__.py` exports.
 
 ## [0.6.18] - 2026-01-30
 
@@ -168,7 +181,6 @@ Now uses `ADMIN_USER_ID` environment variable.
 
 ### Added
 - **API Client**: Introduced explicit `BIFROST_TIMEOUT` (60s) in `telegram_bot/api_client/core.py`.
-
 ### Changed
 - **Reliability**: Standardized all Bifrost API calls (`get_login_code`, `login_to_bifrost`, `sync_subscription_status`, `create_payment_intent`) to use the dedicated 60-second timeout, separating them from the default Web Service timeout.
 

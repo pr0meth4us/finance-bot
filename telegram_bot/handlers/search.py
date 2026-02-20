@@ -1,3 +1,6 @@
+# telegram_bot/handlers/search.py
+
+import html
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from telegram import Update
@@ -89,7 +92,7 @@ async def received_custom_end(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def _ask_type(message, context):
-    if message.from_user.is_bot:
+    if message.fromuser.is_bot:
         await message.edit_text(t("search.ask_type", context), reply_markup=keyboards.search_type_keyboard(context))
     else:
         await message.reply_text(t("search.ask_type", context), reply_markup=keyboards.search_type_keyboard(context))
@@ -186,8 +189,8 @@ async def _execute_search(message, context):
                     emoji=emoji,
                     amount=amount_str,
                     currency=tx['currency'],
-                    category=tx['categoryId'],
-                    description=desc_str,
+                    category=html.escape(tx['categoryId']),
+                    description=html.escape(desc_str),
                     date=dt
                 )
 
