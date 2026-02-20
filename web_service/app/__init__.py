@@ -7,8 +7,10 @@ from pymongo import MongoClient
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from flasgger import Swagger
+
 from .config import Config
 from .services.scheduler import send_daily_reminder_job, run_scheduled_report
+from .utils.db import init_db_indexes
 
 
 def get_db(app=None):
@@ -36,8 +38,10 @@ def create_app():
     client = MongoClient(Config.MONGODB_URI, tls=True, tlsCAFile=certifi.where())
     app.db = client[Config.DB_NAME]
 
-    scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Phnom_Penh')
+    # --- Performance: Initialize DB Indexes ---
+    init_db_indexes(app)
 
+    scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Phnom_Penh')
     scheduler.add_job(
         send_daily_reminder_job,
         trigger=CronTrigger(hour=21, minute=0),
@@ -72,7 +76,6 @@ def create_app():
         id='yearly_report',
         replace_existing=True,
     )
-
     scheduler.start()
     app.scheduler = scheduler
 
@@ -81,26 +84,20 @@ def create_app():
     from .analytics.routes import analytics_bp
     from .transactions.routes import transactions_bp
     from .debts.routes import debts_bp
-    from .summary.routes import summary_bp
-    from .reminders.routes import reminders_bp
     from .auth.routes import auth_bp
     from .users.routes import users_bp
     from .payments.routes import payments_bp
+    from .reminders.routes import reminders_bp
+    from .summary.routes import summary_bp
 
     app.register_blueprint(settings_bp)
     app.register_blueprint(analytics_bp)
     app.register_blueprint(transactions_bp)
     app.register_blueprint(debts_bp)
-    app.register_blueprint(summary_bp)
-    app.register_blueprint(reminders_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
     app.register_blueprint(payments_bp)
-
-    Swagger(app, template_file='../swagger.yaml')
-
-    @app.route("/health")
-    def health_check():
-        return jsonify({"status": "ok"})
+    app.register_blueprint(reminders_bp)
+    app.register_blueprint(summary_bp)
 
     return app

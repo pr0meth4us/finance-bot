@@ -1,10 +1,34 @@
+# CHANGELOG.md
+
 # Changelog
+
+## [0.7.6] - 2026-02-20
+
+### Fixed
+- **Performance/Database**: Addressed a critical scaling vulnerability where MongoDB collections lacked proper indexing.
+  - The absence of indexes forced MongoDB to execute a Full Collection Scan (`COLLSCAN`) for nearly every API request.
+  - Implemented `init_db_indexes` in `web_service/app/utils/db.py` to construct Compound Indexes on heavily queried fields like `account_id`, `timestamp`, and `status`.
+  - Integrated index initialization into the Flask app factory (`__init__.py`) to assure robust `O(1)` data retrieval performance.
+
+## [0.7.5] - 2026-02-20
+
+### Fixed
+- **Performance/Database**: Resolved a critical MongoDB connection pooling issue in `web_service/app/utils/db.py`. 
+  - The application was previously creating a new `MongoClient` for every single incoming HTTP request, defeating connection pooling and introducing severe latency due to repeated TLS handshakes.
+  - Refactored `get_db()` to utilize the global `current_app.db` instance created at startup, dramatically reducing database response times and preventing connection storms.
+
+## [0.7.4] - 2026-02-20
+
+### Fixed
+- **Efficiency/Security**: Implemented a 24-hour TTL (Time-To-Live) cache for token validation in `web_service/app/utils/auth.py`. This resolves a significant efficiency bottleneck where every backend request triggered a synchronous HTTP call to the Bifrost server. It also fully enables the `invalidate_token_cache` function for instant revocation of compromised tokens via webhooks.
 
 ## [0.7.3] - 2026-02-20
 
 ### Fixed
-- **Security/Memory**: Implemented a 24-hour TTL (Time-To-Live) cache for `_USER_TOKENS` in `telegram_bot/api_client/core.py`. This prevents unbounded memory growth over time and mitigates the risk of long-lived JWT exposure in memory.
-- **Security/Efficiency**: Reverted global `logging.basicConfig` level from `DEBUG` to `INFO` in `telegram_bot/bot.py`. This resolves an I/O bottleneck and prevents sensitive user payload data from writing to system logs.
+- **Security/Memory**: Implemented a 24-hour TTL (Time-To-Live) cache for `_USER_TOKENS` in `telegram_bot/api_client/core.py`.
+This prevents unbounded memory growth over time and mitigates the risk of long-lived JWT exposure in memory.
+- **Security/Efficiency**: Reverted global `logging.basicConfig` level from `DEBUG` to `INFO` in `telegram_bot/bot.py`.
+This resolves an I/O bottleneck and prevents sensitive user payload data from writing to system logs.
 
 ### Refactored
 - **API Client**: Encapsulated `_USER_TOKENS` dict access by introducing a `set_cached_token` method, eliminating unsafe direct memory assignments in `telegram_bot/api_client/auth.py`.
@@ -13,23 +37,23 @@
 
 ### Added
 - **UX**: Added an immediate "⏳ Verifying subscription status..." loading message to the `/upgrade` command in `telegram_bot/handlers/payment.py`.
-  - This informs the user that the bot is working while it syncs data with Bifrost and the Finance API, preventing confusion during the ~2s delay.
+- This informs the user that the bot is working while it syncs data with Bifrost and the Finance API, preventing confusion during the ~2s delay.
 
 ## [0.7.1] - 2026-01-30
 
 ### Fixed
 - **Upgrade Flow**: Enhanced `/upgrade` to force a `sync_subscription_status` check against Bifrost Internal API before showing payment options.
-  - This ensures users who are already `premium_user` in the DB but have a stale local session are not asked to pay again.
+- This ensures users who are already `premium_user` in the DB but have a stale local session are not asked to pay again.
 
 ## [0.7.0] - 2026-01-30
 
 ### Refactored
 - **Web Service Structure**: Split the monolithic `web_service/app/__init__.py` into modular services.
-    - Extracted report generation logic to `web_service/app/services/reporting.py`.
+- Extracted report generation logic to `web_service/app/services/reporting.py`.
     - Extracted scheduler jobs and configuration to `web_service/app/services/scheduler.py`.
-    - Extracted Telegram API helpers to `web_service/app/utils/telegram_helpers.py`.
+- Extracted Telegram API helpers to `web_service/app/utils/telegram_helpers.py`.
 - **Telegram Bot Keyboards**: Converted `telegram_bot/keyboards.py` into a package (`telegram_bot/keyboards/`).
-    - Modularized keyboards into `menus.py`, `transactions.py`, `iou.py`, `analytics.py`, `settings.py`, and `utils.py`.
+- Modularized keyboards into `menus.py`, `transactions.py`, `iou.py`, `analytics.py`, `settings.py`, and `utils.py`.
     - Maintained full backward compatibility via `telegram_bot/keyboards/__init__.py` exports.
 
 ## [0.6.18] - 2026-01-30
@@ -91,12 +115,12 @@
 
 ### Fixed
 - **Auth Integration**: Updated `web_service/app/utils/auth.py` to match the actual Bifrost Internal API.
-  - Endpoint: Changed from `/auth/api/verify` (404) to `POST /internal/validate-token`.
+- Endpoint: Changed from `/auth/api/verify` (404) to `POST /internal/validate-token`.
   - Auth Method: Switched from Bearer Token to **Basic Auth** (Client ID/Secret).
-  - Payload: Sending `{"jwt": token}` in the body instead of query params.
+- Payload: Sending `{"jwt": token}` in the body instead of query params.
 - **Bot Stability**: Hardened `telegram_bot/decorators.py` to gracefully handle `PremiumFeatureException`.
   - Instead of crashing or trying to edit the message (which fails if content is identical), it now shows a **native Telegram alert** (popup).
-  - Added specific handling for `MessageNotModified` to prevent log spam and crashes when the UI state is already correct.
+- Added specific handling for `MessageNotModified` to prevent log spam and crashes when the UI state is already correct.
 
 ## [0.6.8] - 2026-01-26
 
@@ -136,7 +160,7 @@
 
 ### Fixed
 - **Security**: Removed hardcoded Admin IDs in `handlers/analytics.py` and `handlers/settings.py`.
-  Now uses `ADMIN_USER_ID` environment variable.
+Now uses `ADMIN_USER_ID` environment variable.
 - **Auth**: Fixed `ensure_auth` decorator in `api_client/core.py` to gracefully handle 401 errors by clearing the token and returning `None`, preventing handler crashes while ensuring re-login on the next request.
 - **API Client**: Updated all API modules (`transactions`, `settings`, `analytics`, `debts`, `auth`) to propagate `401 Unauthorized` exceptions to the `ensure_auth` decorator instead of swallowing them.
 
@@ -165,13 +189,13 @@
 - **Performance**: Refactored `auth_required` to remove per-request identity syncing, significantly reducing database load on high-traffic endpoints.
 - **Notifications**: The "Premium Activated" Telegram alert now informs the user of their specific **Plan Duration** and **Expiration Date**.
 - **Localization**: Converted date formats and code-like strings in all locale files to use HTML `<code>` tags.
-  This prevents formatting errors when the bot uses `parse_mode='HTML'`.
+This prevents formatting errors when the bot uses `parse_mode='HTML'`.
 
 ### Fixed
 - **Provisioning**: Fixed logic in `web_service/app/models.py` to ensure `telegram_id` is stored immediately during Lazy Provisioning (initial user creation).
 - **Locales**:
   - Added missing Khmer (km) keys for `onboarding.ask_subscription`, `keyboards.plan_free`, and `keyboards.plan_premium`.
-  - Added missing Khmer keys for `settings.link_email`.
+- Added missing Khmer keys for `settings.link_email`.
 
 ## [0.5.3] - 2026-01-22
 
@@ -214,7 +238,7 @@
 
 ### Added
 - **Manual Account Linking**: Added `/link <token>` command.
-  This serves as a reliable alternative to deep links for users on devices where standard URL redirection fails.
+This serves as a reliable alternative to deep links for users on devices where standard URL redirection fails.
 - **Bifrost Compatibility**: Updated `/upgrade` payload format to support Bifrost 1.4.0 features (Duration and Explicit Roles).
 
 ### Changed
@@ -229,13 +253,13 @@
 - The Finance Service now caches token validation results for 24 hours to maximize performance.
 - Added a new `/internal/webhook/auth-event` endpoint to receive invalidation signals from Bifrost (e.g., on ban or password change).
 - **Provisioning**: Switched to **Lazy Provisioning**. The `/sync-session` endpoint has been removed.
-  User profiles are now automatically created in the Finance DB upon the first valid request.
+User profiles are now automatically created in the Finance DB upon the first valid request.
 
 ## [0.3.2] - 2026-01-20
 
 ### Fixed
 - **Auth Architecture**: Fixed the "Shared Secret" vulnerability.
-  The Finance Service no longer attempts to decode Bifrost tokens locally.
+The Finance Service no longer attempts to decode Bifrost tokens locally.
 - **Web Service**: Updated `/sync-session` to validate tokens by calling `Bifrost` directly, removing the need for `JWT_SECRET_KEY` synchronization between services.
 
 ## [0.3.1] - 2026-01-20
@@ -275,8 +299,8 @@
 - **Finance Service Models**: Updated `User` model in `web_service/app/models.py` to support `email`, `password`, and `subscription_tier`.
 - **Finance Service Auth**:
   - Added `POST /auth/register` and `POST /auth/login` for Web Email/Password flow.
-  - Added `POST /auth/verify-otp` to allow Telegram users to login to Web using the 6-digit Bot code.
-  - Added `POST /auth/link-account` to connect Email to Telegram accounts and vice versa.
+- Added `POST /auth/verify-otp` to allow Telegram users to login to Web using the 6-digit Bot code.
+- Added `POST /auth/link-account` to connect Email to Telegram accounts and vice versa.
 
 ### Changed
 - **Finance Service Auth**: Updated `sync-session` to return premium status.
@@ -293,18 +317,18 @@
 - **Infrastructure**: Added `bifrost` service to `docker-compose.yml`. Updated `web` and `telegram` services to communicate with Bifrost.
 - **Auth (Telegram Bot)**:
   - Updated `telegram_bot/api_client.py` to include `sync_session` method.
-  - Updated `telegram_bot/decorators.py` to call `sync_session` after successful login.
+- Updated `telegram_bot/decorators.py` to call `sync_session` after successful login.
 
 ## [0.0.1] - 2026-01-01
 
 ### Added
 - **Core Features**:
   - **Smart Text Input**: Natural language logging for expenses and income (e.g., "Coffee 2.50", "Salary 500").
-  - **Dual Currency Support**: Full support for USD and KHR with live or fixed exchange rates.
-  - **Debt Management**: Tracking for "Lent" and "Borrowed" amounts with repayment logging.
-  - **Reporting**: Weekly/Monthly analytics, spending habits, and CSV exports.
+- **Dual Currency Support**: Full support for USD and KHR with live or fixed exchange rates.
+- **Debt Management**: Tracking for "Lent" and "Borrowed" amounts with repayment logging.
+- **Reporting**: Weekly/Monthly analytics, spending habits, and CSV exports.
   - **Reminders**: Custom scheduled notifications via Telegram.
 - **Architecture**:
   - **Telegram Bot**: Python-based interface using `python-telegram-bot`.
-  - **Web Service**: Flask backend handling logic, database operations, and API endpoints.
-  - **Database**: MongoDB for persistent storage of transactions, debts, and user settings.
+- **Web Service**: Flask backend handling logic, database operations, and API endpoints.
+- **Database**: MongoDB for persistent storage of transactions, debts, and user settings.
