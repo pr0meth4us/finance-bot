@@ -1,6 +1,7 @@
 # telegram_bot/api_client/core.py
 
 import os
+import time
 import requests
 import logging
 from dotenv import load_dotenv
@@ -19,8 +20,9 @@ DEFAULT_TIMEOUT = 60
 # Dedicated timeout for Bifrost calls to ensure consistency
 BIFROST_TIMEOUT = 60
 
-# In-memory token storage: { user_id: "jwt_token" }
+# In-memory token storage: { user_id: {"token": "jwt_token", "expires_at": timestamp} }
 _USER_TOKENS = {}
+TOKEN_TTL = 24 * 60 * 60  # 24 hours in seconds
 
 
 class PremiumFeatureException(Exception):
@@ -33,8 +35,21 @@ class UpstreamUnavailable(Exception):
     pass
 
 def get_cached_token(user_id):
-    """Retrieves the JWT for a user from the in-memory cache."""
-    return _USER_TOKENS.get(user_id)
+    """Retrieves the JWT for a user from the in-memory cache, respecting TTL."""
+    cache_entry = _USER_TOKENS.get(user_id)
+    if cache_entry:
+        if time.time() < cache_entry["expires_at"]:
+            return cache_entry["token"]
+        else:
+            _USER_TOKENS.pop(user_id, None)
+    return None
+
+def set_cached_token(user_id, token):
+    """Stores the JWT in the cache with a TTL."""
+    _USER_TOKENS[user_id] = {
+        "token": token,
+        "expires_at": time.time() + TOKEN_TTL
+    }
 
 def _get_headers(user_id_or_token):
     """
@@ -47,7 +62,7 @@ def _get_headers(user_id_or_token):
         return {"Authorization": f"Bearer {user_id_or_token}"}
 
     # 2. Otherwise, treat as User ID and look up in cache
-    token = _USER_TOKENS.get(user_id_or_token)
+    token = get_cached_token(user_id_or_token)
     if token:
         return {"Authorization": f"Bearer {token}"}
 

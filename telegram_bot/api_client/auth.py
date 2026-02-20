@@ -8,7 +8,7 @@ from utils.bifrost import prepare_bifrost_payload
 from .core import (
     BIFROST_URL, BIFROST_CLIENT_ID, BIFROST_CLIENT_SECRET,
     TELEGRAM_TOKEN, DEFAULT_TIMEOUT, BIFROST_TIMEOUT, BASE_URL,
-    _USER_TOKENS, _get_headers, ensure_auth
+    _get_headers, ensure_auth, set_cached_token
 )
 
 log = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ def login_to_bifrost(user):
 
         jwt = data.get('jwt')
         if jwt:
-            _USER_TOKENS[user.id] = jwt
+            set_cached_token(user.id, jwt)
             log.info(f"Bifrost login successful for user {user.id}")
             return jwt
         else:

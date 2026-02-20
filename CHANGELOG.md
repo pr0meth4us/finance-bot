@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.3] - 2026-02-20
+
+### Fixed
+- **Security/Memory**: Implemented a 24-hour TTL (Time-To-Live) cache for `_USER_TOKENS` in `telegram_bot/api_client/core.py`. This prevents unbounded memory growth over time and mitigates the risk of long-lived JWT exposure in memory.
+- **Security/Efficiency**: Reverted global `logging.basicConfig` level from `DEBUG` to `INFO` in `telegram_bot/bot.py`. This resolves an I/O bottleneck and prevents sensitive user payload data from writing to system logs.
+
+### Refactored
+- **API Client**: Encapsulated `_USER_TOKENS` dict access by introducing a `set_cached_token` method, eliminating unsafe direct memory assignments in `telegram_bot/api_client/auth.py`.
+
 ## [0.7.2] - 2026-01-30
 
 ### Added
@@ -87,23 +96,23 @@
   - Payload: Sending `{"jwt": token}` in the body instead of query params.
 - **Bot Stability**: Hardened `telegram_bot/decorators.py` to gracefully handle `PremiumFeatureException`.
   - Instead of crashing or trying to edit the message (which fails if content is identical), it now shows a **native Telegram alert** (popup).
-- Added specific handling for `MessageNotModified` to prevent log spam and crashes when the UI state is already correct.
+  - Added specific handling for `MessageNotModified` to prevent log spam and crashes when the UI state is already correct.
 
 ## [0.6.8] - 2026-01-26
 
 ### Fixed
 - **Auth Service**: Corrected the Bifrost integration in `web_service/app/utils/auth.py`.
-  - Switched from the non-existent `/auth/api/me` endpoint to the correct `POST /internal/validate-token` endpoint found in Bifrost source.
-  - Implemented `HTTPBasicAuth` using the service's Client Credentials.
+- Switched from the non-existent `/auth/api/me` endpoint to the correct `POST /internal/validate-token` endpoint found in Bifrost source.
+- Implemented `HTTPBasicAuth` using the service's Client Credentials.
   - Updated payload format to send `{"jwt": token}` as expected by Bifrost's `validate_token` route.
-  - Added robust response parsing to map Bifrost's `app_specific_role` to the local User model.
+- Added robust response parsing to map Bifrost's `app_specific_role` to the local User model.
 
 ## [0.6.7] - 2026-01-26
 
 ### Fixed
 - **Core Architecture**: Resolved critical decorator inconsistency in the Web Service.
-  - Replaced the simple `auth_required` decorator with a **Decorator Factory** in `app/utils/auth.py`.
-  - This supports the `@auth_required(min_role="user")` syntax used throughout the application routes.
+- Replaced the simple `auth_required` decorator with a **Decorator Factory** in `app/utils/auth.py`.
+- This supports the `@auth_required(min_role="user")` syntax used throughout the application routes.
 - **Data Integrity**: Updated `auth_required` to explicitly set `g.account_id`, `g.role`, and `g.email`, fixing `AttributeError` crashes in `transactions`, `debts`, and `settings` endpoints.
 - **Consistency**: Renamed internal calls in `auth.py` to match `app/models.py` (`get_by_account_id` instead of `find_by_account_id`, `create` instead of `create_user`).
 - **Dependencies**: Added missing exports `service_auth_required` and `invalidate_token_cache` to `app/utils/auth.py` to fix `ImportError` in `auth/routes.py`.
@@ -112,21 +121,22 @@
 
 ### Fixed
 - **Web Service Auth**: Completely rewrote `auth_required` in `web_service/app/utils/auth.py`.
-  - It now functions as a "Decorator Factory," allowing arguments like `@auth_required(min_role="premium_user")`.
-  - Added logic to explicitly set `g.account_id` from the token, fixing `AttributeError` in routes.
-  - Implemented the `403 Forbidden` check if a user lacks the required `min_role`.
+- It now functions as a "Decorator Factory," allowing arguments like `@auth_required(min_role="premium_user")`.
+- Added logic to explicitly set `g.account_id` from the token, fixing `AttributeError` in routes.
+- Implemented the `403 Forbidden` check if a user lacks the required `min_role`.
 - **Web Service Debts**: Updated `web_service/app/debts/routes.py` to handle empty JSON bodies gracefully and ensure `g.account_id` is available.
 
 ## [0.6.4] - 2026-01-26
 
 ### Fixed
 - **API Client**: Fixed 7 debt endpoints in `telegram_bot/api_client/debts.py` that were suppressing `401 Unauthorized` errors, preventing the automatic re-login logic from triggering.
-  - Fixed: `add_reminder`, `get_all_debts_by_person`, `get_all_settled_debts_by_person`, `get_debt_details`, `cancel_debt`, `update_debt`, `record_lump_sum_repayment`.
+- Fixed: `add_reminder`, `get_all_debts_by_person`, `get_all_settled_debts_by_person`, `get_debt_details`, `cancel_debt`, `update_debt`, `record_lump_sum_repayment`.
 
 ## [0.6.3] - 2026-01-26
 
 ### Fixed
-- **Security**: Removed hardcoded Admin IDs in `handlers/analytics.py` and `handlers/settings.py`. Now uses `ADMIN_USER_ID` environment variable.
+- **Security**: Removed hardcoded Admin IDs in `handlers/analytics.py` and `handlers/settings.py`.
+  Now uses `ADMIN_USER_ID` environment variable.
 - **Auth**: Fixed `ensure_auth` decorator in `api_client/core.py` to gracefully handle 401 errors by clearing the token and returning `None`, preventing handler crashes while ensuring re-login on the next request.
 - **API Client**: Updated all API modules (`transactions`, `settings`, `analytics`, `debts`, `auth`) to propagate `401 Unauthorized` exceptions to the `ensure_auth` decorator instead of swallowing them.
 
@@ -148,13 +158,14 @@
 ### Added
 - **Bifrost 2.3.3 Support**:
   - The Web Service now extracts `duration` (e.g., '1m') and `expires_at` from `subscription_success` webhooks.
-  - **Database**: The `expires_at` timestamp is now stored in the user's `settings` collection to accurately track subscription validity.
+- **Database**: The `expires_at` timestamp is now stored in the user's `settings` collection to accurately track subscription validity.
 - **Profile Sync**: Implemented webhook support for `account_update` events. Changes to `email`, `username`, or `telegram_id` in Bifrost now automatically propagate to the Finance App database.
 
 ### Changed
 - **Performance**: Refactored `auth_required` to remove per-request identity syncing, significantly reducing database load on high-traffic endpoints.
 - **Notifications**: The "Premium Activated" Telegram alert now informs the user of their specific **Plan Duration** and **Expiration Date**.
-- **Localization**: Converted date formats and code-like strings in all locale files to use HTML `<code>` tags. This prevents formatting errors when the bot uses `parse_mode='HTML'`.
+- **Localization**: Converted date formats and code-like strings in all locale files to use HTML `<code>` tags.
+  This prevents formatting errors when the bot uses `parse_mode='HTML'`.
 
 ### Fixed
 - **Provisioning**: Fixed logic in `web_service/app/models.py` to ensure `telegram_id` is stored immediately during Lazy Provisioning (initial user creation).
@@ -167,8 +178,8 @@
 ### Changed
 - **Bifrost Alignment**:
   - Standardized all premium logic to use `role: "premium_user"` matching Bifrost's `secure-intent` target role.
-  - Updated `auth_event_webhook` to parse `subscription_success` and `subscription_expired` payloads exactly as defined in Bifrost docs.
-  - Implemented `X-Bifrost-Signature` verification using HMAC-SHA256.
+- Updated `auth_event_webhook` to parse `subscription_success` and `subscription_expired` payloads exactly as defined in Bifrost docs.
+- Implemented `X-Bifrost-Signature` verification using HMAC-SHA256.
 
 ### Added
 - **Migration**: Added `migrate_legacy_users.sh` to convert existing `tier: premium` records to `role: premium_user`.
