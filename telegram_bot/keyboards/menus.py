@@ -35,3 +35,8 @@ def main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
+
+def login_keyboard(context: ContextTypes.DEFAULT_TYPE):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔑 Retry Login", callback_data='start')]
+    ])

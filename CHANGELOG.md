@@ -2,6 +2,11 @@
 
 # Changelog
 
+## [0.7.12] - 2026-03-25
+
+### Fixed
+- **Imports**: Fixed `ImportError` where `login_keyboard` was missing from `telegram_bot/keyboards/__init__.py` and `telegram_bot/keyboards/menus.py`, which caused crashes during authentication failures.
+
 ## [0.7.11] - 2026-03-25
 
 ### Fixed
@@ -48,13 +53,17 @@
 ## [0.7.4] - 2026-02-20
 
 ### Fixed
-- **Efficiency/Security**: Implemented a 24-hour TTL (Time-To-Live) cache for token validation in `web_service/app/utils/auth.py`. This resolves a significant efficiency bottleneck where every backend request triggered a synchronous HTTP call to the Bifrost server. It also fully enables the `invalidate_token_cache` function for instant revocation of compromised tokens via webhooks.
+- **Efficiency/Security**: Implemented a 24-hour TTL (Time-To-Live) cache for token validation in `web_service/app/utils/auth.py`.
+  - This resolves a significant efficiency bottleneck where every backend request triggered a synchronous HTTP call to the Bifrost server.
+  - It also fully enables the `invalidate_token_cache` function for instant revocation of compromised tokens via webhooks.
 
 ## [0.7.3] - 2026-02-20
 
 ### Fixed
-- **Security/Memory**: Implemented a 24-hour TTL (Time-To-Live) cache for `_USER_TOKENS` in `telegram_bot/api_client/core.py`. This prevents unbounded memory growth over time and mitigates the risk of long-lived JWT exposure in memory.
-- **Security/Efficiency**: Reverted global `logging.basicConfig` level from `DEBUG` to `INFO` in `telegram_bot/bot.py`. This resolves an I/O bottleneck and prevents sensitive user payload data from writing to system logs.
+- **Security/Memory**: Implemented a 24-hour TTL (Time-To-Live) cache for `_USER_TOKENS` in `telegram_bot/api_client/core.py`.
+  - This prevents unbounded memory growth over time and mitigates the risk of long-lived JWT exposure in memory.
+- **Security/Efficiency**: Reverted global `logging.basicConfig` level from `DEBUG` to `INFO` in `telegram_bot/bot.py`.
+  - This resolves an I/O bottleneck and prevents sensitive user payload data from writing to system logs.
 
 ### Refactored
 - **API Client**: Encapsulated `_USER_TOKENS` dict access by introducing a `set_cached_token` method, eliminating unsafe direct memory assignments in `telegram_bot/api_client/auth.py`.
@@ -104,24 +113,24 @@
 
 ### Refactored
 - **Authentication Architecture**: Transitioned `web_service` to a "Pure Bifrost" model.
-- **Routes**: Updated `auth/routes.py` to **proxy** `/login` and `/verify-otp` requests directly to Bifrost API, removing local token generation.
-- **Utils**: Cleaned up `utils/auth.py` to remove `create_jwt` and enforce strict Bifrost token validation.
-- **Lazy Provisioning**: The `auth_required` decorator now automatically creates/syncs a local `User` record when a valid Bifrost token is presented.
+  - **Routes**: Updated `auth/routes.py` to **proxy** `/login` and `/verify-otp` requests directly to Bifrost API, removing local token generation.
+  - **Utils**: Cleaned up `utils/auth.py` to remove `create_jwt` and enforce strict Bifrost token validation.
+  - **Lazy Provisioning**: The `auth_required` decorator now automatically creates/syncs a local `User` record when a valid Bifrost token is presented.
 
 ## [0.6.14] - 2026-01-28
 
 ### Refactored
 - **Backend Auth**: Completely replaced `web_service/app/utils/auth.py` with a robust Bifrost-integrated version.
-- **Compatibility**: Added alias wrappers (`login_required`, `role_required`) to the new `auth_required` core to maintain backward compatibility with existing routes.
-- **Security**: Implemented real-time token validation against Bifrost Internal API using Basic Auth.
+  - **Compatibility**: Added alias wrappers (`login_required`, `role_required`) to the new `auth_required` core to maintain backward compatibility with existing routes.
+  - **Security**: Implemented real-time token validation against Bifrost Internal API using Basic Auth.
 
 ## [0.6.13] - 2026-01-28
 
 ### Fixed
 - **Role Standardization**: Conducted a complete overhaul of role verification logic to strictly enforce `'premium_user'`.
-- **Legacy Removal**: Deprecated and removed all code that accepted `'premium'` as an alias for premium users.
-- **Backend Auth**: Updated `web_service/app/utils/auth.py` to perform strict equality checks on user roles, rejecting any ambiguous role names.
-- **Bot Commands**: Updated `/upgrade` and `/menu` handlers to strictly validate against `'premium_user'`.
+  - **Legacy Removal**: Deprecated and removed all code that accepted `'premium'` as an alias for premium users.
+  - **Backend Auth**: Updated `web_service/app/utils/auth.py` to perform strict equality checks on user roles, rejecting any ambiguous role names.
+  - **Bot Commands**: Updated `/upgrade` and `/menu` handlers to strictly validate against `'premium_user'`.
 
 ## [0.6.12] - 2026-01-28
 
@@ -152,17 +161,17 @@
 
 ### Fixed
 - **Auth Service**: Corrected the Bifrost integration in `web_service/app/utils/auth.py`.
-- Switched from the non-existent `/auth/api/me` endpoint to the correct `POST /internal/validate-token` endpoint found in Bifrost source.
-- Implemented `HTTPBasicAuth` using the service's Client Credentials.
+  - Switched from the non-existent `/auth/api/me` endpoint to the correct `POST /internal/validate-token` endpoint found in Bifrost source.
+  - Implemented `HTTPBasicAuth` using the service's Client Credentials.
   - Updated payload format to send `{"jwt": token}` as expected by Bifrost's `validate_token` route.
-- Added robust response parsing to map Bifrost's `app_specific_role` to the local User model.
+  - Added robust response parsing to map Bifrost's `app_specific_role` to the local User model.
 
 ## [0.6.7] - 2026-01-26
 
 ### Fixed
 - **Core Architecture**: Resolved critical decorator inconsistency in the Web Service.
-- Replaced the simple `auth_required` decorator with a **Decorator Factory** in `app/utils/auth.py`.
-- This supports the `@auth_required(min_role="user")` syntax used throughout the application routes.
+  - Replaced the simple `auth_required` decorator with a **Decorator Factory** in `app/utils/auth.py`.
+  - This supports the `@auth_required(min_role="user")` syntax used throughout the application routes.
 - **Data Integrity**: Updated `auth_required` to explicitly set `g.account_id`, `g.role`, and `g.email`, fixing `AttributeError` crashes in `transactions`, `debts`, and `settings` endpoints.
 - **Consistency**: Renamed internal calls in `auth.py` to match `app/models.py` (`get_by_account_id` instead of `find_by_account_id`, `create` instead of `create_user`).
 - **Dependencies**: Added missing exports `service_auth_required` and `invalidate_token_cache` to `app/utils/auth.py` to fix `ImportError` in `auth/routes.py`.
@@ -171,16 +180,16 @@
 
 ### Fixed
 - **Web Service Auth**: Completely rewrote `auth_required` in `web_service/app/utils/auth.py`.
-- It now functions as a "Decorator Factory," allowing arguments like `@auth_required(min_role="premium_user")`.
-- Added logic to explicitly set `g.account_id` from the token, fixing `AttributeError` in routes.
-- Implemented the `403 Forbidden` check if a user lacks the required `min_role`.
+  - It now functions as a "Decorator Factory," allowing arguments like `@auth_required(min_role="premium_user")`.
+  - Added logic to explicitly set `g.account_id` from the token, fixing `AttributeError` in routes.
+  - Implemented the `403 Forbidden` check if a user lacks the required `min_role`.
 - **Web Service Debts**: Updated `web_service/app/debts/routes.py` to handle empty JSON bodies gracefully and ensure `g.account_id` is available.
 
 ## [0.6.4] - 2026-01-26
 
 ### Fixed
 - **API Client**: Fixed 7 debt endpoints in `telegram_bot/api_client/debts.py` that were suppressing `401 Unauthorized` errors, preventing the automatic re-login logic from triggering.
-- Fixed: `add_reminder`, `get_all_debts_by_person`, `get_all_settled_debts_by_person`, `get_debt_details`, `cancel_debt`, `update_debt`, `record_lump_sum_repayment`.
+  - Fixed: `add_reminder`, `get_all_debts_by_person`, `get_all_settled_debts_by_person`, `get_debt_details`, `cancel_debt`, `update_debt`, `record_lump_sum_repayment`.
 
 ## [0.6.3] - 2026-01-26
 
@@ -207,8 +216,8 @@
 ### Added
 - **Bifrost 2.3.3 Support**:
   - The Web Service now extracts `duration` (e.g., '1m') and `expires_at` from `subscription_success` webhooks.
-- **Database**: The `expires_at` timestamp is now stored in the user's `settings` collection to accurately track subscription validity.
-- **Profile Sync**: Implemented webhook support for `account_update` events. Changes to `email`, `username`, or `telegram_id` in Bifrost now automatically propagate to the Finance App database.
+  - **Database**: The `expires_at` timestamp is now stored in the user's `settings` collection to accurately track subscription validity.
+  - **Profile Sync**: Implemented webhook support for `account_update` events. Changes to `email`, `username`, or `telegram_id` in Bifrost now automatically propagate to the Finance App database.
 
 ### Changed
 - **Performance**: Refactored `auth_required` to remove per-request identity syncing, significantly reducing database load on high-traffic endpoints.
