@@ -1,11 +1,23 @@
 # CHANGELOG.md
 
 # Changelog
+## [0.8.3] - 2026-03-25
+
+### Changed
+- **Bot Routing**: Registered the `handle_document` webhook in `telegram_bot/bot.py` using `MessageHandler` and `filters.Document.ALL`. The bot is now fully armed to receive and process `.csv` and `.xlsx` bank statement uploads.
+
 ## [0.8.2] - 2026-03-25
 
 ### Fixed
 - **Cache Invalidation**: Fixed a bug where a user's web service token cache was not cleared following a `subscription_success` webhook event from Bifrost. Because Bifrost's server-side webhook does not carry the user's active `token`, the cache eviction was failing.
 - Implemented `invalidate_token_cache_by_account` in `web_service/app/utils/auth.py` and deployed it across all profile and subscription webhooks in `web_service/app/auth/routes.py` to securely enforce immediate role updates and eliminate `403 Forbidden` errors post-payment.
+
+## [0.8.1] - 2026-03-25
+
+### Added
+- **Statement Import API**: Added `web_service/app/imports/routes.py` to handle the 3-step statement import flow (Upload -> Review -> Confirm).
+- **Session Caching**: Uploaded files are now parsed and temporarily stored in a `pending_imports` MongoDB collection, generating a unique `session_id` for the Next.js Web App to retrieve.
+- **Duplicate Protection**: The `/confirm` endpoint utilizes `insert_many` with `ordered=False` to gracefully swallow `DuplicateKeyError` exceptions, guaranteeing that identical `bank_reference_id`s are never imported twice, while allowing new records to succeed.
 
 ## [0.8.0] - 2026-03-25
 
