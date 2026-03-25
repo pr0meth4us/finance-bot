@@ -1,5 +1,3 @@
-# telegram_bot/keyboards/menus.py
-
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from utils.i18n import t
@@ -29,6 +27,9 @@ def main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE):
         [
             InlineKeyboardButton(t("keyboards.get_live_rate", context), callback_data='get_live_rate'),
             InlineKeyboardButton(t("keyboards.settings", context), callback_data='settings_menu')
+        ],
+        [
+            InlineKeyboardButton("📥 Import Bank Statement", callback_data='import_prompt')
         ],
         [
             InlineKeyboardButton(t("keyboards.web_dashboard", context), url="https://savvify-web.vercel.app/")
