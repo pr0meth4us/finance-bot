@@ -5,9 +5,8 @@ import matplotlib.pyplot as plt
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from pymongo import MongoClient
-
+import certifi
 from app.config import Config
-from app.utils.db import MONGO_CONNECTION_ARGS
 from app.utils.currency import get_live_usd_to_khr_rate
 
 log = logging.getLogger(__name__)
@@ -41,7 +40,6 @@ def send_telegram_photo(chat_id, photo_bytes, token, caption=""):
 def _get_user_specific_report_data(start_date_local, end_date_local, db, user_settings_doc):
     """Generates report data for a specific user context using shared pipelines."""
     from app.analytics.pipelines import build_start_balance_pipeline, build_faceted_report_pipeline
-
     account_id = user_settings_doc['account_id']
     settings = user_settings_doc.get('settings', {})
 
@@ -105,9 +103,10 @@ def _format_message(data):
 
     if data['expenseBreakdown']:
         for item in data['expenseBreakdown'][:3]:
-            msg += f"  - {item['category']}: ${item['totalUSD']:,.2f}\n"
+            msg += f" - {item['category']}: ${item['totalUSD']:,.2f}\n"
     else:
-        msg += "  - No expenses.\n"
+        msg += " - No expenses.\n"
+
     return msg
 
 
@@ -143,7 +142,7 @@ def _create_chart(data, start_date, end_date):
 
 def run_scheduled_report(period):
     try:
-        client = MongoClient(Config.MONGODB_URI, **MONGO_CONNECTION_ARGS)
+        client = MongoClient(Config.MONGODB_URI, tls=True, tlsCAFile=certifi.where())
         db = client[Config.DB_NAME]
     except Exception as e:
         log.error(f"Scheduled job DB connection failed: {e}")
@@ -151,7 +150,6 @@ def run_scheduled_report(period):
 
     try:
         users = list(db.settings.find({"settings.notification_chat_ids.report": {"$ne": None}}))
-
         today = datetime.now(PHNOM_PENH_TZ).date()
         start_date, end_date = None, None
 
@@ -167,7 +165,6 @@ def run_scheduled_report(period):
                 try:
                     chat_id = user['settings']['notification_chat_ids']['report']
                     data = _get_user_specific_report_data(start_date, end_date, db, user)
-
                     if data['summary']['totalExpenseUSD'] > 0 or data['summary']['totalIncomeUSD'] > 0:
                         send_telegram_message(chat_id, _format_message(data), Config.TELEGRAM_TOKEN)
                         if chart := _create_chart(data, start_date, end_date):
@@ -182,7 +179,7 @@ def run_scheduled_report(period):
 
 def send_daily_reminder_job():
     try:
-        client = MongoClient(Config.MONGODB_URI, **MONGO_CONNECTION_ARGS)
+        client = MongoClient(Config.MONGODB_URI, tls=True, tlsCAFile=certifi.where())
         db = client[Config.DB_NAME]
 
         now = datetime.now(PHNOM_PENH_TZ)
@@ -197,7 +194,6 @@ def send_daily_reminder_job():
                 if db.transactions.count_documents({'timestamp': {'$gte': today_utc}, 'account_id': uid}) == 0:
                     chat_id = user['settings']['notification_chat_ids']['reminder']
                     lang = user.get('settings', {}).get('language', 'en')
-
                     msg = "Hey!\nDon't forget to log your transactions today! ✍️"
                     if lang == 'km':
                         msg = "សួស្តី!\nកុំភ្លេចកត់ត្រាចំណាយថ្ងៃនេះណា! ✍️"
@@ -205,6 +201,7 @@ def send_daily_reminder_job():
                     send_telegram_message(chat_id, msg, Config.TELEGRAM_TOKEN, parse_mode='Markdown')
             except Exception as e:
                 log.error(f"Reminder failed for user {user.get('account_id')}: {e}")
+
     except Exception as e:
         log.error(f"Daily reminder job failed: {e}")
     finally:

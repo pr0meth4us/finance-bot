@@ -2,6 +2,11 @@
 
 # Changelog
 
+## [0.7.11] - 2026-03-25
+
+### Fixed
+- **Jobs**: Resolved `ImportError` caused by missing `MONGO_CONNECTION_ARGS` import in `web_service/app/jobs.py`. `MongoClient` now explicitly uses `tls=True` and `tlsCAFile=certifi.where()`.
+
 ## [0.7.10] - 2026-02-20
 
 ### Fixed
@@ -29,16 +34,16 @@
 
 ### Fixed
 - **Performance/Database**: Addressed a critical scaling vulnerability where MongoDB collections lacked proper indexing.
-- The absence of indexes forced MongoDB to execute a Full Collection Scan (`COLLSCAN`) for nearly every API request.
-- Implemented `init_db_indexes` in `web_service/app/utils/db.py` to construct Compound Indexes on heavily queried fields like `account_id`, `timestamp`, and `status`.
-- Integrated index initialization into the Flask app factory (`__init__.py`) to assure robust `O(1)` data retrieval performance.
+  - The absence of indexes forced MongoDB to execute a Full Collection Scan (`COLLSCAN`) for nearly every API request.
+  - Implemented `init_db_indexes` in `web_service/app/utils/db.py` to construct Compound Indexes on heavily queried fields like `account_id`, `timestamp`, and `status`.
+  - Integrated index initialization into the Flask app factory (`__init__.py`) to assure robust `O(1)` data retrieval performance.
 
 ## [0.7.5] - 2026-02-20
 
 ### Fixed
 - **Performance/Database**: Resolved a critical MongoDB connection pooling issue in `web_service/app/utils/db.py`.
-- The application was previously creating a new `MongoClient` for every single incoming HTTP request, defeating connection pooling and introducing severe latency due to repeated TLS handshakes.
-- Refactored `get_db()` to utilize the global `current_app.db` instance created at startup, dramatically reducing database response times and preventing connection storms.
+  - The application was previously creating a new `MongoClient` for every single incoming HTTP request, defeating connection pooling and introducing severe latency due to repeated TLS handshakes.
+  - Refactored `get_db()` to utilize the global `current_app.db` instance created at startup, dramatically reducing database response times and preventing connection storms.
 
 ## [0.7.4] - 2026-02-20
 
@@ -58,24 +63,24 @@
 
 ### Added
 - **UX**: Added an immediate "⏳ Verifying subscription status..." loading message to the `/upgrade` command in `telegram_bot/handlers/payment.py`.
-- This informs the user that the bot is working while it syncs data with Bifrost and the Finance API, preventing confusion during the ~2s delay.
+  - This informs the user that the bot is working while it syncs data with Bifrost and the Finance API, preventing confusion during the ~2s delay.
 
 ## [0.7.1] - 2026-01-30
 
 ### Fixed
 - **Upgrade Flow**: Enhanced `/upgrade` to force a `sync_subscription_status` check against Bifrost Internal API before showing payment options.
-- This ensures users who are already `premium_user` in the DB but have a stale local session are not asked to pay again.
+  - This ensures users who are already `premium_user` in the DB but have a stale local session are not asked to pay again.
 
 ## [0.7.0] - 2026-01-30
 
 ### Refactored
 - **Web Service Structure**: Split the monolithic `web_service/app/__init__.py` into modular services.
-- Extracted report generation logic to `web_service/app/services/reporting.py`.
-- Extracted scheduler jobs and configuration to `web_service/app/services/scheduler.py`.
-- Extracted Telegram API helpers to `web_service/app/utils/telegram_helpers.py`.
+  - Extracted report generation logic to `web_service/app/services/reporting.py`.
+  - Extracted scheduler jobs and configuration to `web_service/app/services/scheduler.py`.
+  - Extracted Telegram API helpers to `web_service/app/utils/telegram_helpers.py`.
 - **Telegram Bot Keyboards**: Converted `telegram_bot/keyboards.py` into a package (`telegram_bot/keyboards/`).
-- Modularized keyboards into `menus.py`, `transactions.py`, `iou.py`, `analytics.py`, `settings.py`, and `utils.py`.
-- Maintained full backward compatibility via `telegram_bot/keyboards/__init__.py` exports.
+  - Modularized keyboards into `menus.py`, `transactions.py`, `iou.py`, `analytics.py`, `settings.py`, and `utils.py`.
+  - Maintained full backward compatibility via `telegram_bot/keyboards/__init__.py` exports.
 
 ## [0.6.18] - 2026-01-30
 
@@ -202,7 +207,7 @@
 ### Added
 - **Bifrost 2.3.3 Support**:
   - The Web Service now extracts `duration` (e.g., '1m') and `expires_at` from `subscription_success` webhooks.
-  - **Database**: The `expires_at` timestamp is now stored in the user's `settings` collection to accurately track subscription validity.
+- **Database**: The `expires_at` timestamp is now stored in the user's `settings` collection to accurately track subscription validity.
 - **Profile Sync**: Implemented webhook support for `account_update` events. Changes to `email`, `username`, or `telegram_id` in Bifrost now automatically propagate to the Finance App database.
 
 ### Changed
@@ -247,8 +252,8 @@
 ### Added
 - **Secure Payment Flow**: Updated `/upgrade` command to use the "Intent-Based" payment system.
   - The bot now calls Bifrost's `POST /secure-intent` to register transactions server-side.
-- **Pricing Packages**: Added selection menu for **1 Month ($5.00)** and **1 Year ($45.00)** plans.
-- **API Client**: Added `api_client.payment` module to handle secure intent creation.
+  - **Pricing Packages**: Added selection menu for **1 Month ($5.00)** and **1 Year ($45.00)** plans.
+  - **API Client**: Added `api_client.payment` module to handle secure intent creation.
 
 ### Security
 - Removed client-side link generation to prevent parameter tampering (price manipulation).
