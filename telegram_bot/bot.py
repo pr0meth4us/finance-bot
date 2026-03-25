@@ -1,9 +1,7 @@
-# telegram_bot/bot.py
-
 import os
 import logging
 from telegram import Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from dotenv import load_dotenv
 
 # Import the Facade
@@ -36,6 +34,7 @@ from handlers.iou import download_debt_analysis_csv
 from handlers.command_handler import unified_message_conversation_handler
 from handlers.onboarding import onboarding_conversation_handler
 from handlers.settings import settings_conversation_handler
+from handlers.imports import handle_document
 from utils.i18n import load_translations
 
 load_dotenv()
@@ -144,9 +143,12 @@ def main():
     app.add_handler(CommandHandler("login", login_command))
     app.add_handler(CommandHandler("web", login_command))
 
-    # --- NEW: Upgrade Handler ---
+    # --- Upgrade Handler ---
     app.add_handler(CommandHandler("upgrade", upgrade_start))
     app.add_handler(CallbackQueryHandler(upgrade_start, pattern="^upgrade_premium$"))
+
+    # --- Document Uploads (Bank Statements) ---
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 
     # Conversations
     app.add_handler(tx_conversation_handler)
@@ -194,7 +196,7 @@ def main():
     app.add_handler(CommandHandler("upgrade", upgrade_start))
     app.add_handler(CallbackQueryHandler(upgrade_start, pattern="^upgrade_premium$"))  # Legacy entry point
 
-    # NEW: Handle Package Selection (upgrade:1m, upgrade:1y)
+    # Handle Package Selection (upgrade:1m, upgrade:1y)
     app.add_handler(CallbackQueryHandler(upgrade_confirm, pattern="^upgrade:(1m|1y)$"))
 
     logger.info("🚀 Bot is polling...")
