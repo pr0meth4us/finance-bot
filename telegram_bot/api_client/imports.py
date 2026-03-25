@@ -1,6 +1,7 @@
+import os
 import logging
 import requests
-from .core import ensure_auth, get_base_url
+from .core import ensure_auth
 
 log = logging.getLogger(__name__)
 
@@ -11,7 +12,9 @@ def upload_bank_statement(telegram_id, file_bytes, filename, token=None):
     Uploads a bank statement to the backend for parsing.
     The ensure_auth decorator injects the valid JWT token.
     """
-    url = f"{get_base_url()}/imports/upload"
+    # Fallback to standard local port if env variable is missing
+    base_url = os.getenv("WEB_SERVICE_URL", "http://localhost:5001/api")
+    url = f"{base_url}/imports/upload"
     headers = {'Authorization': f'Bearer {token}'}
 
     # requests automatically sets the correct multipart/form-data boundary

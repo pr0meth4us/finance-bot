@@ -2,6 +2,11 @@
 
 # Changelog
 
+## [0.8.5] - 2026-03-25
+
+### Fixed
+- **Bot Crash**: Fixed `ImportError` where `api_client/imports.py` attempted to import an undefined `get_base_url` function. Refactored the module to use standard `os.getenv("WEB_SERVICE_URL")` routing.
+
 ## [0.8.4] - 2026-03-25
 
 ### Added
