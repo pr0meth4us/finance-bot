@@ -8,7 +8,9 @@ from app.utils.db import get_db
 from app.parsers.bank_statements import parse_statement, UnsupportedBankError
 
 log = logging.getLogger(__name__)
-imports_bp = Blueprint('imports', __name__)
+
+# FIX: Added url_prefix='/imports' so the routes mount correctly
+imports_bp = Blueprint('imports', __name__, url_prefix='/imports')
 
 
 @imports_bp.route('/upload', methods=['POST'])
