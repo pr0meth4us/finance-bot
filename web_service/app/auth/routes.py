@@ -1,6 +1,8 @@
+# web_service/app/auth/routes.py
 from flask import Blueprint, request, jsonify, current_app, g
 from app.models import User
-from app.utils.auth import auth_required, service_auth_required, invalidate_token_cache, login_required
+from app.utils.auth import auth_required, invalidate_token_cache, \
+    invalidate_token_cache_by_account, login_required
 from app import get_db
 from app.utils.db import settings_collection
 from app.config import Config
@@ -14,13 +16,13 @@ from datetime import datetime
 
 auth_bp = Blueprint('auth', __name__)
 
+
 # --- HELPER: Send Telegram Notification ---
 def send_telegram_alert(telegram_id, message):
     """Sends a security alert to the user's Telegram."""
     if not Config.TELEGRAM_TOKEN:
         current_app.logger.error("❌ Notification Failed: TELEGRAM_TOKEN not found in environment.")
         return
-
     if not telegram_id:
         current_app.logger.warning("⚠️ Notification Skipped: No telegram_id provided.")
         return
@@ -33,6 +35,7 @@ def send_telegram_alert(telegram_id, message):
             "parse_mode": "Markdown"
         }
         resp = requests.post(url, json=payload, timeout=5)
+
         if resp.status_code != 200:
             current_app.logger.error(f"❌ Telegram API Error {resp.status_code}: {resp.text}")
         else:
@@ -42,12 +45,9 @@ def send_telegram_alert(telegram_id, message):
 
 
 # --- WEB AUTHENTICATION ---
-
 @auth_bp.route('/login', methods=['POST'])
 def login():
-    """
-    Proxies login credentials to Bifrost and returns the Bifrost JWT.
-    """
+    """ Proxies login credentials to Bifrost and returns the Bifrost JWT. """
     data = request.get_json()
     email = data.get('email')
     password = data.get('password')
@@ -81,10 +81,7 @@ def login():
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
-    """
-    Bifrost does not allow open registration via API (requires OTP).
-    We direct the user to the OTP flow.
-    """
+    """ Bifrost does not allow open registration via API (requires OTP). We direct the user to the OTP flow. """
     data = request.get_json()
     email = data.get('email')
 
@@ -108,9 +105,7 @@ def register():
 
 @auth_bp.route('/verify-otp', methods=['POST'])
 def verify_otp_and_login():
-    """
-    Proxies OTP verification to Bifrost (for Telegram/Email login codes).
-    """
+    """ Proxies OTP verification to Bifrost (for Telegram/Email login codes). """
     data = request.get_json()
     code = data.get('code')
 
@@ -128,7 +123,6 @@ def verify_otp_and_login():
             timeout=Config.BIFROST_TIMEOUT
         )
         return jsonify(response.json()), response.status_code
-
     except Exception as e:
         current_app.logger.error(f"Bifrost OTP Proxy Error: {e}")
         return jsonify({"error": "Verification service unavailable"}), 503
@@ -136,9 +130,7 @@ def verify_otp_and_login():
 
 @auth_bp.route('/telegram-login', methods=['POST'])
 def telegram_login():
-    """
-    Proxies login via Telegram Widget to Bifrost.
-    """
+    """ Proxies login via Telegram Widget to Bifrost. """
     data = request.get_json()
     telegram_data = data.get('telegram_data')
 
@@ -146,7 +138,7 @@ def telegram_login():
         return jsonify({"error": "telegram_data object required"}), 400
 
     payload = {
-        "client_id":Config.BIFROST_CLIENT_ID,
+        "client_id": Config.BIFROST_CLIENT_ID,
         "telegram_data": telegram_data
     }
 
@@ -159,7 +151,6 @@ def telegram_login():
             timeout=Config.BIFROST_TIMEOUT
         )
         return jsonify(response.json()), response.status_code
-
     except Exception as e:
         current_app.logger.error(f"Bifrost Telegram Login Error: {e}")
         return jsonify({"error": "Authentication service unavailable"}), 503
@@ -168,9 +159,7 @@ def telegram_login():
 @auth_bp.route('/me', methods=['GET'])
 @login_required
 def get_current_user():
-    """
-    Returns the current user profile (synced from Bifrost).
-    """
+    """ Returns the current user profile (synced from Bifrost). """
     user = g.user
     return jsonify({
         "id": str(user['_id']),
@@ -182,7 +171,6 @@ def get_current_user():
 
 
 # --- ACCOUNT LINKING (Proxy to Bifrost) ---
-
 @auth_bp.route('/link-account', methods=['POST'])
 @auth_required(min_role="user")
 def link_account():
@@ -251,7 +239,10 @@ def initiate_telegram_link():
         resp.raise_for_status()
         token = resp.json().get('token')
 
-        bot_username = os.getenv("TELEGRAM_BOT_USERNAME", "savvify_bot")
+        if not token:
+            return jsonify({"error": "Failed to generate token"}), 500
+
+        bot_username = current_app.config.get("TELEGRAM_BOT_USERNAME", "savvify_bot")
         deep_link = f"https://t.me/{bot_username}?start=link_{token}"
 
         return jsonify({
@@ -294,7 +285,6 @@ def generate_link_command():
             "token": token,
             "expires_in": "10 minutes"
         })
-
     except Exception as e:
         current_app.logger.error(f"Failed to generate link command: {e}")
         return jsonify({"error": "Service unavailable"}), 503
@@ -332,7 +322,6 @@ def complete_telegram_link():
 
 
 # --- INTERNAL WEBHOOKS ---
-
 @auth_bp.route('/internal/webhook/auth-event', methods=['POST'])
 def auth_event_webhook():
     signature = request.headers.get('X-Bifrost-Signature')
@@ -375,7 +364,7 @@ def auth_event_webhook():
                 {"account_id": ObjectId(account_id)},
                 {"$set": update_data}
             )
-            current_app.logger.info(f"   🎉 Premium Activated for {account_id}")
+            current_app.logger.info(f" 🎉 Premium Activated for {account_id}")
 
             # 2. Notify User with details
             if telegram_id:
@@ -398,12 +387,13 @@ def auth_event_webhook():
                         pass  # Fallback if format differs
 
                 msg += "\n\nYour Premium features are now active!"
-
                 send_telegram_alert(telegram_id, msg)
             else:
                 current_app.logger.warning(f"⚠️ Could not notify user {account_id}: No Telegram ID found.")
 
             # 3. Invalidate Cache
+            if account_id:
+                invalidate_token_cache_by_account(account_id)
             if token:
                 invalidate_token_cache(token)
 
@@ -413,7 +403,7 @@ def auth_event_webhook():
                 {"account_id": ObjectId(account_id)},
                 {"$set": {"role": "user"}}
             )
-            current_app.logger.info(f"   📉 Premium Expired for {account_id}")
+            current_app.logger.info(f" 📉 Premium Expired for {account_id}")
 
             # 2. Notify User
             if telegram_id:
@@ -423,6 +413,8 @@ def auth_event_webhook():
                 )
 
             # 3. Invalidate Cache
+            if account_id:
+                invalidate_token_cache_by_account(account_id)
             if token:
                 invalidate_token_cache(token)
 
@@ -430,25 +422,26 @@ def auth_event_webhook():
         elif event_type == 'account_update':
             # NEW: Sync updated fields directly from payload
             updates = {}
-            if data.get('telegram_id'):
-                updates['telegram_id'] = data.get('telegram_id')
-            if data.get('email'):
-                updates['email'] = data.get('email')
-            if data.get('username'):
-                updates['username'] = data.get('username')
+            if data.get('telegram_id'): updates['telegram_id'] = data.get('telegram_id')
+            if data.get('email'): updates['email'] = data.get('email')
+            if data.get('username'): updates['username'] = data.get('username')
 
             if updates:
                 get_db().settings.update_one(
                     {"account_id": ObjectId(account_id)},
                     {"$set": updates}
                 )
-                current_app.logger.info(f"   📝 Profile synced via Webhook: {list(updates.keys())}")
+                current_app.logger.info(f" 📝 Profile synced via Webhook: {list(updates.keys())}")
 
+            if account_id:
+                invalidate_token_cache_by_account(account_id)
             if token:
                 invalidate_token_cache(token)
 
         # --- C. Security Events ---
         elif event_type in ['invalidation', 'security_password_change']:
+            if account_id:
+                invalidate_token_cache_by_account(account_id)
             if token:
                 invalidate_token_cache(token)
 
@@ -458,5 +451,5 @@ def auth_event_webhook():
         return jsonify({"status": "processed", "event": event_type}), 200
 
     except Exception as e:
-        current_app.logger.error(f"Webhook error: {e}")
-        return jsonify({"error": "Failed"}), 500
+        current_app.logger.error(f"Error processing webhook: {e}")
+        return jsonify({"error": "Internal Server Error"}), 500

@@ -1,6 +1,19 @@
 # CHANGELOG.md
 
 # Changelog
+## [0.8.2] - 2026-03-25
+
+### Fixed
+- **Cache Invalidation**: Fixed a bug where a user's web service token cache was not cleared following a `subscription_success` webhook event from Bifrost. Because Bifrost's server-side webhook does not carry the user's active `token`, the cache eviction was failing.
+- Implemented `invalidate_token_cache_by_account` in `web_service/app/utils/auth.py` and deployed it across all profile and subscription webhooks in `web_service/app/auth/routes.py` to securely enforce immediate role updates and eliminate `403 Forbidden` errors post-payment.
+
+## [0.8.0] - 2026-03-25
+
+### Added
+- **Statement Parsing**: Implemented robust `.csv` and `.xlsx` parsing for bank statements in `web_service/app/parsers/bank_statements.py`.
+- **Auto-Detection**: The system now automatically identifies ABA and ACLEDA statements by reading header signatures, removing the need for manual user selection.
+- **Self-Transfer Detection**: The parser automatically categorizes transactions as "Transfer" (neutral) if the user's registered bank name appears in transfer/payment descriptions.
+- **Database Architecture**: Added a unique, sparse compound index on `{"account_id": 1, "bank_reference_id": 1}` in `web_service/app/utils/db.py` to guarantee deduplication of imported bank transactions.
 
 ## [0.7.12] - 2026-03-25
 

@@ -1,41 +1,59 @@
 # web_service/app/utils/db.py
-
 import logging
-from flask import current_app
+import certifi
+from pymongo import MongoClient, ASCENDING, DESCENDING
+from flask import current_app, g
 
 log = logging.getLogger(__name__)
 
+def init_db(app):
+    """Initializes the global database connection and indexes."""
+    try:
+        client = MongoClient(
+            app.config['MONGODB_URI'],
+            tls=True,
+            tlsCAFile=certifi.where(),
+            maxPoolSize=50
+        )
+        app.db = client[app.config['DB_NAME']]
+        init_db_indexes(app.db)
+        log.info("Successfully connected to MongoDB and initialized indexes.")
+    except Exception as e:
+        log.error(f"Failed to connect to MongoDB: {e}")
+        raise
+
 
 def get_db():
-    """Returns a handle to the specific database using the global client."""
+    """Returns the global database instance."""
     return current_app.db
 
+
+def init_db_indexes(db):
+    """Creates required MongoDB indexes to ensure O(1) read performance and enforce uniqueness."""
+    try:
+        # Core application indexes
+        db.transactions.create_index([("account_id", ASCENDING), ("timestamp", DESCENDING)])
+        db.transactions.create_index([("account_id", ASCENDING), ("status", ASCENDING)])
+
+        # UNIQUE index for bank statement imports to prevent duplicate processing.
+        # sparse=True allows manually entered transactions without a bank_reference_id to bypass the unique check.
+        db.transactions.create_index(
+            [("account_id", ASCENDING), ("bank_reference_id", ASCENDING)],
+            unique=True,
+            sparse=True
+        )
+
+        db.debts.create_index([("account_id", ASCENDING), ("status", ASCENDING)])
+        db.users.create_index([("account_id", ASCENDING)], unique=True)
+        db.settings.create_index([("account_id", ASCENDING)], unique=True)
+
+        log.info("Database indexes verified/created successfully.")
+    except Exception as e:
+        log.error(f"Error creating database indexes: {e}")
 
 def close_db(e=None):
     """No-op. Global client is managed by the application lifecycle."""
     pass
-
-
-def init_db_indexes(app):
-    """Creates essential MongoDB indexes to prevent full collection scans."""
-    db = app.db
-    try:
-        # Settings: Exact match for user lookups
-        db.settings.create_index("account_id", unique=True)
-
-        # Transactions: Filtered by account_id, frequently sorted by timestamp
-        db.transactions.create_index([("account_id", 1), ("timestamp", -1)])
-
-        # Debts: Filtered by account_id and status
-        db.debts.create_index([("account_id", 1), ("status", 1)])
-
-        # Reminders: For the cron job that looks for unsent reminders
-        db.reminders.create_index([("status", 1), ("scheduled_for", 1)])
-
-        log.info("✅ Database indexes verified/created successfully.")
-    except Exception as e:
-        log.error(f"Failed to create database indexes: {e}")
-
 
 # --- Collection Accessors ---
 def transactions_collection():

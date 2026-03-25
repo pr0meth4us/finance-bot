@@ -1,5 +1,4 @@
 # web_service/app/utils/auth.py
-
 import requests
 import logging
 import time
@@ -14,7 +13,6 @@ log = logging.getLogger(__name__)
 _TOKEN_CACHE = {}
 TOKEN_TTL = 24 * 60 * 60  # 24 hours in seconds
 
-
 def get_cached_token_data(token):
     cache_entry = _TOKEN_CACHE.get(token)
     if cache_entry:
@@ -23,7 +21,6 @@ def get_cached_token_data(token):
         else:
             _TOKEN_CACHE.pop(token, None)
     return None
-
 
 def set_cached_token_data(token, user_data):
     # Basic cleanup to prevent memory leaks if the cache grows too large
@@ -38,11 +35,19 @@ def set_cached_token_data(token, user_data):
         "expires_at": time.time() + TOKEN_TTL
     }
 
-
 def invalidate_token_cache(token):
     """Removes a token from the cache (e.g., upon logout or webhook event)."""
     _TOKEN_CACHE.pop(token, None)
 
+def invalidate_token_cache_by_account(account_id):
+    """Removes all cached tokens for a specific account ID."""
+    to_remove = []
+    account_id_str = str(account_id)
+    for token, cache_entry in _TOKEN_CACHE.items():
+        if str(cache_entry["data"].get("id")) == account_id_str:
+            to_remove.append(token)
+    for token in to_remove:
+        _TOKEN_CACHE.pop(token, None)
 
 def validate_bifrost_token(token):
     """
@@ -50,8 +55,9 @@ def validate_bifrost_token(token):
     Uses Basic Auth to authenticate the Service (Finance Bot) itself.
     """
     if not Config.BIFROST_CLIENT_ID or not Config.BIFROST_CLIENT_SECRET:
-        log.error("CRITICAL: BIFROST_CLIENT_ID or BIFROST_CLIENT_SECRET is missing in environment!")
+        log.error("CRITICAL: BIFROST_CLIENT_ID or BIFROST_CLIENT_SECRET missing.")
         return None
+
     if not token:
         return None
 
@@ -63,6 +69,7 @@ def validate_bifrost_token(token):
         url = f"{Config.BIFROST_URL}/internal/validate-token"
         auth = HTTPBasicAuth(Config.BIFROST_CLIENT_ID, Config.BIFROST_CLIENT_SECRET)
         payload = {"jwt": token}
+
         response = requests.post(url, json=payload, auth=auth, timeout=Config.BIFROST_TIMEOUT)
 
         if response.status_code == 200:
@@ -79,12 +86,12 @@ def validate_bifrost_token(token):
                 'telegram_id': data.get('telegram_id'),
                 'display_name': data.get('display_name')
             }
-
             set_cached_token_data(token, user_data)
             return user_data
 
         log.error(f"Bifrost Validation Failed. HTTP {response.status_code}: {response.text}")
         return None
+
     except requests.exceptions.ConnectionError:
         log.error(f"Could not connect to Bifrost at {Config.BIFROST_URL}. Is the service running?")
         return None
@@ -92,13 +99,11 @@ def validate_bifrost_token(token):
         log.error(f"Unexpected error validating Bifrost token: {e}")
         return None
 
-
 def auth_required(min_role=None):
     """
     Authenticates requests using Bifrost Tokens.
     Enforces Role Hierarchy (Admin > Premium > User).
     """
-
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
@@ -158,30 +163,24 @@ def auth_required(min_role=None):
             g.email = bifrost_user.get('email')
 
             return f(*args, **kwargs)
-
         return decorated_function
-
     if callable(min_role):
         f = min_role
         min_role = None
         return decorator(f)
     return decorator
 
-
 def login_required(f):
     """Legacy alias for @auth_required()"""
     return auth_required()(f)
 
-
 def role_required(min_role):
     """Legacy alias for @auth_required(min_role=X)"""
     return auth_required(min_role)
-
 
 def service_auth_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         # Service auth logic
         return f(*args, **kwargs)
-
     return decorated_function
