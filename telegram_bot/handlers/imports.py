@@ -9,7 +9,7 @@ from api_client.imports import upload_bank_statement
 log = logging.getLogger(__name__)
 
 # Fallback URL if not set in the environment variables
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://your-finance-dashboard.com")
+FRONTEND_URL = os.getenv("https://savvify-web.vercel.app/")
 
 
 @authenticate_user
