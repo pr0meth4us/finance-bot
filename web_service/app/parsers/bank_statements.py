@@ -39,16 +39,33 @@ def _extract_rows(file_bytes, filename):
     """Extracts rows from either an Excel workbook or a CSV file."""
     rows = []
     if filename.lower().endswith('.xlsx'):
-        wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+        # read_only=True forces a lazy XML stream, preventing heavy DOM memory loads
+        wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=True)
         sheet = wb.active
+        empty_row_count = 0
+
         for row in sheet.iter_rows(values_only=True):
-            rows.append(["" if cell is None else str(cell).strip() for cell in row])
+            clean_row = ["" if cell is None else str(cell).strip() for cell in row]
+
+            # Optimization: Stop processing if we hit 10 consecutive empty rows
+            if not any(clean_row):
+                empty_row_count += 1
+                if empty_row_count > 10:
+                    break
+                continue
+
+            empty_row_count = 0
+            rows.append(clean_row)
+
+        # Explicitly close to free the read-only memory buffer
+        wb.close()
     else:
         # Standard CSV processing
         content = file_bytes.decode('utf-8', errors='replace')
         reader = csv.reader(io.StringIO(content))
         for row in reader:
             rows.append([cell.strip() for cell in row])
+
     return rows
 
 
