@@ -13,6 +13,28 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "https://your-finance-dashboard.com")
 
 
 @authenticate_user
+async def prompt_import_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Triggered when a user clicks the "Import Statement" button in a menu.
+    Instructs the user on how to proceed.
+    """
+    query = update.callback_query
+    await query.answer()
+
+    await query.message.reply_text(
+        "📥 <b>Import Bank Statement</b>\n\n"
+        "To import your transactions, simply upload your bank statement directly into this chat as a document.\n\n"
+        "<b>Supported Banks:</b>\n"
+        "• ABA Bank\n"
+        "• ACLEDA Bank\n\n"
+        "<b>Supported Formats:</b>\n"
+        "• <code>.csv</code>\n"
+        "• <code>.xlsx</code>",
+        parse_mode='HTML'
+    )
+
+
+@authenticate_user
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Intercepts document uploads, validates the extension, downloads the file

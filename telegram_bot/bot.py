@@ -34,7 +34,7 @@ from handlers.iou import download_debt_analysis_csv
 from handlers.command_handler import unified_message_conversation_handler
 from handlers.onboarding import onboarding_conversation_handler
 from handlers.settings import settings_conversation_handler
-from handlers.imports import handle_document
+from handlers.imports import handle_document, prompt_import_upload
 from utils.i18n import load_translations
 
 load_dotenv()
@@ -147,8 +147,9 @@ def main():
     app.add_handler(CommandHandler("upgrade", upgrade_start))
     app.add_handler(CallbackQueryHandler(upgrade_start, pattern="^upgrade_premium$"))
 
-    # --- Document Uploads (Bank Statements) ---
+    # --- Document Uploads & Prompts (Bank Statements) ---
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    app.add_handler(CallbackQueryHandler(prompt_import_upload, pattern="^import_prompt$"))
 
     # Conversations
     app.add_handler(tx_conversation_handler)

@@ -1,6 +1,12 @@
 # CHANGELOG.md
 
 # Changelog
+
+## [0.8.4] - 2026-03-25
+
+### Added
+- **Import Discoverability**: Added `prompt_import_upload` callback handler to the Telegram bot. This allows you to place an "Import Statement" button in the bot's menus. When clicked, it explicitly instructs the user to upload their `.csv` or `.xlsx` file into the chat.
+
 ## [0.8.3] - 2026-03-25
 
 ### Changed
