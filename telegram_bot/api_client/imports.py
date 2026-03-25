@@ -1,24 +1,22 @@
-import os
 import logging
 import requests
-from .core import ensure_auth
+from .core import ensure_auth, _get_headers, BASE_URL
 
 log = logging.getLogger(__name__)
 
 
 @ensure_auth
-def upload_bank_statement(telegram_id, file_bytes, filename, token=None):
+def upload_bank_statement(file_bytes, filename, user_id):
     """
     Uploads a bank statement to the backend for parsing.
-    The ensure_auth decorator injects the valid JWT token.
+    Note: user_id is the JWT string injected from context.user_data['jwt']
     """
-    # Fallback to standard local port if env variable is missing
-    base_url = os.getenv("WEB_SERVICE_URL", "http://localhost:5001/api")
-    url = f"{base_url}/imports/upload"
-    headers = {'Authorization': f'Bearer {token}'}
+    # Defensive strip to prevent 308 Redirects dropping the Authorization header
+    url = f"{BASE_URL.rstrip('/')}/imports/upload"
 
-    # requests automatically sets the correct multipart/form-data boundary
-    # and Content-Type when passing data via the 'files' parameter.
+    # _get_headers checks if user_id is a JWT string and uses it directly
+    headers = _get_headers(user_id)
+
     files = {'file': (filename, file_bytes)}
 
     try:

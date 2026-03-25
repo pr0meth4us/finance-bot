@@ -9,7 +9,7 @@ from api_client.imports import upload_bank_statement
 log = logging.getLogger(__name__)
 
 # Fallback URL if not set in the environment variables
-FRONTEND_URL = os.getenv("https://savvify-web.vercel.app/")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://savvify-web.vercel.app")
 
 
 @authenticate_user
@@ -58,10 +58,11 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         file = await context.bot.get_file(document.file_id)
         file_byte_array = await file.download_as_bytearray()
 
-        telegram_id = update.effective_user.id
+        # USE JWT from context, exactly like all other API endpoints do
+        jwt_token = context.user_data.get('jwt')
 
         # 3. Send to Flask Backend
-        result = upload_bank_statement(telegram_id, bytes(file_byte_array), document.file_name)
+        result = upload_bank_statement(bytes(file_byte_array), document.file_name, user_id=jwt_token)
 
         # Handle backend errors (e.g., UnsupportedBankError)
         if 'error' in result:
@@ -75,7 +76,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         safe_filename = html.escape(document.file_name)
 
         # Construct the deep link to the specific Next.js import review page
-        web_app_url = f"{FRONTEND_URL}/dashboard/import/{session_id}"
+        web_app_url = f"{FRONTEND_URL.rstrip('/')}/dashboard/import/{session_id}"
 
         keyboard = [
             [InlineKeyboardButton("📝 Review & Import", web_app=WebAppInfo(url=web_app_url))]
