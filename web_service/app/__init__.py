@@ -89,7 +89,9 @@ def create_app():
     from .payments.routes import payments_bp
     from .reminders.routes import reminders_bp
     from .summary.routes import summary_bp
+    from .imports.routes import imports_bp
 
+    app.register_blueprint(imports_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(analytics_bp)
     app.register_blueprint(transactions_bp)
